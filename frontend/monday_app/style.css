@@ -1,0 +1,81 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", "Segoe UI", Arial, sans-serif;
+  background: #f6f7fb;
+  color: #1f1f1f;
+}
+
+.container {
+  max-width: 640px;
+  margin: 40px auto;
+  padding: 0 16px;
+}
+
+.header h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+}
+
+.subhead {
+  margin: 0;
+  color: #5b5e70;
+}
+
+.card {
+  margin-top: 20px;
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 6px 24px rgba(23, 26, 31, 0.08);
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.meta {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.meta div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.label {
+  font-weight: 600;
+  color: #5b5e70;
+}
+
+.primary {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 16px;
+  border-radius: 10px;
+  border: none;
+  color: #ffffff;
+  background: #4c52ff;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  background: #b7b9c8;
+  cursor: not-allowed;
+}
+
+.error {
+  margin-top: 12px;
+  color: #d32f2f;
+  min-height: 20px;
+}

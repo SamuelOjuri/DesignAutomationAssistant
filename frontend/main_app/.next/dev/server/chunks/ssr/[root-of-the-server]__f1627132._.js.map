@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 14, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/SamuelOjuri/OneDrive%20-%20Tapered%20Plus/Documents/CodeProjects/DesignAutomationAssistant/frontend/main_app/app/page.tsx"],"sourcesContent":["export default function HomePage() {\r\n  return (\r\n    <main className=\"mx-auto mt-10 max-w-2xl px-4\">\r\n      <h1 className=\"text-2xl font-semibold\">Main App</h1>\r\n      <p className=\"text-muted-foreground mt-2\">\r\n        Use the Monday handoff link to open a task.\r\n      </p>\r\n    </main>\r\n  );\r\n}\r\n"],"names":[],"mappings":";;;;;;AAAe,SAAS;IACtB,qBACE,8OAAC;QAAK,WAAU;;0BACd,8OAAC;gBAAG,WAAU;0BAAyB;;;;;;0BACvC,8OAAC;gBAAE,WAAU;0BAA6B;;;;;;;;;;;;AAKhD"}}]
+}
