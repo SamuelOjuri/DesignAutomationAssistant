@@ -67,6 +67,7 @@ data/
 output/
 producer/
 .cursor/
+**/.next/
 test_jwt.py
 
 debug_extractions/
