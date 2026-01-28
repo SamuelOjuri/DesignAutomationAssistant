@@ -68,7 +68,7 @@ numpy==2.4.1
 pgvector==0.4.2
 beautifulsoup4==4.13.5 
 colorclass==2.2.2 
-compressed==rtf-1.0.7 
+compressed-rtf==1.0.7 
 distro==1.9.0 
 easygui==0.98.3 
 ebcdic==1.1.1 
