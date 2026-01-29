@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     monday_oauth_redirect_uri: Optional[str] = None
 
     # URLs
-    main_app_base_url: str = "http://localhost:3000"
+    main_app_base_url: str = "https://design-automation-assistant.netlify.app"
     backend_base_url: str = "https://design-automation-assistant-api.onrender.com"
 
     # Supabase / main-app auth
