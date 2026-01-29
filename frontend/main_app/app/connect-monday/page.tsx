@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getBrowserSupabase } from "@/lib/supabase";
+import { getBrowserSupabase } from "@/lib/supabase/client";
 
 async function getAccessToken(): Promise<string | null> {
   const supabase = getBrowserSupabase();

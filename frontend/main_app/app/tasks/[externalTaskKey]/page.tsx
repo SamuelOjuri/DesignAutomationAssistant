@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getBrowserSupabase } from "@/lib/supabase";
+import { getBrowserSupabase } from "@/lib/supabase/client";
 
 type PageProps = {
   params: { externalTaskKey: string };
