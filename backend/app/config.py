@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     # URLs
     main_app_base_url: str = "http://localhost:3000"
-    backend_base_url: str = "http://localhost:8000"
+    backend_base_url: str = "https://design-automation-assistant-api.onrender.com"
 
     # Supabase / main-app auth
     supabase_jwt_secret: str  # used to validate main app JWTs
