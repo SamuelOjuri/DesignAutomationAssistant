@@ -17,29 +17,30 @@ export default function ConfirmClickClient({ token, type, returnTo }: Props) {
 
   const handleConfirm = async () => {
     setError(null);
-    if (!token || !type) {
+
+    const params = new URLSearchParams(window.location.search);
+
+    const effectiveToken = token || params.get("token");
+    const effectiveType = type || params.get("type");
+    const effectiveReturnTo = returnTo || params.get("redirect_to") || "/";
+
+    if (!effectiveToken || !effectiveType) {
       setError("Missing token or type.");
       return;
     }
 
-    setLoading(true);
-    try {
-      const supabase = getBrowserSupabase();
-      const { error } = await supabase.auth.verifyOtp({
-        token_hash: token,
-        type: type as "invite" | "recovery" | "magiclink" | "signup",
-      });
-      if (error) throw error;
+    const supabase = getBrowserSupabase();
+    const { error } = await supabase.auth.verifyOtp({
+      token_hash: effectiveToken,
+      type: effectiveType as "invite" | "recovery" | "magiclink" | "signup",
+    });
 
-      if (type === "invite" || type === "recovery") {
-        router.replace(`/auth/set-password?returnTo=${encodeURIComponent(returnTo)}`);
+    if (!error) {
+      if (effectiveType === "invite" || effectiveType === "recovery") {
+        router.replace(`/auth/set-password?returnTo=${encodeURIComponent(effectiveReturnTo)}`);
       } else {
-        router.replace(returnTo);
+        router.replace(effectiveReturnTo);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Verification failed");
-    } finally {
-      setLoading(false);
     }
   };
 
