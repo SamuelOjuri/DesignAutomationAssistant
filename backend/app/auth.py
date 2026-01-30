@@ -2,9 +2,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 import jwt
+from jwt import PyJWKClient
 from fastapi import Header, HTTPException, status
 
 from .config import settings
+
+_jwks_client = PyJWKClient(settings.supabase_jwks_url)
 
 @dataclass
 class CurrentUser:
@@ -16,10 +19,11 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> CurrentUser
 
     token = authorization.split(" ", 1)[1]
     try:
+        signing_key = _jwks_client.get_signing_key_from_jwt(token).key
         payload = jwt.decode(
             token,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
+            signing_key,
+            algorithms=["ES256"],
             options={"verify_aud": False},
         )
     except jwt.PyJWTError:

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
 
     # Supabase / main-app auth
     supabase_jwt_secret: str  # used to validate main app JWTs
+    supabase_jwks_url: str
 
     # Supabase
     supabase_url: str
