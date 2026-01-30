@@ -14,6 +14,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Location"],
 )
 
 app.include_router(monday_handoff_router)

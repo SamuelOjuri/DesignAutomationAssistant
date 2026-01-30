@@ -32,10 +32,12 @@ export default function ConnectMondayClient({ returnTo }: ConnectMondayClientPro
       const response = await fetch(`${apiBaseUrl}/auth/monday/login`, {
         method: "GET",
         headers: { Authorization: `Bearer ${token}` },
-        redirect: "manual",
       });
 
-      const redirectUrl = response.headers.get("Location") || response.url;
+      const data = await response.json();
+
+      const redirectUrl = data?.url;
+
       if (!redirectUrl) throw new Error("Missing redirect URL");
 
       window.location.href = redirectUrl;

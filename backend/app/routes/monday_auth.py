@@ -6,6 +6,7 @@ import jwt
 import requests
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from ..auth import CurrentUser, get_current_user
@@ -54,7 +55,8 @@ def monday_login(current_user: CurrentUser = Depends(get_current_user)):
             "state": state,
         }
     )
-    return RedirectResponse(f"{MONDAY_OAUTH_URL}?{query}")
+    url = f"{MONDAY_OAUTH_URL}?{query}"
+    return JSONResponse({"url": url})
 
 @router.get("/callback")
 def monday_callback(
