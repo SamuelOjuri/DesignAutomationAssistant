@@ -59,11 +59,11 @@ async function requestHandoff() {
   const payload = {
     sessionToken: state.sessionToken,
     context: {
-      accountId: state.context.accountId,
-      boardId: state.context.boardId,
-      itemId: state.context.itemId,
+      accountId: String(state.context.accountId),
+      boardId: String(state.context.boardId),
+      itemId: String(state.context.itemId),
       user: state.context.user,
-      workspaceId: state.context.workspaceId,
+      workspaceId: state.context.workspaceId != null ? String(state.context.workspaceId) : null,
     },
   };
 
