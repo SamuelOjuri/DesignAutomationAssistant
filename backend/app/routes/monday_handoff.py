@@ -33,8 +33,21 @@ def handoff_init(payload: HandoffInitRequest, db: Session = Depends(get_db)):
 
     token_payload = verify_session_token(payload.sessionToken)
 
-    token_user_id = token_payload.get("userId") or token_payload.get("user_id")
-    token_account_id = token_payload.get("accountId") or token_payload.get("account_id")
+    # Monday session tokens nest claims inside "dat"
+    dat = token_payload.get("dat") or {}
+
+    token_user_id = (
+        dat.get("user_id")
+        or dat.get("userId")
+        or token_payload.get("userId")
+        or token_payload.get("user_id")
+    )
+    token_account_id = (
+        dat.get("account_id")
+        or dat.get("accountId")
+        or token_payload.get("accountId")
+        or token_payload.get("account_id")
+    )
 
     if not token_user_id or not token_account_id:
         raise HTTPException(status_code=400, detail="Invalid sessionToken payload")
