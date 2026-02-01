@@ -28,7 +28,8 @@ function setError(message) {
 }
 
 function setMeta(context) {
-  elements.accountId.textContent = context.accountId || "-";
+  const accountId = context.account?.id ?? context.accountId ?? "-";
+  elements.accountId.textContent = accountId;
   elements.boardId.textContent = context.boardId || "-";
   elements.itemId.textContent = context.itemId || "-";
   elements.userId.textContent = (context.user && context.user.id) || "-";
@@ -56,14 +57,17 @@ async function requestHandoff() {
     throw new Error("Missing monday context or session token.");
   }
 
+  const accountId = state.context.account?.id ?? state.context.accountId;
+
   const payload = {
     sessionToken: state.sessionToken,
     context: {
-      accountId: String(state.context.accountId),
+      accountId: accountId != null ? String(accountId) : null,
       boardId: String(state.context.boardId),
       itemId: String(state.context.itemId),
       user: state.context.user,
-      workspaceId: state.context.workspaceId != null ? String(state.context.workspaceId) : null,
+      workspaceId:
+        state.context.workspaceId != null ? String(state.context.workspaceId) : null,
     },
   };
 
