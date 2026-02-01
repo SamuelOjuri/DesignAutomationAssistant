@@ -1,11 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import { getBrowserSupabase } from "@/lib/supabase/client";
-
-type PageProps = {
-  params: { externalTaskKey: string };
-};
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -139,7 +136,11 @@ function formatDate(iso?: string | null): string {
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
 }
 
-export default function TaskPage({ params }: PageProps) {
+export default function TaskPage() {
+  // Use useParams hook to get the route parameter
+  const params = useParams();
+  const externalTaskKey = params.externalTaskKey as string;
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [citations, setCitations] = useState<Citation[]>([]);
   const [input, setInput] = useState("");
@@ -201,7 +202,7 @@ export default function TaskPage({ params }: PageProps) {
           return;
         }
         const response = await fetch(
-          `${baseUrl}/api/tasks/${params.externalTaskKey}/files/${fileId}/signed-url`,
+          `${baseUrl}/api/tasks/${externalTaskKey}/files/${fileId}/signed-url`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
         if (!response.ok) {
@@ -215,7 +216,7 @@ export default function TaskPage({ params }: PageProps) {
         setSignedUrlError(`Signed URL error: ${String(e)}`);
       }
     },
-    [baseUrl, params.externalTaskKey, signedUrls, getAccessToken]
+    [baseUrl, externalTaskKey, signedUrls]
   );
 
   const appendAssistantChunk = useCallback((chunk: string) => {
@@ -272,6 +273,7 @@ export default function TaskPage({ params }: PageProps) {
 
   // --- Fetch summary and sources helpers ---
   const fetchSummary = useCallback(async (): Promise<TaskSummaryResponse | null> => {
+    if (!externalTaskKey) return null;
     setIsLoadingSummary(true);
     setSummaryError(null);
     try {
@@ -285,7 +287,7 @@ export default function TaskPage({ params }: PageProps) {
         return null;
       }
       const response = await fetch(
-        `${baseUrl}/api/tasks/${params.externalTaskKey}/summary`,
+        `${baseUrl}/api/tasks/${externalTaskKey}/summary`,
         {
           headers: { Authorization: `Bearer ${accessToken}` },
           cache: "no-store",
@@ -304,9 +306,10 @@ export default function TaskPage({ params }: PageProps) {
     } finally {
       setIsLoadingSummary(false);
     }
-  }, [baseUrl, params.externalTaskKey]);
+  }, [baseUrl, externalTaskKey]);
 
   const fetchSources = useCallback(async () => {
+    if (!externalTaskKey) return;
     setIsLoadingSources(true);
     setSourcesError(null);
     try {
@@ -320,7 +323,7 @@ export default function TaskPage({ params }: PageProps) {
         return;
       }
       const response = await fetch(
-        `${baseUrl}/api/tasks/${params.externalTaskKey}/sources`,
+        `${baseUrl}/api/tasks/${externalTaskKey}/sources`,
         {
           headers: { Authorization: `Bearer ${accessToken}` },
           cache: "no-store",
@@ -337,18 +340,20 @@ export default function TaskPage({ params }: PageProps) {
     } finally {
       setIsLoadingSources(false);
     }
-  }, [baseUrl, params.externalTaskKey]);
+  }, [baseUrl, externalTaskKey]);
 
   const refreshTaskData = useCallback(async () => {
     await Promise.all([fetchSummary(), fetchSources()]);
   }, [fetchSummary, fetchSources]);
 
   useEffect(() => {
-    void refreshTaskData();
-  }, [refreshTaskData]);
+    if (externalTaskKey) {
+      void refreshTaskData();
+    }
+  }, [externalTaskKey, refreshTaskData]);
 
   const sendMessage = useCallback(async () => {
-    if (!input.trim() || isStreaming) return;
+    if (!input.trim() || isStreaming || !externalTaskKey) return;
     const prompt = input.trim();
     setInput("");
     setCitations([]);
@@ -377,7 +382,7 @@ export default function TaskPage({ params }: PageProps) {
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          externalTaskKey: params.externalTaskKey,
+          externalTaskKey: externalTaskKey,
           message: prompt,
           history: messages.map((m) => ({
             role: m.role,
@@ -402,7 +407,7 @@ export default function TaskPage({ params }: PageProps) {
       setIsStreaming(false);
       abortRef.current = null;
     }
-  }, [appendAssistantChunk, baseUrl, input, isStreaming, messages, params.externalTaskKey, parseSse]);
+  }, [appendAssistantChunk, baseUrl, input, isStreaming, messages, externalTaskKey, parseSse]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
@@ -448,6 +453,8 @@ export default function TaskPage({ params }: PageProps) {
   }, []);
 
   const syncTask = useCallback(async () => {
+    if (!externalTaskKey) return;
+
     const accessToken = await getAccessToken();
     if (!accessToken) {
       setSyncStatus("Not authenticated.");
@@ -461,7 +468,7 @@ export default function TaskPage({ params }: PageProps) {
     setSyncStatus("Syncing...");
     try {
       const response = await fetch(
-        `${baseUrl}/api/tasks/${params.externalTaskKey}/sync`,
+        `${baseUrl}/api/tasks/${externalTaskKey}/sync`,
         {
           method: "POST",
           headers: {
@@ -484,18 +491,27 @@ export default function TaskPage({ params }: PageProps) {
     } catch (e: any) {
       setSyncStatus(`Sync error: ${String(e)}`);
     }
-  }, [baseUrl, params.externalTaskKey, refreshTaskData, pollForSnapshotChange, summary?.snapshotVersion]);
+  }, [baseUrl, externalTaskKey, pollForSnapshotChange, summary?.snapshotVersion]);
 
   useEffect(() => {
     return () => abortRef.current?.abort();
   }, []);
+
+  // Show loading state if externalTaskKey is not yet available
+  if (!externalTaskKey) {
+    return (
+      <main className="mx-auto mt-10 max-w-3xl px-4 pb-16">
+        <p className="text-muted-foreground">Loading task...</p>
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto mt-10 max-w-3xl px-4 pb-16">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Task</h1>
-          <p className="text-muted-foreground mt-2">{params.externalTaskKey}</p>
+          <p className="text-muted-foreground mt-2">{externalTaskKey}</p>
         </div>
         <button
           onClick={syncTask}
@@ -650,7 +666,6 @@ export default function TaskPage({ params }: PageProps) {
                 {c.snippet && (
                   <div className="mt-1 whitespace-pre-wrap">{c.snippet}</div>
                 )}
-
                 {c.fileId ? (
                   <div className="mt-2">
                     <button
