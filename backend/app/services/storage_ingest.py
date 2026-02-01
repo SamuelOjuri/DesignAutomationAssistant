@@ -279,7 +279,7 @@ def ingest_derived_attachment_bytes(
     mime_type = mime_type or (mimetypes.guess_type(safe_name)[0] or "application/octet-stream")
     supabase.storage.from_(settings.supabase_storage_bucket).upload(
         object_path,
-        io.BytesIO(content),
+        content,  # Pass raw bytes directly instead of io.BytesIO(content)
         file_options={"content-type": mime_type, "upsert": True},
     )
     return upsert_task_file(
