@@ -157,7 +157,7 @@ def ingest_asset(
             supabase.storage.from_(settings.supabase_storage_bucket).upload(
                 object_path,
                 f,
-                file_options={"content-type": downloaded.content_type, "upsert": True},
+                file_options={"content-type": downloaded.content_type, "upsert": "true"},
             )
     finally:
         try:
@@ -282,7 +282,7 @@ def ingest_derived_attachment_bytes(
     supabase.storage.from_(settings.supabase_storage_bucket).upload(
         object_path,
         content,  # Pass raw bytes directly instead of io.BytesIO(content)
-        file_options={"content-type": mime_type, "upsert": True},
+        file_options={"content-type": mime_type, "upsert": "true"},
     )
     return upsert_task_file(
         db,
