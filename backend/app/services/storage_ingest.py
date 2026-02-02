@@ -26,12 +26,28 @@ from ..monday_client import download_asset
     wait=wait_exponential(multiplier=1, min=4, max=60),
     retry=retry_if_exception_type((httpx.ReadError, httpx.ConnectError, httpx.TimeoutException))
 )
-def upload_with_retry(bucket, path, file_obj, options):
-    supabase.storage.from_(bucket).upload(
-        path,
-        file_obj,
-        file_options=options,
-    )
+def upload_with_retry(bucket: str, path: str, file_content: Any, content_type: str):
+    """
+    Uploads file directly using httpx to allow for custom timeouts.
+    """
+    url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{path}"
+    headers = {
+        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        "apikey": settings.supabase_service_role_key,
+        "Content-Type": content_type,
+        "x-upsert": "true"
+    }
+    
+    # timeout=300.0 means 5 minutes for connect/read/write/pool
+    with httpx.Client(timeout=300.0) as client:
+        # Check if file_content is bytes or a file-like object
+        if hasattr(file_content, "read"):
+            content = file_content.read()
+        else:
+            content = file_content
+            
+        response = client.post(url, content=content, headers=headers)
+        response.raise_for_status()
 
 def sanitize_filename(name: str) -> str:
     cleaned = name.strip().replace("\\", "_").replace("/", "_")
@@ -174,7 +190,7 @@ def ingest_asset(
                 settings.supabase_storage_bucket,
                 object_path,
                 f,
-                {"content-type": downloaded.content_type, "upsert": "true"},
+                downloaded.content_type,
             )
     finally:
         try:
@@ -309,7 +325,7 @@ def ingest_derived_attachment_bytes(
         settings.supabase_storage_bucket,
         object_path,
         content,
-        {"content-type": mime_type, "upsert": "true"},
+        mime_type,
     )
 
     logger.info(f"[INGEST] Upload complete: {filename}")
