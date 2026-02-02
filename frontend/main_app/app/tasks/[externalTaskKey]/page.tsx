@@ -47,6 +47,7 @@ type TaskSummaryResponse = {
   taskContext?: TaskContext | null;
   status?: string | null;
   updatedAt?: string | null;
+  syncStatus?: string | null;
 };
 
 type TaskSourceFile = {
@@ -431,6 +432,15 @@ export default function TaskPage() {
 
         const data = await fetchSummary();
         const nextVersion = data?.snapshotVersion ?? null;
+        const currentSyncStatus = data?.syncStatus;
+
+        // If sync finished (success or failure), stop polling
+        if (currentSyncStatus === "completed" || currentSyncStatus === "failed") {
+          // Refresh sources to ensure we have the latest data
+          await fetchSources();
+          setSyncStatus(null); // Clear the ephemeral status message
+          return true;
+        }
 
         if (nextVersion && nextVersion !== previousVersion) {
           await fetchSources();
