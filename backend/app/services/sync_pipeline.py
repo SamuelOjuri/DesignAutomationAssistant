@@ -166,14 +166,17 @@ def run_sync_pipeline(
     cleared_file_ids: set = set()
     embed_client = None
 
-    MAX_SINGLE_PDF_SIZE = 30 * 1024 * 1024  # 30MB
-    MAX_EMAIL_SIZE = 20 * 1024 * 1024  # 20MB
-    MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
+    # Memory-optimized limits to prevent OOM on 2GB instances
+    MAX_SINGLE_PDF_SIZE = 15 * 1024 * 1024  # 15MB (reduced from 30MB)
+    MAX_EMAIL_SIZE = 10 * 1024 * 1024  # 10MB (reduced from 20MB)
+    MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB (reduced from 10MB)
     MAX_TEXT_CHARS = 200_000
     MAX_CHUNKS_PER_DOC = 200
-    RSS_GUARD_MB = 1300
+    RSS_GUARD_MB = 800  # Reduced from 1300 to give more headroom before 2GB limit
+    RSS_CRITICAL_MB = 1500  # Critical threshold - abort pipeline to prevent OOM kill
     SUPPORTED_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
-    EMBED_BATCH_SIZE = 4
+    EMBED_BATCH_SIZE = 2  # Reduced from 4 to minimize memory pressure
+    MAX_ATTACHMENTS_PER_EMAIL = 5  # Limit attachments to prevent memory accumulation
 
     def _rss_mb() -> float:
         try:
@@ -184,7 +187,15 @@ def run_sync_pipeline(
     def _should_skip(reason: str) -> bool:
         rss = _rss_mb()
         if rss and rss > RSS_GUARD_MB:
-            logger.warning(f"[OOM-GUARD] Skipping {reason}: RSS>{RSS_GUARD_MB}MB")
+            logger.warning(f"[OOM-GUARD] Skipping {reason}: RSS>{RSS_GUARD_MB}MB (current: {rss:.1f}MB)")
+            return True
+        return False
+
+    def _should_abort() -> bool:
+        """Check if memory is critical and pipeline should abort to prevent OOM kill."""
+        rss = _rss_mb()
+        if rss and rss > RSS_CRITICAL_MB:
+            logger.error(f"[OOM-ABORT] Memory critical at {rss:.1f}MB (limit: {RSS_CRITICAL_MB}MB), aborting pipeline")
             return True
         return False
 
@@ -304,7 +315,13 @@ def run_sync_pipeline(
                     chunk_section = f"offset:{chunk['start']}-{chunk['end']}"
             _enqueue_chunk(file_id, chunk["text"], page, chunk_section)
 
+    aborted = False
     for job in asset_jobs:
+        # Check for critical memory pressure before processing each asset
+        if _should_abort():
+            logger.error("[OOM-ABORT] Stopping asset processing early to prevent crash")
+            aborted = True
+            break
 
         asset = job["asset"]
         kind = job["kind"]
@@ -359,6 +376,8 @@ def run_sync_pipeline(
                         section=f"row:{doc['rowIndex']}",
                         page=None,
                     )
+            gc.collect()
+            _log_memory("After CSV asset cleanup")
             continue
 
         # Email extraction
@@ -448,9 +467,16 @@ def run_sync_pipeline(
 
             # Process PDF attachments ONE AT A TIME to minimize memory
             pdf_attachments = [att for att in attachments if att["filename"].lower().endswith(".pdf")]
+            if len(pdf_attachments) > MAX_ATTACHMENTS_PER_EMAIL:
+                logger.warning(f"[EMAIL] Limiting PDF attachments from {len(pdf_attachments)} to {MAX_ATTACHMENTS_PER_EMAIL}")
+                pdf_attachments = pdf_attachments[:MAX_ATTACHMENTS_PER_EMAIL]
             logger.info(f"[EMAIL] Processing {len(pdf_attachments)} PDF attachments one at a time")
 
             for idx, att in enumerate(pdf_attachments, 1):
+                # Check memory before each PDF
+                if _should_abort():
+                    logger.error(f"[OOM-ABORT] Stopping PDF processing at {idx}/{len(pdf_attachments)}")
+                    break
                 logger.info(f"[PDF {idx}/{len(pdf_attachments)}] Processing: {att['filename']}")
                 _log_memory(f"Before PDF {idx}")
 
@@ -536,9 +562,16 @@ def run_sync_pipeline(
                 att for att in attachments
                 if any(att["filename"].lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp"))
             ]
+            if len(image_attachments) > MAX_ATTACHMENTS_PER_EMAIL:
+                logger.warning(f"[EMAIL] Limiting image attachments from {len(image_attachments)} to {MAX_ATTACHMENTS_PER_EMAIL}")
+                image_attachments = image_attachments[:MAX_ATTACHMENTS_PER_EMAIL]
             logger.info(f"[EMAIL] Processing {len(image_attachments)} image attachments one at a time")
 
             for idx, att in enumerate(image_attachments, 1):
+                # Check memory before each image
+                if _should_abort():
+                    logger.error(f"[OOM-ABORT] Stopping image processing at {idx}/{len(image_attachments)}")
+                    break
                 logger.info(f"[IMAGE {idx}/{len(image_attachments)}] Processing: {att['filename']}")
                 _log_memory(f"Before image {idx}")
 
@@ -718,6 +751,9 @@ def run_sync_pipeline(
                 section=None,  # filled at chunk time as chunk:{n}
                 page=None,
             )
+            del pdf_bytes  # Free memory
+            gc.collect()
+            _log_memory("After non-email PDF cleanup")
             continue
 
         # Image extraction (non-email)
@@ -788,6 +824,9 @@ def run_sync_pipeline(
                 section="image:description",
                 page=None,
             )
+            del img_bytes  # Free memory
+            gc.collect()
+            _log_memory("After non-email image cleanup")
             continue
 
         if filename.endswith((".gif", ".bmp")):
@@ -799,10 +838,22 @@ def run_sync_pipeline(
                 section="image:description",
                 page=None,
             )
+            gc.collect()
+            _log_memory("After gif/bmp asset cleanup")
             continue
 
         # Default: just ingest once
         ingest_asset(db, task, snapshot, asset, kind, access_token)
+        
+        # Cleanup after each asset to prevent memory accumulation
+        gc.collect()
+        _log_memory("After default asset cleanup")
+
+    # Log if we aborted early
+    if aborted:
+        logger.warning("[OOM-ABORT] Pipeline aborted early due to memory pressure - partial snapshot will be committed")
+        gc.collect()
+        _log_memory("After abort cleanup")
 
     # ---- Add column text docs for RAG ----
     def _build_column_text(item: Dict[str, Any]) -> str:
