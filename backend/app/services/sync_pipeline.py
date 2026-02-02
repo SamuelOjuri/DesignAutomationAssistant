@@ -166,9 +166,27 @@ def run_sync_pipeline(
     cleared_file_ids: set = set()
     embed_client = None
 
-    MAX_SINGLE_PDF_SIZE = 100 * 1024 * 1024  # 100MB
+    MAX_SINGLE_PDF_SIZE = 30 * 1024 * 1024  # 30MB
+    MAX_EMAIL_SIZE = 20 * 1024 * 1024  # 20MB
+    MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
+    MAX_TEXT_CHARS = 200_000
+    MAX_CHUNKS_PER_DOC = 200
+    RSS_GUARD_MB = 1300
     SUPPORTED_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
-    EMBED_BATCH_SIZE = 16
+    EMBED_BATCH_SIZE = 4
+
+    def _rss_mb() -> float:
+        try:
+            return psutil.Process().memory_info().rss / (1024 * 1024)
+        except Exception:
+            return 0.0
+
+    def _should_skip(reason: str) -> bool:
+        rss = _rss_mb()
+        if rss and rss > RSS_GUARD_MB:
+            logger.warning(f"[OOM-GUARD] Skipping {reason}: RSS>{RSS_GUARD_MB}MB")
+            return True
+        return False
 
     def _chunk_text(text: str, size: int = 1000, overlap: int = 150) -> list[dict]:
         if not text:
@@ -198,6 +216,9 @@ def run_sync_pipeline(
     def _flush_embed_buffer() -> None:
         nonlocal embed_client
         if not embed_buffer:
+            return
+        if _should_skip("embedding batch"):
+            embed_buffer.clear()
             return
         if embed_client is None:
             embed_client = genai.Client(api_key=settings.gemini_api_key)
@@ -255,12 +276,18 @@ def run_sync_pipeline(
     ) -> None:
         if not file_id:
             return
+        if _should_skip(f"{kind} embedding"):
+            return
         text = (text or "").strip()
         if not text:
             return
+        if len(text) > MAX_TEXT_CHARS:
+            text = text[:MAX_TEXT_CHARS]
         chunks = _chunk_text(text)
         if not chunks:
             return
+        if len(chunks) > MAX_CHUNKS_PER_DOC:
+            chunks = chunks[:MAX_CHUNKS_PER_DOC]
         doc_stats["total_docs"] += 1
         doc_stats["total_chunks"] += len(chunks)
         doc_stats["by_kind"][kind] = doc_stats["by_kind"].get(kind, 0) + 1
@@ -344,6 +371,32 @@ def run_sync_pipeline(
             downloaded = download_asset_to_temp(asset, access_token)
             logger.info(f"[EMAIL] Downloaded to temp: {downloaded.temp_path}, size: {downloaded.size_bytes / (1024*1024):.2f} MB")
             _log_memory("After email download")
+            if downloaded.size_bytes and downloaded.size_bytes > MAX_EMAIL_SIZE:
+                logger.warning(
+                    f"[EMAIL] Too large to extract: {downloaded.size_bytes} bytes"
+                )
+                ingest_asset(
+                    db,
+                    task,
+                    snapshot,
+                    asset,
+                    kind,
+                    access_token,
+                    downloaded=downloaded,
+                )
+                continue
+            if _should_skip("email extraction"):
+                logger.warning("[EMAIL] Skipping extraction due to memory guard")
+                ingest_asset(
+                    db,
+                    task,
+                    snapshot,
+                    asset,
+                    kind,
+                    access_token,
+                    downloaded=downloaded,
+                )
+                continue
 
             with open(downloaded.temp_path, "rb") as f:
                 email_bytes = f.read()
@@ -405,6 +458,23 @@ def run_sync_pipeline(
                     # Get file size before reading
                     file_size = os.path.getsize(att["temp_path"])
                     logger.info(f"[PDF {idx}] File size: {file_size / (1024*1024):.2f} MB")
+                    if file_size > MAX_SINGLE_PDF_SIZE:
+                        logger.warning(
+                            f"[PDF {idx}] Too large for extraction: {file_size} bytes"
+                        )
+                        process_doc_for_embedding(
+                            email_file.id,
+                            f"PDF ATTACHMENT ({att['filename']}) [Too large for extraction]",
+                            kind="pdf",
+                            section=f"email:attachment:{att['filename']}",
+                            page=None,
+                        )
+                        continue
+                    if _should_skip(f"email pdf extraction {att['filename']}"):
+                        logger.warning(
+                            f"[PDF {idx}] Skipping extraction due to memory guard"
+                        )
+                        continue
 
                     with open(att["temp_path"], "rb") as f:
                         pdf_bytes = f.read()
@@ -475,6 +545,16 @@ def run_sync_pipeline(
                 try:
                     file_size = os.path.getsize(att["temp_path"])
                     logger.info(f"[IMAGE {idx}] File size: {file_size / (1024*1024):.2f} MB")
+                    if file_size > MAX_IMAGE_SIZE:
+                        logger.warning(
+                            f"[IMAGE {idx}] Too large to extract: {file_size} bytes"
+                        )
+                        continue
+                    if _should_skip(f"email image extraction {att['filename']}"):
+                        logger.warning(
+                            f"[IMAGE {idx}] Skipping extraction due to memory guard"
+                        )
+                        continue
 
                     with open(att["temp_path"], "rb") as f:
                         img_bytes = f.read()
@@ -581,6 +661,18 @@ def run_sync_pipeline(
                 f"{(downloaded.size_bytes or 0) / (1024*1024):.2f} MB"
             )
             _log_memory("After PDF download")
+            if _should_skip("pdf extraction"):
+                logger.warning("[PDF] Skipping extraction due to memory guard")
+                ingest_asset(
+                    db,
+                    task,
+                    snapshot,
+                    asset,
+                    kind,
+                    access_token,
+                    downloaded=downloaded,
+                )
+                continue
             if downloaded.size_bytes > MAX_SINGLE_PDF_SIZE:
                 file_record = ingest_asset(
                     db,
@@ -636,6 +728,39 @@ def run_sync_pipeline(
                 f"{(downloaded.size_bytes or 0) / (1024*1024):.2f} MB"
             )
             _log_memory("After image download")
+            if _should_skip("image extraction"):
+                logger.warning("[IMAGE] Skipping extraction due to memory guard")
+                ingest_asset(
+                    db,
+                    task,
+                    snapshot,
+                    asset,
+                    kind,
+                    access_token,
+                    downloaded=downloaded,
+                )
+                continue
+            if downloaded.size_bytes and downloaded.size_bytes > MAX_IMAGE_SIZE:
+                logger.warning(
+                    f"[IMAGE] Too large to extract: {downloaded.size_bytes} bytes"
+                )
+                file_record = ingest_asset(
+                    db,
+                    task,
+                    snapshot,
+                    asset,
+                    kind,
+                    access_token,
+                    downloaded=downloaded,
+                )
+                process_doc_for_embedding(
+                    file_record.id,
+                    f"Image too large for extraction ({downloaded.size_bytes} bytes).",
+                    kind="image",
+                    section="image:description",
+                    page=None,
+                )
+                continue
             with open(downloaded.temp_path, "rb") as f:
                 img_bytes = f.read()
             logger.info(
