@@ -144,7 +144,7 @@ def run_sync_pipeline(
             external_task_key=task.external_task_key,
             snapshot_version=snapshot_version,
         )
-        .one_or_none()
+        .first()
     )
 
     if snapshot is not None and not force:
