@@ -1,5 +1,6 @@
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator  
 
 class Settings(BaseSettings):
     # monday
@@ -33,5 +34,11 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @field_validator("supabase_url", mode="before")
+    def _ensure_supabase_url_trailing_slash(cls, v: str) -> str:
+        if isinstance(v, str) and v and not v.endswith("/"):
+            return v + "/"
+        return v
 
 settings = Settings()

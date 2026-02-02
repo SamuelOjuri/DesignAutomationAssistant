@@ -161,10 +161,121 @@ def run_sync_pipeline(
 
     asset_jobs = _collect_asset_jobs(item)
     csv_params: List[Dict[str, Any]] = []
-    extracted_docs: List[Dict[str, Any]] = []
+    doc_stats: Dict[str, Any] = {"total_docs": 0, "total_chunks": 0, "by_kind": {}}
+    embed_buffer: list[dict] = []
+    cleared_file_ids: set = set()
+    embed_client = None
 
     MAX_SINGLE_PDF_SIZE = 100 * 1024 * 1024  # 100MB
     SUPPORTED_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+    EMBED_BATCH_SIZE = 16
+
+    def _chunk_text(text: str, size: int = 1000, overlap: int = 150) -> list[dict]:
+        if not text:
+            return []
+        chunks = []
+        start = 0
+        while start < len(text):
+            end = min(len(text), start + size)
+            chunks.append({"text": text[start:end], "start": start, "end": end})
+            start = end - overlap
+            if start < 0:
+                start = 0
+        return chunks
+
+    def _normalize(vec: list[float]) -> list[float]:
+        norm = math.sqrt(sum(v * v for v in vec))
+        return [v / norm for v in vec] if norm else vec
+
+    def _ensure_chunks_cleared(file_id: Any) -> None:
+        if file_id in cleared_file_ids:
+            return
+        db.query(TaskChunk).filter(TaskChunk.file_id == file_id).delete(
+            synchronize_session=False
+        )
+        cleared_file_ids.add(file_id)
+
+    def _flush_embed_buffer() -> None:
+        nonlocal embed_client
+        if not embed_buffer:
+            return
+        if embed_client is None:
+            embed_client = genai.Client(api_key=settings.gemini_api_key)
+        logger.info(f"[EMBED] batch size={len(embed_buffer)}")
+        _log_memory("Before embedding batch")
+        contents = [c["chunk_text"] for c in embed_buffer]
+        result = embed_client.models.embed_content(
+            model="gemini-embedding-001",
+            contents=contents,
+            config=types.EmbedContentConfig(
+                output_dimensionality=1536,
+                task_type="RETRIEVAL_DOCUMENT",
+            ),
+        )
+        embeddings = [_normalize(list(e.values)) for e in result.embeddings]
+        for record, vector in zip(embed_buffer, embeddings):
+            db.add(
+                TaskChunk(
+                    file_id=record["file_id"],
+                    chunk_text=record["chunk_text"],
+                    embedding=vector,
+                    page=record.get("page"),
+                    section=record.get("section"),
+                )
+            )
+        embed_buffer.clear()
+        _log_memory("After embedding batch")
+
+    def _enqueue_chunk(
+        file_id: Any,
+        chunk_text: str,
+        page: int | None,
+        section: str | None,
+    ) -> None:
+        if not file_id or not chunk_text:
+            return
+        _ensure_chunks_cleared(file_id)
+        embed_buffer.append(
+            {
+                "file_id": file_id,
+                "chunk_text": chunk_text,
+                "page": page,
+                "section": section,
+            }
+        )
+        if len(embed_buffer) >= EMBED_BATCH_SIZE:
+            _flush_embed_buffer()
+
+    def process_doc_for_embedding(
+        file_id: Any,
+        text: str | None,
+        kind: str,
+        section: str | None = None,
+        page: int | None = None,
+    ) -> None:
+        if not file_id:
+            return
+        text = (text or "").strip()
+        if not text:
+            return
+        chunks = _chunk_text(text)
+        if not chunks:
+            return
+        doc_stats["total_docs"] += 1
+        doc_stats["total_chunks"] += len(chunks)
+        doc_stats["by_kind"][kind] = doc_stats["by_kind"].get(kind, 0) + 1
+        multi = len(chunks) > 1
+        for idx, chunk in enumerate(chunks, start=1):
+            chunk_section = section
+            if chunk_section:
+                if multi:
+                    chunk_section = f"{chunk_section}:chunk:{idx}"
+            else:
+                if kind == "pdf":
+                    chunk_section = f"chunk:{idx}"
+                else:
+                    chunk_section = f"offset:{chunk['start']}-{chunk['end']}"
+            _enqueue_chunk(file_id, chunk["text"], page, chunk_section)
 
     for job in asset_jobs:
 
@@ -180,6 +291,7 @@ def run_sync_pipeline(
         # CSV handling (download once, parse, ingest once)
         if _is_csv_asset(asset, kind):
             downloaded = download_asset_to_temp(asset, access_token)
+            documents: list[dict] | None = None
             try:
                 documents, records = _parse_key_value_csv(downloaded.temp_path)
                 csv_params.append(
@@ -202,20 +314,7 @@ def run_sync_pipeline(
                     }
                 )
 
-            # For RAG: push each CSV row document into extracted_docs
-            if "documents" in csv_params[-1]:
-                for doc in csv_params[-1]["documents"]:
-                    extracted_docs.append(
-                        {
-                            "assetId": str(asset.get("id")),  # map to CSV TaskFile
-                            "filename": asset.get("name"),
-                            "kind": "csv",
-                            "text": doc["text"],
-                            "section": f"row:{doc['rowIndex']}",
-                            "page": None,
-                        }
-                    )
-            ingest_asset(
+            file_record = ingest_asset(
                 db,
                 task,
                 snapshot,
@@ -224,6 +323,15 @@ def run_sync_pipeline(
                 access_token,
                 downloaded=downloaded,
             )
+            if documents:
+                for doc in documents:
+                    process_doc_for_embedding(
+                        file_record.id,
+                        doc["text"],
+                        kind="csv",
+                        section=f"row:{doc['rowIndex']}",
+                        page=None,
+                    )
             continue
 
         # Email extraction
@@ -254,29 +362,36 @@ def run_sync_pipeline(
             logger.info("[EMAIL] Freed email_bytes, ran gc.collect()")
             _log_memory("After freeing email_bytes")
 
-            # Extract text sections for RAG (header + body only, no attachment bytes)
-            sections = []
-            if header.strip():
-                sections.append({"section": "email:header", "text": header})
-            if body.strip():
-                sections.append({"section": "email:body", "text": body})
-
-            for section in sections:
-                extracted_docs.append(
-                    {
-                        "assetId": str(asset.get("id")),
-                        "filename": asset.get("name"),
-                        "kind": "email",
-                        "text": section["text"],
-                        "section": section["section"],
-                        "page": None,
-                    }
-                )
-
             # Ingest the email file itself
-            ingest_asset(db, task, snapshot, asset, kind, access_token, downloaded=downloaded)
+            email_file = ingest_asset(
+                db,
+                task,
+                snapshot,
+                asset,
+                kind,
+                access_token,
+                downloaded=downloaded,
+            )
             logger.info("[EMAIL] Ingested email file to Supabase")
             _log_memory("After email file upload")
+
+            # Extract text sections for RAG (header + body only, no attachment bytes)
+            if header.strip():
+                process_doc_for_embedding(
+                    email_file.id,
+                    header,
+                    kind="email",
+                    section="email:header",
+                    page=None,
+                )
+            if body.strip():
+                process_doc_for_embedding(
+                    email_file.id,
+                    body,
+                    kind="email",
+                    section="email:body",
+                    page=None,
+                )
 
             # Process PDF attachments ONE AT A TIME to minimize memory
             pdf_attachments = [att for att in attachments if att["filename"].lower().endswith(".pdf")]
@@ -303,27 +418,21 @@ def run_sync_pipeline(
                             [{"filename": att["filename"], "content": pdf_bytes}]
                         )
                         logger.info(f"[PDF {idx}] Gemini extraction complete, text length: {len(extracted)}")
-                        extracted_docs.append(
-                            {
-                                "assetId": str(asset.get("id")),
-                                "filename": att["filename"],
-                                "kind": "pdf",
-                                "text": f"PDF ATTACHMENT ({att['filename']}):\n{extracted}",
-                                "section": f"email:attachment:{att['filename']}",
-                                "page": None,
-                            }
+                        process_doc_for_embedding(
+                            email_file.id,
+                            f"PDF ATTACHMENT ({att['filename']}):\n{extracted}",
+                            kind="pdf",
+                            section=f"email:attachment:{att['filename']}",
+                            page=None,
                         )
                     else:
                         logger.warning(f"[PDF {idx}] Too large for extraction: {len(pdf_bytes) / (1024*1024):.2f} MB")
-                        extracted_docs.append(
-                            {
-                                "assetId": str(asset.get("id")),
-                                "filename": att["filename"],
-                                "kind": "pdf",
-                                "text": f"PDF ATTACHMENT ({att['filename']}) [Too large for extraction]",
-                                "section": f"email:attachment:{att['filename']}",
-                                "page": None,
-                            }
+                        process_doc_for_embedding(
+                            email_file.id,
+                            f"PDF ATTACHMENT ({att['filename']}) [Too large for extraction]",
+                            kind="pdf",
+                            section=f"email:attachment:{att['filename']}",
+                            page=None,
                         )
 
                     # Ingest to Supabase
@@ -377,15 +486,12 @@ def run_sync_pipeline(
                     )
                     logger.info(f"[IMAGE {idx}] Gemini complete")
 
-                    extracted_docs.append(
-                        {
-                            "assetId": str(asset.get("id")),
-                            "filename": att["filename"],
-                            "kind": "image",
-                            "text": f"IMAGE ATTACHMENT ({att['filename']}):\n{extracted}",
-                            "section": f"email:attachment:{att['filename']}",
-                            "page": None,
-                        }
+                    process_doc_for_embedding(
+                        email_file.id,
+                        f"IMAGE ATTACHMENT ({att['filename']}):\n{extracted}",
+                        kind="image",
+                        section=f"email:attachment:{att['filename']}",
+                        page=None,
                     )
                     logger.info(f"[IMAGE {idx}] Uploading to Supabase...")
                     ingest_derived_attachment_bytes(
@@ -476,17 +582,22 @@ def run_sync_pipeline(
             )
             _log_memory("After PDF download")
             if downloaded.size_bytes > MAX_SINGLE_PDF_SIZE:
-                extracted_docs.append(
-                    {
-                        "assetId": str(asset.get("id")),
-                        "filename": asset.get("name"),
-                        "kind": "pdf",
-                        "text": f"PDF too large for extraction ({downloaded.size_bytes} bytes).",
-                        "section": None,  # filled at chunk time as chunk:{n}
-                        "page": None,
-                    }
+                file_record = ingest_asset(
+                    db,
+                    task,
+                    snapshot,
+                    asset,
+                    kind,
+                    access_token,
+                    downloaded=downloaded,
                 )
-                ingest_asset(db, task, snapshot, asset, kind, access_token, downloaded=downloaded)
+                process_doc_for_embedding(
+                    file_record.id,
+                    f"PDF too large for extraction ({downloaded.size_bytes} bytes).",
+                    kind="pdf",
+                    section=None,  # filled at chunk time as chunk:{n}
+                    page=None,
+                )
                 continue
             with open(downloaded.temp_path, "rb") as f:
                 pdf_bytes = f.read()
@@ -499,17 +610,22 @@ def run_sync_pipeline(
             )
             logger.info(f"[PDF] Extracted text length: {len(extracted)}")
             _log_memory("After PDF extraction")
-            extracted_docs.append(
-                {
-                    "assetId": str(asset.get("id")),
-                    "filename": asset.get("name"),
-                    "kind": "pdf",
-                    "text": extracted,
-                    "section": None,  # filled at chunk time as chunk:{n}
-                    "page": None,
-                }
+            file_record = ingest_asset(
+                db,
+                task,
+                snapshot,
+                asset,
+                kind,
+                access_token,
+                downloaded=downloaded,
             )
-            ingest_asset(db, task, snapshot, asset, kind, access_token, downloaded=downloaded)
+            process_doc_for_embedding(
+                file_record.id,
+                extracted,
+                kind="pdf",
+                section=None,  # filled at chunk time as chunk:{n}
+                page=None,
+            )
             continue
 
         # Image extraction (non-email)
@@ -531,31 +647,33 @@ def run_sync_pipeline(
             )
             logger.info(f"[IMAGE] Extracted text length: {len(extracted)}")
             _log_memory("After image extraction")
-            extracted_docs.append(
-                {
-                    "assetId": str(asset.get("id")),
-                    "filename": asset.get("name"),
-                    "kind": "image",
-                    "text": extracted,
-                    "section": "image:description",
-                    "page": None,
-                }
+            file_record = ingest_asset(
+                db,
+                task,
+                snapshot,
+                asset,
+                kind,
+                access_token,
+                downloaded=downloaded,
             )
-            ingest_asset(db, task, snapshot, asset, kind, access_token, downloaded=downloaded)
+            process_doc_for_embedding(
+                file_record.id,
+                extracted,
+                kind="image",
+                section="image:description",
+                page=None,
+            )
             continue
 
         if filename.endswith((".gif", ".bmp")):
-            extracted_docs.append(
-                {
-                    "assetId": str(asset.get("id")),
-                    "filename": asset.get("name"),
-                    "kind": "image",
-                    "text": f"Unsupported image format: {filename.split('.')[-1].lower()}",
-                    "section": "image:description",
-                    "page": None,
-                }
+            file_record = ingest_asset(db, task, snapshot, asset, kind, access_token)
+            process_doc_for_embedding(
+                file_record.id,
+                f"Unsupported image format: {filename.split('.')[-1].lower()}",
+                kind="image",
+                section="image:description",
+                page=None,
             )
-            ingest_asset(db, task, snapshot, asset, kind, access_token)
             continue
 
         # Default: just ingest once
@@ -604,119 +722,19 @@ def run_sync_pipeline(
             kind="monday_columns",
             mime_type="text/plain",
         )
-        extracted_docs.append(
-            {
-                "assetId": col_file.monday_asset_id,
-                "filename": col_file.original_filename,
-                "kind": "monday_columns",
-                "text": column_text,
-                "section": "monday:columns",
-                "page": None,
-            }
+        process_doc_for_embedding(
+            col_file.id,
+            column_text,
+            kind="monday_columns",
+            section="monday:columns",
+            page=None,
         )
 
-    # --- chunk + embed extracted_docs ---
-    def _chunk_text(text: str, size: int = 1000, overlap: int = 150) -> list[dict]:
-        if not text:
-            return []
-        chunks = []
-        start = 0
-        while start < len(text):
-            end = min(len(text), start + size)
-            chunks.append({"text": text[start:end], "start": start, "end": end})
-            start = end - overlap
-            if start < 0:
-                start = 0
-        return chunks
-
-    def _normalize(vec: list[float]) -> list[float]:
-        norm = math.sqrt(sum(v * v for v in vec))
-        return [v / norm for v in vec] if norm else vec
-
-    # Build file map for this snapshot
-    files = db.query(TaskFile).filter_by(snapshot_id=snapshot.id).all()
-    file_id_by_asset = {
-        f.monday_asset_id: f.id for f in files if f.monday_asset_id
-    }
-
-    # delete existing chunks for this snapshot
-    if files:
-        db.query(TaskChunk).filter(
-            TaskChunk.file_id.in_([f.id for f in files])
-        ).delete(synchronize_session=False)
-
-    # Build chunk list
-    chunk_records: list[dict] = []
-    for doc in extracted_docs:
-        asset_id = doc.get("assetId")
-        text = (doc.get("text") or "").strip()
-        file_id = file_id_by_asset.get(asset_id)
-        if not file_id or not text:
-            continue
-
-        chunks = _chunk_text(text)
-        if not chunks:
-            continue
-        multi = len(chunks) > 1
-
-        for idx, chunk in enumerate(chunks, start=1):
-            section = doc.get("section")
-            if section:
-                if multi:
-                    section = f"{section}:chunk:{idx}"
-            else:
-                if doc.get("kind") == "pdf":
-                    section = f"chunk:{idx}"
-                else:
-                    section = f"offset:{chunk['start']}-{chunk['end']}"
-
-            chunk_records.append(
-                {
-                    "file_id": file_id,
-                    "chunk_text": chunk["text"],
-                    "page": doc.get("page"),
-                    "section": section,
-                }
-            )
-
-    # Embed + insert
-    if chunk_records:
-        client = genai.Client(api_key=settings.gemini_api_key)
-        BATCH_SIZE = 16
-        logger.info(
-            f"[EMBED] total_chunks={len(chunk_records)} batch_size={BATCH_SIZE}"
-        )
-        _log_memory("Before embedding")
-        for i in range(0, len(chunk_records), BATCH_SIZE):
-            batch = chunk_records[i:i + BATCH_SIZE]
-            logger.info(
-                f"[EMBED] batch {i//BATCH_SIZE + 1} size={len(batch)}"
-            )
-            contents = [c["chunk_text"] for c in batch]
-            result = client.models.embed_content(
-                model="gemini-embedding-001",
-                contents=contents,
-                config=types.EmbedContentConfig(
-                    output_dimensionality=1536,
-                    task_type="RETRIEVAL_DOCUMENT",
-                ),
-            )
-            embeddings = [_normalize(list(e.values)) for e in result.embeddings]
-            for record, vector in zip(batch, embeddings):
-                db.add(
-                    TaskChunk(
-                        file_id=record["file_id"],
-                        chunk_text=record["chunk_text"],
-                        embedding=vector,
-                        page=record.get("page"),
-                        section=record.get("section"),
-                    )
-                )
-            _log_memory("After embedding batch")
+    _flush_embed_buffer()
 
     task_context = dict(item)
     task_context["csv_params"] = csv_params
-    task_context["extracted_docs"] = extracted_docs
+    task_context["extracted_docs_summary"] = doc_stats
     snapshot.task_context_json = task_context
 
     task.latest_snapshot_version = snapshot_version
