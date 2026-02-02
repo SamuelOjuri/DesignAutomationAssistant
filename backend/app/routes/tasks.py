@@ -87,23 +87,25 @@ def sync_task(
     if link is None:
         raise HTTPException(status_code=403, detail="Monday account not connected")
 
-    if payload and payload.runAsync:
-        background_tasks.add_task(
-            run_sync_pipeline_background,
-            task.external_task_key,
-            link.access_token,
-            payload.force,
-        )
-        return TaskSyncResponse(status="queued", snapshotVersion=None)
+    # Check if sync is already in progress
+    if task.sync_status == "syncing":
+        return TaskSyncResponse(status="already_syncing", snapshotVersion=task.latest_snapshot_version)
 
-    result = run_sync_pipeline(
-        db,
+    # Mark sync as started immediately
+    task.sync_status = "syncing"
+    task.sync_started_at = datetime.now(timezone.utc)
+    task.sync_error = None
+    db.commit()
+
+    # Always run sync in background for immediate response
+    # This prevents connection drops during deploys from causing CORS errors
+    background_tasks.add_task(
+        run_sync_pipeline_background,
         task.external_task_key,
         link.access_token,
-        force=payload.force if payload else False,
+        payload.force if payload else False,
     )
-
-    return TaskSyncResponse(status=result.status, snapshotVersion=result.snapshot_version)
+    return TaskSyncResponse(status="queued", snapshotVersion=None)
 
 
 @router.get("/{externalTaskKey}/summary", response_model=TaskSummaryResponse)
@@ -127,6 +129,11 @@ def task_summary(
         taskContext=snapshot.task_context_json if snapshot else None,
         status=task.status,
         updatedAt=task.updated_at,
+        # Include sync status for frontend polling
+        syncStatus=task.sync_status,
+        syncStartedAt=task.sync_started_at,
+        syncCompletedAt=task.sync_completed_at,
+        syncError=task.sync_error,
     )
 
 

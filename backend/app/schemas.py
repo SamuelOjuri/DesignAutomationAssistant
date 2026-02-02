@@ -37,6 +37,11 @@ class TaskSummaryResponse(BaseModel):
     taskContext: Optional[Dict[str, Any]] = None
     status: Optional[str] = None
     updatedAt: Optional[datetime] = None
+    # Sync status for frontend polling
+    syncStatus: Optional[str] = None  # idle | syncing | completed | failed
+    syncStartedAt: Optional[datetime] = None
+    syncCompletedAt: Optional[datetime] = None
+    syncError: Optional[str] = None
 
 class TaskSourceFile(BaseModel):
     id: str

@@ -33,6 +33,12 @@ class Task(Base):
     raw_purged_at = Column(DateTime(timezone=True), nullable=True)
 
     latest_snapshot_version = Column(String, nullable=True)
+    
+    # Sync status tracking for frontend polling
+    sync_status = Column(String, nullable=True)  # idle | syncing | completed | failed
+    sync_started_at = Column(DateTime(timezone=True), nullable=True)
+    sync_completed_at = Column(DateTime(timezone=True), nullable=True)
+    sync_error = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

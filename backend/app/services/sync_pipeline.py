@@ -924,11 +924,33 @@ def run_sync_pipeline_background(
     access_token: str,
     force: bool = False,
 ) -> None:
+    from datetime import datetime, timezone
+    
     db = SessionLocal()
     try:
-        run_sync_pipeline(db, external_task_key, access_token, force=force)
-    except Exception:
+        result = run_sync_pipeline(db, external_task_key, access_token, force=force)
+        
+        # Update sync status on success
+        task = db.get(Task, external_task_key)
+        if task:
+            task.sync_status = "completed"
+            task.sync_completed_at = datetime.now(timezone.utc)
+            task.sync_error = None
+            db.commit()
+            logger.info(f"Sync completed for {external_task_key}: {result.status}")
+    except Exception as e:
         db.rollback()
         logger.exception("Sync pipeline failed for %s", external_task_key)
+        
+        # Update sync status on failure
+        try:
+            task = db.get(Task, external_task_key)
+            if task:
+                task.sync_status = "failed"
+                task.sync_completed_at = datetime.now(timezone.utc)
+                task.sync_error = str(e)[:500]  # Truncate error message
+                db.commit()
+        except Exception:
+            logger.exception("Failed to update sync status for %s", external_task_key)
     finally:
         db.close()
