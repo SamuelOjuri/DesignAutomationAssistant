@@ -172,6 +172,11 @@ def run_sync_pipeline(
         kind = job["kind"]
         filename = (asset.get("name") or "").lower()
 
+        logger.info(
+            f"[ASSET] kind={kind} name={asset.get('name')} id={asset.get('id')}"
+        )
+        _log_memory("Before asset")
+
         # CSV handling (download once, parse, ingest once)
         if _is_csv_asset(asset, kind):
             downloaded = download_asset_to_temp(asset, access_token)
@@ -465,6 +470,11 @@ def run_sync_pipeline(
         # PDF extraction (non-email)
         if filename.endswith(".pdf"):
             downloaded = download_asset_to_temp(asset, access_token)
+            logger.info(
+                f"[PDF] Downloaded {asset.get('name')} size: "
+                f"{(downloaded.size_bytes or 0) / (1024*1024):.2f} MB"
+            )
+            _log_memory("After PDF download")
             if downloaded.size_bytes > MAX_SINGLE_PDF_SIZE:
                 extracted_docs.append(
                     {
@@ -480,9 +490,15 @@ def run_sync_pipeline(
                 continue
             with open(downloaded.temp_path, "rb") as f:
                 pdf_bytes = f.read()
+            logger.info(
+                f"[PDF] Read into memory: {len(pdf_bytes) / (1024*1024):.2f} MB"
+            )
+            _log_memory("After reading PDF")
             extracted = process_pdf_batch(
                 [{"filename": asset.get("name"), "content": pdf_bytes}]
             )
+            logger.info(f"[PDF] Extracted text length: {len(extracted)}")
+            _log_memory("After PDF extraction")
             extracted_docs.append(
                 {
                     "assetId": str(asset.get("id")),
@@ -499,11 +515,22 @@ def run_sync_pipeline(
         # Image extraction (non-email)
         if filename.endswith(SUPPORTED_IMAGE_EXTS):
             downloaded = download_asset_to_temp(asset, access_token)
+            logger.info(
+                f"[IMAGE] Downloaded {asset.get('name')} size: "
+                f"{(downloaded.size_bytes or 0) / (1024*1024):.2f} MB"
+            )
+            _log_memory("After image download")
             with open(downloaded.temp_path, "rb") as f:
                 img_bytes = f.read()
+            logger.info(
+                f"[IMAGE] Read into memory: {len(img_bytes) / (1024*1024):.2f} MB"
+            )
+            _log_memory("After reading image")
             extracted = process_image_with_gemini(
                 img_bytes, asset.get("name"), "ATTACHMENT"
             )
+            logger.info(f"[IMAGE] Extracted text length: {len(extracted)}")
+            _log_memory("After image extraction")
             extracted_docs.append(
                 {
                     "assetId": str(asset.get("id")),
@@ -656,8 +683,15 @@ def run_sync_pipeline(
     if chunk_records:
         client = genai.Client(api_key=settings.gemini_api_key)
         BATCH_SIZE = 16
+        logger.info(
+            f"[EMBED] total_chunks={len(chunk_records)} batch_size={BATCH_SIZE}"
+        )
+        _log_memory("Before embedding")
         for i in range(0, len(chunk_records), BATCH_SIZE):
             batch = chunk_records[i:i + BATCH_SIZE]
+            logger.info(
+                f"[EMBED] batch {i//BATCH_SIZE + 1} size={len(batch)}"
+            )
             contents = [c["chunk_text"] for c in batch]
             result = client.models.embed_content(
                 model="gemini-embedding-001",
@@ -678,6 +712,7 @@ def run_sync_pipeline(
                         section=record.get("section"),
                     )
                 )
+            _log_memory("After embedding batch")
 
     task_context = dict(item)
     task_context["csv_params"] = csv_params
