@@ -383,7 +383,7 @@ export default function TaskPage() {
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          externalTaskKey: externalTaskKey,
+          externalTaskKey: decodeURIComponent(externalTaskKey),
           message: prompt,
           history: messages.map((m) => ({
             role: m.role,
