@@ -4,6 +4,7 @@ import json
 import re
 import io
 import tempfile
+import gc
 import mimetypes
 from typing import Any, Dict
 from dataclasses import dataclass
@@ -279,12 +280,15 @@ def ingest_derived_attachment_bytes(
         safe_name,
     )
     mime_type = mime_type or (mimetypes.guess_type(safe_name)[0] or "application/octet-stream")
+    content_size = len(content)
+    
     supabase.storage.from_(settings.supabase_storage_bucket).upload(
         object_path,
-        content,  # Pass raw bytes directly instead of io.BytesIO(content)
+        content,  # Pass raw bytes directly
         file_options={"content-type": mime_type, "upsert": "true"},
     )
-    return upsert_task_file(
+    
+    result = upsert_task_file(
         db,
         external_task_key=task.external_task_key,
         snapshot_id=str(snapshot.id),
@@ -292,8 +296,14 @@ def ingest_derived_attachment_bytes(
         monday_asset_id=asset_id,
         original_filename=filename,
         mime_type=mime_type,
-        size_bytes=len(content),
+        size_bytes=content_size,
         bucket=settings.supabase_storage_bucket,
         object_path=object_path,
         sha256=sha,
     )
+    
+    # Force garbage collection for large files (>10MB)
+    if content_size > 10 * 1024 * 1024:
+        gc.collect()
+    
+    return result

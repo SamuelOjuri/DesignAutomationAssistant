@@ -1,6 +1,9 @@
 import io
 import logging
 import time
+import tempfile
+import os
+
 from email.parser import BytesParser
 from email import policy
 from email.utils import parsedate_to_datetime
@@ -74,6 +77,101 @@ def process_email_content(email_content: bytes, filename: str) -> Tuple[str, str
                 attachments_data.append({"filename": att_filename, "content": content})
 
     return header_info, body, attachments_data, inline_images
+
+def process_email_content_to_temp(
+    email_content: bytes, filename: str
+) -> Tuple[str, str, List[Dict], List[Dict]]:
+    """
+    Memory-efficient version that writes attachments to temp files.
+    Returns attachment metadata with temp_path instead of content bytes.
+    """
+    if filename.lower().endswith(".msg"):
+        with io.BytesIO(email_content) as bio:
+            msg = extract_msg.Message(bio)
+            try:
+                raw_date = msg.date or ""
+                local_date_str = format_email_date(raw_date)
+                header_info = f"From: {msg.sender}\nTo: {msg.to}\nSubject: {msg.subject}\nDate: {local_date_str}\n"
+                body = msg.body or ""
+                attachments_data, inline_images = [], []
+                for attachment in msg.attachments:
+                    att_filename = attachment.longFilename or attachment.shortFilename
+                    if not att_filename:
+                        continue
+                    # Write to temp file instead of holding in memory
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{att_filename}")
+                    tmp.write(attachment.data)
+                    tmp.close()
+                    
+                    if is_inline_attachment(attachment, msg, att_filename):
+                        inline_images.append({
+                            "filename": att_filename,
+                            "temp_path": tmp.name,
+                            "content_id": getattr(attachment, "cid", None),
+                            "mime_type": f"image/{att_filename.split('.')[-1].lower()}",
+                        })
+                    else:
+                        attachments_data.append({"filename": att_filename, "temp_path": tmp.name})
+            finally:
+                msg.close()
+    else:
+        msg = BytesParser(policy=policy.default).parsebytes(email_content)
+        raw_date = msg.get("date", "")
+        local_date_str = format_email_date(raw_date)
+        header_info = f"From: {msg.get('from','')}\nTo: {msg.get('to','')}\nSubject: {msg.get('subject','')}\nDate: {local_date_str}\n"
+        body = ""
+
+        if msg.is_multipart():
+            for part in msg.walk():
+                if part.get_content_type() == "text/plain" and not part.get_filename():
+                    body += part.get_content() + "\n"
+            if not body:
+                for part in msg.walk():
+                    if part.get_content_type() == "text/html" and not part.get_filename():
+                        body += part.get_content() + "\n"
+        else:
+            body = msg.get_content()
+
+        attachments_data, inline_images = [], []
+        for part in msg.iter_attachments():
+            att_filename = part.get_filename()
+            if not att_filename:
+                continue
+            content = part.get_payload(decode=True)
+            
+            # Write to temp file instead of holding in memory
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{att_filename}")
+            tmp.write(content)
+            tmp.close()
+            del content  # Free memory immediately
+            
+            if is_inline_image(part, att_filename):
+                inline_images.append({
+                    "filename": att_filename,
+                    "temp_path": tmp.name,
+                    "content_id": part.get("Content-ID"),
+                    "mime_type": part.get_content_type(),
+                })
+            else:
+                attachments_data.append({"filename": att_filename, "temp_path": tmp.name})
+
+    return header_info, body, attachments_data, inline_images
+
+
+def cleanup_temp_files(attachments: List[Dict], inline_images: List[Dict] = None):
+    """Clean up any remaining temp files."""
+    for att in attachments:
+        if "temp_path" in att:
+            try:
+                os.unlink(att["temp_path"])
+            except OSError:
+                pass
+    for img in (inline_images or []):
+        if "temp_path" in img:
+            try:
+                os.unlink(img["temp_path"])
+            except OSError:
+                pass
 
 def format_email_date(raw_date: Union[str, object]) -> str:
     try:

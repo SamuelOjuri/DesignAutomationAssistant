@@ -7,13 +7,14 @@ from typing import Any, Dict, List
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+import os
 import math
 from google import genai
 from google.genai import types
 from ..config import settings
 from ..db import SessionLocal
 
-from .email_extraction import process_email_content, extract_email_sections
+from .email_extraction import process_email_content, extract_email_sections, process_email_content_to_temp, cleanup_temp_files
 from .pdf_extraction import process_pdf_batch
 from .image_extraction import process_image_with_gemini
 from .storage_ingest import ingest_derived_attachment_bytes, attachment_kind_for_filename
@@ -208,15 +209,26 @@ def run_sync_pipeline(
             continue
 
         # Email extraction
+
         is_email = filename.endswith(".eml") or filename.endswith(".msg") or kind == "email"
         if is_email:
             downloaded = download_asset_to_temp(asset, access_token)
             with open(downloaded.temp_path, "rb") as f:
                 email_bytes = f.read()
-            header, body, attachments, inline_images = process_email_content(
+
+            # Use memory-efficient extraction that writes attachments to temp files
+            header, body, attachments, inline_images = process_email_content_to_temp(
                 email_bytes, asset.get("name") or ""
             )
-            sections = extract_email_sections(header, body, attachments, inline_images)
+            del email_bytes  # Free email bytes immediately
+
+            # Extract text sections for RAG (header + body only, no attachment bytes)
+            sections = []
+            if header.strip():
+                sections.append({"section": "email:header", "text": header})
+            if body.strip():
+                sections.append({"section": "email:body", "text": body})
+
             for section in sections:
                 extracted_docs.append(
                     {
@@ -228,28 +240,152 @@ def run_sync_pipeline(
                         "page": None,
                     }
                 )
+
+            # Ingest the email file itself
             ingest_asset(db, task, snapshot, asset, kind, access_token, downloaded=downloaded)
-            for att in attachments:
-                ingest_derived_attachment_bytes(
-                    db,
-                    task,
-                    snapshot,
-                    parent_asset_id=str(asset.get("id")),
-                    filename=att["filename"],
-                    content=att["content"],
-                    kind=attachment_kind_for_filename(att["filename"]),
-                )
+
+            # Process PDF attachments ONE AT A TIME to minimize memory
+            pdf_attachments = [att for att in attachments if att["filename"].lower().endswith(".pdf")]
+            for att in pdf_attachments:
+                try:
+                    with open(att["temp_path"], "rb") as f:
+                        pdf_bytes = f.read()
+
+                    # Check size before processing
+                    if len(pdf_bytes) <= MAX_SINGLE_PDF_SIZE:
+                        extracted = process_pdf_batch(
+                            [{"filename": att["filename"], "content": pdf_bytes}]
+                        )
+                        extracted_docs.append(
+                            {
+                                "assetId": str(asset.get("id")),
+                                "filename": att["filename"],
+                                "kind": "pdf",
+                                "text": f"PDF ATTACHMENT ({att['filename']}):\n{extracted}",
+                                "section": f"email:attachment:{att['filename']}",
+                                "page": None,
+                            }
+                        )
+                    else:
+                        extracted_docs.append(
+                            {
+                                "assetId": str(asset.get("id")),
+                                "filename": att["filename"],
+                                "kind": "pdf",
+                                "text": f"PDF ATTACHMENT ({att['filename']}) [Too large for extraction]",
+                                "section": f"email:attachment:{att['filename']}",
+                                "page": None,
+                            }
+                        )
+
+                    # Ingest to Supabase
+                    ingest_derived_attachment_bytes(
+                        db,
+                        task,
+                        snapshot,
+                        parent_asset_id=str(asset.get("id")),
+                        filename=att["filename"],
+                        content=pdf_bytes,
+                        kind=attachment_kind_for_filename(att["filename"]),
+                    )
+                    del pdf_bytes  # Free memory immediately
+                finally:
+                    # Delete temp file immediately after processing
+                    try:
+                        os.unlink(att["temp_path"])
+                    except OSError:
+                        pass
+
+            # Process image attachments ONE AT A TIME
+            image_attachments = [
+                att for att in attachments
+                if any(att["filename"].lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp"))
+            ]
+
+            for att in image_attachments:
+                try:
+                    with open(att["temp_path"], "rb") as f:
+                        img_bytes = f.read()
+
+                    extracted = process_image_with_gemini(
+                        img_bytes, att["filename"], "ATTACHMENT"
+                    )
+                    extracted_docs.append(
+                        {
+                            "assetId": str(asset.get("id")),
+                            "filename": att["filename"],
+                            "kind": "image",
+                            "text": f"IMAGE ATTACHMENT ({att['filename']}):\n{extracted}",
+                            "section": f"email:attachment:{att['filename']}",
+                            "page": None,
+                        }
+                    )
+
+                    ingest_derived_attachment_bytes(
+                        db,
+                        task,
+                        snapshot,
+                        parent_asset_id=str(asset.get("id")),
+                        filename=att["filename"],
+                        content=img_bytes,
+                        kind="attachment_image",
+                    )
+                    del img_bytes  # Free memory immediately
+                finally:
+                    try:
+                        os.unlink(att["temp_path"])
+                    except OSError:
+                        pass
+
+            # Process inline images ONE AT A TIME
             for img in inline_images or []:
-                ingest_derived_attachment_bytes(
-                    db,
-                    task,
-                    snapshot,
-                    parent_asset_id=str(asset.get("id")),
-                    filename=img["filename"],
-                    content=img["content"],
-                    kind="attachment_image",
-                    mime_type=img.get("mime_type"),
-                )
+                try:
+                    with open(img["temp_path"], "rb") as f:
+                        img_bytes = f.read()
+                    ingest_derived_attachment_bytes(
+                        db,
+                        task,
+                        snapshot,
+                        parent_asset_id=str(asset.get("id")),
+                        filename=img["filename"],
+                        content=img_bytes,
+                        kind="attachment_image",
+                        mime_type=img.get("mime_type"),
+                    )
+                    del img_bytes  # Free memory immediately
+                finally:
+                    try:
+                        os.unlink(img["temp_path"])
+                    except OSError:
+                        pass
+
+            # Clean up any remaining non-visual attachments
+            other_attachments = [
+                att for att in attachments
+                if not any(att["filename"].lower().endswith(ext) 
+                          for ext in (".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"))
+            ]
+
+            for att in other_attachments:
+                try:
+                    with open(att["temp_path"], "rb") as f:
+                        content = f.read()
+                    ingest_derived_attachment_bytes(
+                        db,
+                        task,
+                        snapshot,
+                        parent_asset_id=str(asset.get("id")),
+                        filename=att["filename"],
+                        content=content,
+                        kind=attachment_kind_for_filename(att["filename"]),
+                    )
+                    del content
+                finally:
+                    try:
+                        os.unlink(att["temp_path"])
+                    except OSError:
+                        pass
+
             continue
 
         # PDF extraction (non-email)
