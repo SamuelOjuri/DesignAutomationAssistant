@@ -65,6 +65,21 @@ def process_pdfs_in_parallel(pdf_files: List[Dict]) -> str:
 def process_pdf_batch(pdf_files: List[Dict]) -> str:
     if not pdf_files:
         return ""
+
+    # Optimization: processing a single file doesn't need a thread pool
+    if len(pdf_files) == 1:
+        try:
+            filename = pdf_files[0]["filename"]
+            # Check for empty content to avoid unnecessary API calls
+            if not pdf_files[0]["content"]:
+                return f"=== PDF: {filename} ===\n[Empty PDF Content]\n"
+                
+            text = process_pdf_with_gemini(pdf_files[0]["content"], filename)
+            return f"=== PDF: {filename} ===\n{text}\n"
+        except Exception as e:
+            filename = pdf_files[0].get("filename", "unknown")
+            return f"=== PDF: {filename} ===\nError processing PDF: {e}\n"
+
     if should_batch_pdfs(pdf_files):
         try:
             return process_multiple_pdfs_single_call(pdf_files)

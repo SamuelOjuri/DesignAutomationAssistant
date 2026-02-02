@@ -235,27 +235,40 @@ def run_sync_pipeline(
             embed_client = genai.Client(api_key=settings.gemini_api_key)
         logger.info(f"[EMBED] batch size={len(embed_buffer)}")
         _log_memory("Before embedding batch")
-        contents = [c["chunk_text"] for c in embed_buffer]
-        result = embed_client.models.embed_content(
-            model="gemini-embedding-001",
-            contents=contents,
-            config=types.EmbedContentConfig(
-                output_dimensionality=1536,
-                task_type="RETRIEVAL_DOCUMENT",
-            ),
-        )
-        embeddings = [_normalize(list(e.values)) for e in result.embeddings]
-        for record, vector in zip(embed_buffer, embeddings):
-            db.add(
-                TaskChunk(
-                    file_id=record["file_id"],
-                    chunk_text=record["chunk_text"],
-                    embedding=vector,
-                    page=record.get("page"),
-                    section=record.get("section"),
-                )
+        
+        try:
+            contents = [c["chunk_text"] for c in embed_buffer]
+            result = embed_client.models.embed_content(
+                model="gemini-embedding-001",
+                contents=contents,
+                config=types.EmbedContentConfig(
+                    output_dimensionality=1536,
+                    task_type="RETRIEVAL_DOCUMENT",
+                ),
             )
+            embeddings = [_normalize(list(e.values)) for e in result.embeddings]
+            for record, vector in zip(embed_buffer, embeddings):
+                db.add(
+                    TaskChunk(
+                        file_id=record["file_id"],
+                        chunk_text=record["chunk_text"],
+                        embedding=vector,
+                        page=record.get("page"),
+                        section=record.get("section"),
+                    )
+                )
+            
+            # Explicit cleanup of large objects
+            del result
+            del contents
+            del embeddings
+            
+        except Exception as e:
+            logger.error(f"[EMBED] Failed to embed batch: {e}")
+            # We clear the buffer anyway to avoid getting stuck
+            
         embed_buffer.clear()
+        gc.collect()  # Force GC after embedding
         _log_memory("After embedding batch")
 
     def _enqueue_chunk(
