@@ -101,7 +101,11 @@ def fetch_item_with_assets(access_token: str, item_id: str) -> dict[str, Any]:
     return items[0]
 
 def download_asset(url: str, access_token: Optional[str] = None) -> requests.Response:
-    headers = {"Authorization": access_token} if access_token else None
+    headers = {}
+    if access_token:
+        headers["Authorization"] = access_token
+    headers["Accept"] = "*/*"  # Accept any content type
+
     resp = requests.get(url, headers=headers, stream=True, timeout=60)
     if resp.status_code == 401:
         raise HTTPException(status_code=403, detail="monday asset access denied")
