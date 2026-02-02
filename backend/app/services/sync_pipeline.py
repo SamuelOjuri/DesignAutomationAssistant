@@ -207,6 +207,11 @@ def run_sync_pipeline(
         while start < len(text):
             end = min(len(text), start + size)
             chunks.append({"text": text[start:end], "start": start, "end": end})
+
+            # FIX: Stop if we have reached the end of the text
+            if end >= len(text):
+                break
+
             start = end - overlap
             if start < 0:
                 start = 0
