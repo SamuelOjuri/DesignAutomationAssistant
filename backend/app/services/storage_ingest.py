@@ -216,10 +216,12 @@ class DownloadedAsset:
     size_bytes: int
 
 def download_asset_to_temp(asset: Dict[str, Any], access_token: str) -> DownloadedAsset:
-    url = asset.get("url") or asset.get("public_url")
+    # Changed url selection logic to prefer 'public_url' if present, otherwise use 'url'
+    url = asset.get("public_url") or asset.get("url")
     if not url:
         raise HTTPException(status_code=502, detail="Asset missing download url")
 
+    # Changed use_token logic to match above: only use access_token if using the private 'url'
     use_token = access_token if url == asset.get("url") else None
     resp = download_asset(url, access_token=use_token)
 
