@@ -9,6 +9,9 @@ import mimetypes
 from typing import Any, Dict
 from dataclasses import dataclass
 
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import httpx
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
@@ -17,6 +20,18 @@ from ..config import settings
 from ..models import Task, TaskFile, TaskSnapshot
 from ..supabase_client import supabase
 from ..monday_client import download_asset
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=4, max=60),
+    retry=retry_if_exception_type((httpx.ReadError, httpx.ConnectError, httpx.TimeoutException))
+)
+def upload_with_retry(bucket, path, file_obj, options):
+    supabase.storage.from_(bucket).upload(
+        path,
+        file_obj,
+        file_options=options,
+    )
 
 def sanitize_filename(name: str) -> str:
     cleaned = name.strip().replace("\\", "_").replace("/", "_")
@@ -155,10 +170,11 @@ def ingest_asset(
 
     try:
         with open(downloaded.temp_path, "rb") as f:
-            supabase.storage.from_(settings.supabase_storage_bucket).upload(
+            upload_with_retry(
+                settings.supabase_storage_bucket,
                 object_path,
                 f,
-                file_options={"content-type": downloaded.content_type, "upsert": "true"},
+                {"content-type": downloaded.content_type, "upsert": "true"},
             )
     finally:
         try:
@@ -289,10 +305,11 @@ def ingest_derived_attachment_bytes(
 
     logger.info(f"[INGEST] Uploading to path: {object_path}")
 
-    supabase.storage.from_(settings.supabase_storage_bucket).upload(
+    upload_with_retry(
+        settings.supabase_storage_bucket,
         object_path,
-        content,  # Pass raw bytes directly
-        file_options={"content-type": mime_type, "upsert": "true"},
+        content,
+        {"content-type": mime_type, "upsert": "true"},
     )
 
     logger.info(f"[INGEST] Upload complete: {filename}")
