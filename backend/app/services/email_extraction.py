@@ -85,7 +85,10 @@ def process_email_content_to_temp(
     Memory-efficient version that writes attachments to temp files.
     Returns attachment metadata with temp_path instead of content bytes.
     """
+    logger.info(f"[EMAIL_EXTRACT] Starting extraction for: {filename}, size: {len(email_content) / (1024*1024):.2f} MB")
+
     if filename.lower().endswith(".msg"):
+        logger.info("[EMAIL_EXTRACT] Parsing as .msg file")
         with io.BytesIO(email_content) as bio:
             msg = extract_msg.Message(bio)
             try:
@@ -94,15 +97,27 @@ def process_email_content_to_temp(
                 header_info = f"From: {msg.sender}\nTo: {msg.to}\nSubject: {msg.subject}\nDate: {local_date_str}\n"
                 body = msg.body or ""
                 attachments_data, inline_images = [], []
-                for attachment in msg.attachments:
+
+                attachment_count = len(msg.attachments) if hasattr(msg, 'attachments') else 0
+                logger.info(f"[EMAIL_EXTRACT] Found {attachment_count} attachments in .msg")
+
+                for idx, attachment in enumerate(msg.attachments, 1):
                     att_filename = attachment.longFilename or attachment.shortFilename
                     if not att_filename:
                         continue
+
+                    att_size = len(attachment.data) if attachment.data else 0
+                    logger.info(f"[EMAIL_EXTRACT] Attachment {idx}: {att_filename}, size: {att_size / (1024*1024):.2f} MB")
+
                     # Write to temp file instead of holding in memory
                     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{att_filename}")
                     tmp.write(attachment.data)
                     tmp.close()
-                    
+                    logger.info(f"[EMAIL_EXTRACT] Wrote attachment to temp: {tmp.name}")
+
+                    # Important: Clear attachment data from memory
+                    # Note: extract_msg may hold references internally
+
                     if is_inline_attachment(attachment, msg, att_filename):
                         inline_images.append({
                             "filename": att_filename,
@@ -114,7 +129,9 @@ def process_email_content_to_temp(
                         attachments_data.append({"filename": att_filename, "temp_path": tmp.name})
             finally:
                 msg.close()
+                logger.info("[EMAIL_EXTRACT] Closed .msg parser")
     else:
+        logger.info("[EMAIL_EXTRACT] Parsing as .eml file")
         msg = BytesParser(policy=policy.default).parsebytes(email_content)
         raw_date = msg.get("date", "")
         local_date_str = format_email_date(raw_date)
@@ -133,18 +150,26 @@ def process_email_content_to_temp(
             body = msg.get_content()
 
         attachments_data, inline_images = [], []
-        for part in msg.iter_attachments():
+        attachment_list = list(msg.iter_attachments())
+        logger.info(f"[EMAIL_EXTRACT] Found {len(attachment_list)} attachments in .eml")
+
+        for idx, part in enumerate(attachment_list, 1):
             att_filename = part.get_filename()
             if not att_filename:
                 continue
             content = part.get_payload(decode=True)
-            
+
+            att_size = len(content) if content else 0
+            logger.info(f"[EMAIL_EXTRACT] Attachment {idx}: {att_filename}, size: {att_size / (1024*1024):.2f} MB")
+
             # Write to temp file instead of holding in memory
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{att_filename}")
             tmp.write(content)
             tmp.close()
+            logger.info(f"[EMAIL_EXTRACT] Wrote attachment to temp: {tmp.name}")
+
             del content  # Free memory immediately
-            
+
             if is_inline_image(part, att_filename):
                 inline_images.append({
                     "filename": att_filename,
@@ -155,6 +180,7 @@ def process_email_content_to_temp(
             else:
                 attachments_data.append({"filename": att_filename, "temp_path": tmp.name})
 
+    logger.info(f"[EMAIL_EXTRACT] Complete: {len(attachments_data)} attachments, {len(inline_images)} inline images")
     return header_info, body, attachments_data, inline_images
 
 

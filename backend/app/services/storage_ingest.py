@@ -268,6 +268,12 @@ def ingest_derived_attachment_bytes(
     kind: str | None = None,
     mime_type: str | None = None,
 ) -> TaskFile:
+    import logging
+    logger = logging.getLogger(__name__)
+
+    content_size = len(content)
+    logger.info(f"[INGEST] Starting upload: {filename}, size: {content_size / (1024*1024):.2f} MB")
+
     safe_name = sanitize_filename(filename)
     sha = hashlib.sha256(content).hexdigest()
     asset_id = f"derived:{parent_asset_id}:{sha[:12]}:{safe_name}"
@@ -280,14 +286,17 @@ def ingest_derived_attachment_bytes(
         safe_name,
     )
     mime_type = mime_type or (mimetypes.guess_type(safe_name)[0] or "application/octet-stream")
-    content_size = len(content)
-    
+
+    logger.info(f"[INGEST] Uploading to path: {object_path}")
+
     supabase.storage.from_(settings.supabase_storage_bucket).upload(
         object_path,
         content,  # Pass raw bytes directly
         file_options={"content-type": mime_type, "upsert": "true"},
     )
-    
+
+    logger.info(f"[INGEST] Upload complete: {filename}")
+
     result = upsert_task_file(
         db,
         external_task_key=task.external_task_key,
@@ -301,9 +310,10 @@ def ingest_derived_attachment_bytes(
         object_path=object_path,
         sha256=sha,
     )
-    
+
     # Force garbage collection for large files (>10MB)
     if content_size > 10 * 1024 * 1024:
         gc.collect()
-    
+        logger.info(f"[INGEST] Ran gc.collect() for large file: {filename}")
+
     return result

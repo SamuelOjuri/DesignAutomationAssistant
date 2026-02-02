@@ -3,12 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 import csv
 from typing import Any, Dict, List
+import psutil  # Add this import for memory monitoring
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import os
 import math
+import gc  # Add this import
+
 from google import genai
 from google.genai import types
 from ..config import settings
@@ -30,6 +33,16 @@ from .storage_ingest import (
 import logging
 
 logger = logging.getLogger(__name__)
+
+def _log_memory(stage: str):
+    """Log current memory usage."""
+    try:
+        process = psutil.Process()
+        mem_info = process.memory_info()
+        mem_mb = mem_info.rss / (1024 * 1024)
+        logger.info(f"[MEMORY] {stage}: {mem_mb:.1f} MB")
+    except Exception as e:
+        logger.warning(f"[MEMORY] Could not get memory info: {e}")
 
 @dataclass
 class SyncResult:
@@ -212,15 +225,29 @@ def run_sync_pipeline(
 
         is_email = filename.endswith(".eml") or filename.endswith(".msg") or kind == "email"
         if is_email:
+            logger.info(f"[EMAIL] Processing email: {asset.get('name')}")
+            _log_memory("Before email download")
+
             downloaded = download_asset_to_temp(asset, access_token)
+            logger.info(f"[EMAIL] Downloaded to temp: {downloaded.temp_path}, size: {downloaded.size_bytes / (1024*1024):.2f} MB")
+            _log_memory("After email download")
+
             with open(downloaded.temp_path, "rb") as f:
                 email_bytes = f.read()
+            logger.info(f"[EMAIL] Read email bytes: {len(email_bytes) / (1024*1024):.2f} MB")
+            _log_memory("After reading email bytes")
 
             # Use memory-efficient extraction that writes attachments to temp files
             header, body, attachments, inline_images = process_email_content_to_temp(
                 email_bytes, asset.get("name") or ""
             )
+            logger.info(f"[EMAIL] Extracted: {len(attachments)} attachments, {len(inline_images or [])} inline images")
+            _log_memory("After email extraction")
+
             del email_bytes  # Free email bytes immediately
+            gc.collect()
+            logger.info("[EMAIL] Freed email_bytes, ran gc.collect()")
+            _log_memory("After freeing email_bytes")
 
             # Extract text sections for RAG (header + body only, no attachment bytes)
             sections = []
@@ -243,19 +270,34 @@ def run_sync_pipeline(
 
             # Ingest the email file itself
             ingest_asset(db, task, snapshot, asset, kind, access_token, downloaded=downloaded)
+            logger.info("[EMAIL] Ingested email file to Supabase")
+            _log_memory("After email file upload")
 
             # Process PDF attachments ONE AT A TIME to minimize memory
             pdf_attachments = [att for att in attachments if att["filename"].lower().endswith(".pdf")]
-            for att in pdf_attachments:
+            logger.info(f"[EMAIL] Processing {len(pdf_attachments)} PDF attachments one at a time")
+
+            for idx, att in enumerate(pdf_attachments, 1):
+                logger.info(f"[PDF {idx}/{len(pdf_attachments)}] Processing: {att['filename']}")
+                _log_memory(f"Before PDF {idx}")
+
                 try:
+                    # Get file size before reading
+                    file_size = os.path.getsize(att["temp_path"])
+                    logger.info(f"[PDF {idx}] File size: {file_size / (1024*1024):.2f} MB")
+
                     with open(att["temp_path"], "rb") as f:
                         pdf_bytes = f.read()
+                    logger.info(f"[PDF {idx}] Read into memory: {len(pdf_bytes) / (1024*1024):.2f} MB")
+                    _log_memory(f"After reading PDF {idx}")
 
                     # Check size before processing
                     if len(pdf_bytes) <= MAX_SINGLE_PDF_SIZE:
+                        logger.info(f"[PDF {idx}] Sending to Gemini for extraction...")
                         extracted = process_pdf_batch(
                             [{"filename": att["filename"], "content": pdf_bytes}]
                         )
+                        logger.info(f"[PDF {idx}] Gemini extraction complete, text length: {len(extracted)}")
                         extracted_docs.append(
                             {
                                 "assetId": str(asset.get("id")),
@@ -267,6 +309,7 @@ def run_sync_pipeline(
                             }
                         )
                     else:
+                        logger.warning(f"[PDF {idx}] Too large for extraction: {len(pdf_bytes) / (1024*1024):.2f} MB")
                         extracted_docs.append(
                             {
                                 "assetId": str(asset.get("id")),
@@ -279,6 +322,7 @@ def run_sync_pipeline(
                         )
 
                     # Ingest to Supabase
+                    logger.info(f"[PDF {idx}] Uploading to Supabase...")
                     ingest_derived_attachment_bytes(
                         db,
                         task,
@@ -288,28 +332,46 @@ def run_sync_pipeline(
                         content=pdf_bytes,
                         kind=attachment_kind_for_filename(att["filename"]),
                     )
+                    logger.info(f"[PDF {idx}] Upload complete")
+
                     del pdf_bytes  # Free memory immediately
+                    gc.collect()
+                    logger.info(f"[PDF {idx}] Freed pdf_bytes, ran gc.collect()")
+                    _log_memory(f"After freeing PDF {idx}")
+
                 finally:
                     # Delete temp file immediately after processing
                     try:
                         os.unlink(att["temp_path"])
-                    except OSError:
-                        pass
+                        logger.info(f"[PDF {idx}] Deleted temp file: {att['temp_path']}")
+                    except OSError as e:
+                        logger.warning(f"[PDF {idx}] Failed to delete temp file: {e}")
 
             # Process image attachments ONE AT A TIME
             image_attachments = [
                 att for att in attachments
                 if any(att["filename"].lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp"))
             ]
+            logger.info(f"[EMAIL] Processing {len(image_attachments)} image attachments one at a time")
 
-            for att in image_attachments:
+            for idx, att in enumerate(image_attachments, 1):
+                logger.info(f"[IMAGE {idx}/{len(image_attachments)}] Processing: {att['filename']}")
+                _log_memory(f"Before image {idx}")
+
                 try:
+                    file_size = os.path.getsize(att["temp_path"])
+                    logger.info(f"[IMAGE {idx}] File size: {file_size / (1024*1024):.2f} MB")
+
                     with open(att["temp_path"], "rb") as f:
                         img_bytes = f.read()
 
+                    _log_memory(f"After reading image {idx}")
+                    logger.info(f"[IMAGE {idx}] Sending to Gemini...")
                     extracted = process_image_with_gemini(
                         img_bytes, att["filename"], "ATTACHMENT"
                     )
+                    logger.info(f"[IMAGE {idx}] Gemini complete")
+
                     extracted_docs.append(
                         {
                             "assetId": str(asset.get("id")),
@@ -320,7 +382,7 @@ def run_sync_pipeline(
                             "page": None,
                         }
                     )
-
+                    logger.info(f"[IMAGE {idx}] Uploading to Supabase...")
                     ingest_derived_attachment_bytes(
                         db,
                         task,
@@ -331,14 +393,21 @@ def run_sync_pipeline(
                         kind="attachment_image",
                     )
                     del img_bytes  # Free memory immediately
+                    gc.collect()
+                    _log_memory(f"After freeing image {idx}")
+
                 finally:
                     try:
                         os.unlink(att["temp_path"])
+                        logger.info(f"[IMAGE {idx}] Deleted temp file")
                     except OSError:
                         pass
 
             # Process inline images ONE AT A TIME
-            for img in inline_images or []:
+            logger.info(f"[EMAIL] Processing {len(inline_images or [])} inline images")
+
+            for idx, img in enumerate(inline_images or [], 1):
+                logger.info(f"[INLINE {idx}] Processing: {img['filename']}")
                 try:
                     with open(img["temp_path"], "rb") as f:
                         img_bytes = f.read()
@@ -353,6 +422,7 @@ def run_sync_pipeline(
                         mime_type=img.get("mime_type"),
                     )
                     del img_bytes  # Free memory immediately
+                    gc.collect()
                 finally:
                     try:
                         os.unlink(img["temp_path"])
@@ -365,6 +435,7 @@ def run_sync_pipeline(
                 if not any(att["filename"].lower().endswith(ext) 
                           for ext in (".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"))
             ]
+            logger.info(f"[EMAIL] Processing {len(other_attachments)} other attachments")
 
             for att in other_attachments:
                 try:
@@ -380,12 +451,15 @@ def run_sync_pipeline(
                         kind=attachment_kind_for_filename(att["filename"]),
                     )
                     del content
+                    gc.collect()
                 finally:
                     try:
                         os.unlink(att["temp_path"])
                     except OSError:
                         pass
 
+            logger.info(f"[EMAIL] Completed processing email: {asset.get('name')}")
+            _log_memory("After complete email processing")
             continue
 
         # PDF extraction (non-email)
