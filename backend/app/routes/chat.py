@@ -30,8 +30,11 @@ def _history_to_contents(history: Optional[List[ChatMessage]]) -> List[types.Con
     for msg in history:
         # Map app roles -> GenAI roles
         role = "user" if msg.role == "user" else "model"
+        text = (msg.content or "").strip()
+        if not text:
+            continue
         contents.append(
-            types.Content(role=role, parts=[types.Part.from_text(msg.content or "")])
+            types.Content(role=role, parts=[types.Part.from_text(text)])
         )
     return contents
 
@@ -112,6 +115,7 @@ def _run_with_tools(
 
         contents.append(response.candidates[0].content)
 
+        tool_parts = []
         for fc in function_calls:
             name = getattr(fc, "name", None) or fc.function_call.name
             args = getattr(fc, "args", None) or fc.function_call.args or {}
@@ -134,11 +138,15 @@ def _run_with_tools(
             else:
                 tool_payload = {"error": f"Unknown tool: {name}"}
 
-            tool_response_part = types.Part.from_function_response(
-                name=name,
-                response=tool_payload,
+            tool_parts.append(
+                types.Part.from_function_response(
+                    name=name,
+                    response=tool_payload,
+                )
             )
-            contents.append(types.Content(role="tool", parts=[tool_response_part]))
+        
+        if tool_parts:
+            contents.append(types.Content(role="tool", parts=tool_parts))
 
     return contents, latest_citations, False
 
@@ -167,7 +175,7 @@ def chat(
 
             final_config = types.GenerateContentConfig(
                 # No tools in final call to prevent more tool requests
-                tools=[],
+                tools=None,
                 system_instruction=(
                     "You are a helpful assistant. Do not call tools. "
                     "Answer only using the provided tool results."
