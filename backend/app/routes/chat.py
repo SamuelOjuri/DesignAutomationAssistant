@@ -34,7 +34,7 @@ def _history_to_contents(history: Optional[List[ChatMessage]]) -> List[types.Con
         if not text:
             continue
         contents.append(
-            types.Content(role=role, parts=[types.Part.from_text(text)])
+            types.Content(role=role, parts=[types.Part(text=text)])
         )
     return contents
 
@@ -97,7 +97,7 @@ def _run_with_tools(
     config = _build_tool_config()
 
     contents = _history_to_contents(history)
-    contents.append(types.Content(role="user", parts=[types.Part.from_text(prompt)]))
+    contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
 
     latest_citations: List[Dict[str, Any]] = []
 
