@@ -276,14 +276,28 @@ def run_sync_pipeline(
         gc.collect()  # Force GC after embedding
         _log_memory("After embedding batch")
 
+    def _sanitize_text(text: str | None) -> str:
+        if not text:
+            return ""
+        # Postgres TEXT/VARCHAR cannot contain NUL bytes
+        return text.replace("\x00", "")
+
     def _enqueue_chunk(
         file_id: Any,
         chunk_text: str,
         page: int | None,
         section: str | None,
     ) -> None:
-        if not file_id or not chunk_text:
+        if not file_id:
             return
+
+        chunk_text = _sanitize_text(chunk_text)
+        if not chunk_text:
+            return
+
+        if section:
+            section = _sanitize_text(section)
+
         _ensure_chunks_cleared(file_id)
         embed_buffer.append(
             {
@@ -307,7 +321,8 @@ def run_sync_pipeline(
             return
         if _should_skip(f"{kind} embedding"):
             return
-        text = (text or "").strip()
+
+        text = _sanitize_text(text).strip()
         if not text:
             return
         if len(text) > MAX_TEXT_CHARS:
