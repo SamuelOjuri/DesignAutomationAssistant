@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { getBrowserSupabase } from "@/lib/supabase/client";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeSanitize from "rehype-sanitize";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -82,11 +85,7 @@ type StreamEvent =
   | { type: "citations"; citations: Citation[] }
   | { type: "done" };
 
-async function getAccessToken(): Promise<string | null> {
-  const supabase = getBrowserSupabase();
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
-}
+
 
 type SignedUrlResponse = { url: string; expiresAt: string };
 
@@ -107,6 +106,20 @@ const VALIDATED_COLUMN_TITLES = new Set([
   "Turn Around (Hours)",
   "Date Sort",
 ]);
+
+const Markdown = ({ children }: { children: string }) => (
+  <div className="prose prose-sm max-w-none">
+    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+      {children}
+    </ReactMarkdown>
+  </div>
+);
+
+async function getAccessToken(): Promise<string | null> {
+  const supabase = getBrowserSupabase();
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? null;
+}
 
 function formatColumnValue(col: ColumnValue): string {
   const raw = col.display_value ?? col.text ?? col.value;
@@ -655,7 +668,11 @@ export default function TaskPage() {
             <div className="text-xs uppercase text-muted-foreground">
               {m.role}
             </div>
-            <div className="whitespace-pre-wrap">{m.content}</div>
+            {m.role === "assistant" ? (
+              <Markdown>{m.content}</Markdown>
+            ) : (
+              <div className="whitespace-pre-wrap">{m.content}</div>
+            )}
           </div>
         ))}
       </div>
@@ -673,9 +690,7 @@ export default function TaskPage() {
                   {c.page != null ? `Page ${c.page}` : "Page N/A"}
                   {c.section ? ` • ${c.section}` : ""}
                 </div>
-                {c.snippet && (
-                  <div className="mt-1 whitespace-pre-wrap">{c.snippet}</div>
-                )}
+                {c.snippet && <Markdown>{c.snippet}</Markdown>}
                 {c.fileId ? (
                   <div className="mt-2">
                     <button
