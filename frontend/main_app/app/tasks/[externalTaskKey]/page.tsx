@@ -204,6 +204,9 @@ export default function TaskPage() {
     return summary?.taskContext?.csv_params ?? [];
   }, [summary]);
 
+  const hasSnapshot = Boolean(summary?.snapshotVersion);
+  const hasSourcesSnapshot = Boolean(sources?.snapshotVersion);
+
   const isImageFile = (file: TaskSourceFile) => {
     if (file.kind === "attachment_image") return true;
     if (file.mimeType?.startsWith("image/")) return true;
@@ -617,7 +620,9 @@ export default function TaskPage() {
       {summary && (
         <section className="mt-6 rounded border p-3">
           <div className="text-sm font-semibold">Summary</div>
-          {validatedColumns.length === 0 ? (
+          {!hasSnapshot ? (
+            <p className="mt-2 text-sm text-muted-foreground">Task data not yet synced.</p>
+          ) : validatedColumns.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">No validated columns found.</p>
           ) : (
             <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
@@ -691,7 +696,9 @@ export default function TaskPage() {
           {signedUrlError && (
             <p className="mt-2 text-sm text-red-500">{signedUrlError}</p>
           )}
-          {visibleSources.length === 0 ? (
+          {!hasSourcesSnapshot ? (
+            <p className="mt-2 text-sm text-muted-foreground">Task data not yet synced.</p>
+          ) : visibleSources.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">No files found.</p>
           ) : (
             <ul className="mt-2 divide-y text-sm">
