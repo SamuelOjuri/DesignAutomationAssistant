@@ -117,8 +117,16 @@ def _run_with_tools(
 
         tool_parts = []
         for fc in function_calls:
-            name = getattr(fc, "name", None) or fc.function_call.name
-            args = getattr(fc, "args", None) or fc.function_call.args or {}
+            name = getattr(fc, "name", None)
+            if name is None and hasattr(fc, "function_call"):
+                name = fc.function_call.name
+
+            args = getattr(fc, "args", None)
+            if args is None and hasattr(fc, "function_call"):
+                args = fc.function_call.args
+
+            if args is None:
+                args = {}
 
             if name == "get_task_context":
                 context = get_task_context(db, external_task_key)
