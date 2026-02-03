@@ -198,6 +198,14 @@ export default function TaskPage() {
     return summary?.taskContext?.csv_params ?? [];
   }, [summary]);
 
+  const isImageFile = (file: TaskSourceFile) => {
+    if (file.kind === "attachment_image") return true;
+    if (file.mimeType?.startsWith("image/")) return true;
+    return /\.(png|jpe?g|gif|bmp|webp)$/i.test(file.originalFilename ?? "");
+  };
+  
+  const visibleSources = sources?.files.filter((file) => !isImageFile(file)) ?? [];
+
   const isAwaitingFirstToken =
     isStreaming && (messages.length === 0 || messages[messages.length - 1].role !== "assistant");
 
@@ -677,11 +685,11 @@ export default function TaskPage() {
           {signedUrlError && (
             <p className="mt-2 text-sm text-red-500">{signedUrlError}</p>
           )}
-          {sources.files.length === 0 ? (
+          {visibleSources.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">No files found.</p>
           ) : (
             <ul className="mt-2 divide-y text-sm">
-              {sources.files.map((file) => (
+              {visibleSources.map((file) => (
                 <li key={file.id} className="py-2">
                   <div className="flex items-center justify-between gap-4">
                     <div>
