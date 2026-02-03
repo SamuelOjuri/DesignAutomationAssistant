@@ -110,7 +110,7 @@ const VALIDATED_COLUMN_TITLES = new Set([
 ]);
 
 const Markdown = ({ children }: { children: string }) => (
-  <div className="prose prose-sm max-w-none">
+  <div className="prose prose-sm max-w-none wrap-break-word prose-pre:whitespace-pre-wrap prose-pre:break-words prose-pre:overflow-hidden">
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[rehypeSanitize]}
@@ -119,6 +119,12 @@ const Markdown = ({ children }: { children: string }) => (
           <a {...props} className="break-all">
             {props.children}
           </a>
+        ),
+        pre: ({ node, ...props }) => (
+          <pre {...props} className="whitespace-pre-wrap wrap-break-word overflow-hidden" />
+        ),
+        code: ({ node, ...props }) => (
+          <code {...props} className="wrap-break-word" />
         ),
       }}
     >
