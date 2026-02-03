@@ -51,6 +51,8 @@ type TaskSummaryResponse = {
   status?: string | null;
   updatedAt?: string | null;
   syncStatus?: string | null;
+  syncStartedAt?: string | null;
+  syncCompletedAt?: string | null;
 };
 
 type TaskSourceFile = {
@@ -195,6 +197,9 @@ export default function TaskPage() {
   const csvParams = useMemo(() => {
     return summary?.taskContext?.csv_params ?? [];
   }, [summary]);
+
+  const isAwaitingFirstToken =
+    isStreaming && (messages.length === 0 || messages[messages.length - 1].role !== "assistant");
 
   // --- State/handlers for sources signed url ---
   const [signedUrls, setSignedUrls] = useState<Record<string, SignedUrlResponse>>({});
@@ -444,25 +449,28 @@ export default function TaskPage() {
   const pollForSnapshotChange = useCallback(
     async (previousVersion: string | null) => {
       const token = ++pollTokenRef.current;
-      const timeoutMs = 60_000;
+      const timeoutMs = 5 * 60_000; // 5 minutes
       const intervalMs = 3_000;
+      const slowIntervalMs = 12_000; // slower polling after timeout
       const start = Date.now();
 
+      const isCancelled = () => pollTokenRef.current !== token;
+
+      const handleCompletion = async () => {
+        await fetchSources();
+        setSyncStatus(null); // Clear the ephemeral status message
+        return true;
+      };
+
       while (Date.now() - start < timeoutMs) {
-        if (pollTokenRef.current !== token) {
-          return false; // cancelled (new sync or unmount)
-        }
+        if (isCancelled()) return false;
 
         const data = await fetchSummary();
         const nextVersion = data?.snapshotVersion ?? null;
         const currentSyncStatus = data?.syncStatus;
 
-        // If sync finished (success or failure), stop polling
         if (currentSyncStatus === "completed" || currentSyncStatus === "failed") {
-          // Refresh sources to ensure we have the latest data
-          await fetchSources();
-          setSyncStatus(null); // Clear the ephemeral status message
-          return true;
+          return handleCompletion();
         }
 
         if (nextVersion && nextVersion !== previousVersion) {
@@ -471,6 +479,34 @@ export default function TaskPage() {
         }
 
         await delay(intervalMs);
+      }
+
+      // Final refresh on timeout
+      if (!isCancelled()) {
+        const finalData = await fetchSummary();
+        const finalStatus = finalData?.syncStatus;
+
+        if (finalStatus === "completed" || finalStatus === "failed") {
+          return handleCompletion();
+        }
+
+        // If still syncing, keep polling at a slower interval
+        while (!isCancelled() && finalStatus === "syncing") {
+          await delay(slowIntervalMs);
+
+          const data = await fetchSummary();
+          const nextVersion = data?.snapshotVersion ?? null;
+          const currentSyncStatus = data?.syncStatus;
+
+          if (currentSyncStatus === "completed" || currentSyncStatus === "failed") {
+            return handleCompletion();
+          }
+
+          if (nextVersion && nextVersion !== previousVersion) {
+            await fetchSources();
+            return true;
+          }
+        }
       }
 
       return false;
@@ -554,8 +590,11 @@ export default function TaskPage() {
         </button>
       </div>
 
-      {syncStatus && (
-        <p className="text-muted-foreground mt-2 text-sm">{syncStatus}</p>
+      {summary?.syncStatus && (
+        <p className="text-muted-foreground mt-1 text-xs">
+          Server sync status: {summary.syncStatus}
+          {summary.syncCompletedAt ? ` • completed ${new Date(summary.syncCompletedAt).toLocaleString()}` : ""}
+        </p>
       )}
 
       {/* --- Summary panel loading/errors/render --- */}
@@ -668,6 +707,19 @@ export default function TaskPage() {
       )}
 
       <div className="mt-8 space-y-4">
+        {isAwaitingFirstToken && (
+          <div className="rounded border px-3 py-2 bg-muted">
+            <div className="text-xs uppercase text-muted-foreground">assistant</div>
+            <div className="text-sm text-muted-foreground flex items-center gap-2">
+              Thinking
+              <span className="inline-flex items-center gap-1">
+                <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce" />
+                <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:100ms]" />
+                <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:200ms]" />
+              </span>
+            </div>
+          </div>
+        )}
         {messages.map((m, i) => (
           <div
             key={i}
@@ -730,9 +782,13 @@ export default function TaskPage() {
         <button
           onClick={sendMessage}
           disabled={isStreaming || !input.trim()}
-          className="rounded bg-foreground px-3 py-1 text-sm text-background disabled:opacity-50"
+          aria-busy={isStreaming}
+          className="rounded bg-foreground px-3 py-1 text-sm text-background disabled:opacity-50 inline-flex items-center gap-2"
         >
-          Send
+          {isStreaming ? "Sending..." : "Send"}
+          {isStreaming && (
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-background border-t-transparent" />
+          )}
         </button>
         {isStreaming && (
           <button
