@@ -109,7 +109,17 @@ const VALIDATED_COLUMN_TITLES = new Set([
 
 const Markdown = ({ children }: { children: string }) => (
   <div className="prose prose-sm max-w-none">
-    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeSanitize]}
+      components={{
+        a: ({ node, ...props }) => (
+          <a {...props} className="break-all">
+            {props.children}
+          </a>
+        ),
+      }}
+    >
       {children}
     </ReactMarkdown>
   </div>
