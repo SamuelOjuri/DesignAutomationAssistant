@@ -166,17 +166,17 @@ def run_sync_pipeline(
     cleared_file_ids: set = set()
     embed_client = None
 
-    # Memory-optimized limits to prevent OOM on 2GB instances
-    MAX_SINGLE_PDF_SIZE = 15 * 1024 * 1024  # 15MB (reduced from 30MB)
-    MAX_EMAIL_SIZE = 10 * 1024 * 1024  # 10MB (reduced from 20MB)
-    MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB (reduced from 10MB)
-    MAX_TEXT_CHARS = 200_000
-    MAX_CHUNKS_PER_DOC = 200
-    RSS_GUARD_MB = 800  # Reduced from 1300 to give more headroom before 2GB limit
-    RSS_CRITICAL_MB = 1500  # Critical threshold - abort pipeline to prevent OOM kill
+    # Memory-optimized limits to prevent OOM on 4GB instances
+    MAX_SINGLE_PDF_SIZE = 30 * 1024 * 1024  # (reduced from 30MB)
+    MAX_EMAIL_SIZE = 20 * 1024 * 1024  # (reduced from 20MB)
+    MAX_IMAGE_SIZE = 10 * 1024 * 1024  # (reduced from 10MB)
+    MAX_TEXT_CHARS = 400_000
+    MAX_CHUNKS_PER_DOC = 400
+    RSS_GUARD_MB = 2000  # Reduced to give more headroom before 4GB limit
+    RSS_CRITICAL_MB = 3200  # Critical threshold - abort pipeline to prevent OOM kill
     SUPPORTED_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
     EMBED_BATCH_SIZE = 2  # Reduced from 4 to minimize memory pressure
-    MAX_ATTACHMENTS_PER_EMAIL = 5  # Limit attachments to prevent memory accumulation
+    MAX_ATTACHMENTS_PER_EMAIL = 8  # Limit attachments to prevent memory accumulation
 
     def _rss_mb() -> float:
         try:
