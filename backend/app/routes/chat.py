@@ -181,9 +181,14 @@ def chat(
                 yield _sse({"type": "done"})
                 return
 
+            # Explicitly disable function calling with mode="NONE" for final stream
             final_config = types.GenerateContentConfig(
-                # No tools in final call to prevent more tool requests
-                tools=None,
+                tools=[], 
+                tool_config=types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(
+                        mode="NONE"
+                    )
+                ),
                 system_instruction=(
                     "You are a helpful assistant. Do not call tools. "
                     "Answer only using the provided tool results."
@@ -199,6 +204,8 @@ def chat(
             )
 
             for chunk in stream:
+                # Use a safer access pattern or just rely on chunk.text 
+                # (now that function calling is strictly disabled, warnings should disappear)
                 if chunk.text:
                     yield _sse({"type": "message", "content": chunk.text})
 
