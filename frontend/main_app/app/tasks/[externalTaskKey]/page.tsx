@@ -281,10 +281,11 @@ export default function TaskPage() {
 
   const parseSse = useCallback(async (response: Response) => {
     const reader = response.body?.getReader();
-    if (!reader) return;
+    if (!reader) return false;
 
     const decoder = new TextDecoder();
     let buffer = "";
+    let receivedMessage = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -309,12 +310,15 @@ export default function TaskPage() {
 
         if (!evt) continue;
         if (evt.type === "message" && evt.content) {
+          receivedMessage = true;
           appendAssistantChunk(evt.content);
         } else if (evt.type === "citations") {
           setCitations(evt.citations || []);
         }
       }
     }
+
+    return receivedMessage;
   }, [appendAssistantChunk]);
 
   // --- Fetch summary and sources helpers ---
@@ -444,7 +448,12 @@ export default function TaskPage() {
         return;
       }
 
-      await parseSse(response);
+      const receivedMessage = await parseSse(response);
+      if (!receivedMessage) {
+        appendAssistantChunk(
+          "I found relevant sources, but no final answer was returned. Please try again."
+        );
+      }
     } catch (e: any) {
       if (e?.name !== "AbortError") {
         appendAssistantChunk(`Error: ${String(e)}`);

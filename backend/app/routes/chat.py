@@ -80,10 +80,27 @@ def _build_tool_config() -> types.GenerateContentConfig:
         tools=[tools],
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         system_instruction=(
-            "You are a helpful assistant. Use tools when needed to answer questions. "
-            "When using retrieved sources, base your answer strictly on tool results."
+            "You are a helpful technical design assistant. Use tools when needed "
+            "to answer questions about the current task. After tool results are "
+            "provided, produce a concise plain-text answer. When using retrieved "
+            "sources, base your answer strictly on tool results."
         ),
     )
+
+
+def _response_text(response: Any) -> str:
+    text = getattr(response, "text", None)
+    if text:
+        return str(text).strip()
+
+    parts = []
+    for candidate in getattr(response, "candidates", []) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", []) or []:
+            part_text = getattr(part, "text", None)
+            if part_text:
+                parts.append(str(part_text))
+    return "".join(parts).strip()
 
 
 def _run_with_tools(
@@ -92,7 +109,7 @@ def _run_with_tools(
     prompt: str,
     history: Optional[List[ChatMessage]],
     max_turns: int = 8,
-) -> tuple[List[types.Content], List[Dict[str, Any]], bool]:
+) -> tuple[str, List[Dict[str, Any]], bool]:
     client = genai.Client(api_key=settings.gemini_api_key)
     config = _build_tool_config()
 
@@ -110,8 +127,8 @@ def _run_with_tools(
 
         function_calls = response.function_calls or []
         if not function_calls:
-            # Do NOT append the model response; we want to stream it next
-            return contents, latest_citations, True
+            answer = _response_text(response)
+            return answer, latest_citations, True
 
         contents.append(response.candidates[0].content)
 
@@ -156,7 +173,7 @@ def _run_with_tools(
         if tool_parts:
             contents.append(types.Content(role="tool", parts=tool_parts))
 
-    return contents, latest_citations, False
+    return "", latest_citations, False
 
 
 @router.post("/chat")
@@ -170,44 +187,30 @@ def chat(
     def event_stream():
         yield _sse({"type": "start", "ts": datetime.now(timezone.utc).isoformat()})
         try:
-            contents, citations, ok = _run_with_tools(
+            answer, citations, ok = _run_with_tools(
                 db=db,
                 external_task_key=payload.externalTaskKey,
                 prompt=payload.message,
                 history=payload.history,
             )
             if not ok:
-                yield _sse({"type": "message", "content": "Stopped because max_turns was reached."})
-                yield _sse({"type": "done"})
-                return
+                answer = (
+                    "I found relevant sources, but the model did not finish a "
+                    "plain-text answer. Please try rephrasing the question."
+                )
 
-            # Explicitly disable function calling with mode="NONE" for final stream
-            final_config = types.GenerateContentConfig(
-                tools=[], 
-                tool_config=types.ToolConfig(
-                    function_calling_config=types.FunctionCallingConfig(
-                        mode="NONE"
-                    )
-                ),
-                system_instruction=(
-                    "You are a helpful assistant. Do not call tools. "
-                    "Answer only using the provided tool results."
-                ),
-            )
-
-            client = genai.Client(api_key=settings.gemini_api_key)
-
-            stream = client.models.generate_content_stream(
-                model=settings.gemini_model,
-                contents=contents,
-                config=final_config,
-            )
-
-            for chunk in stream:
-                # Use a safer access pattern or just rely on chunk.text 
-                # (now that function calling is strictly disabled, warnings should disappear)
-                if chunk.text:
-                    yield _sse({"type": "message", "content": chunk.text})
+            if answer:
+                yield _sse({"type": "message", "content": answer})
+            else:
+                yield _sse(
+                    {
+                        "type": "message",
+                        "content": (
+                            "I found relevant sources, but no final answer was "
+                            "returned. Please try again."
+                        ),
+                    }
+                )
 
             if citations:
                 yield _sse({"type": "citations", "citations": citations})
