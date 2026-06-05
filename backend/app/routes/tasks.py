@@ -94,6 +94,7 @@ def sync_task(
     # Mark sync as started immediately
     task.sync_status = "syncing"
     task.sync_started_at = datetime.now(timezone.utc)
+    task.sync_completed_at = None
     task.sync_error = None
     db.commit()
 

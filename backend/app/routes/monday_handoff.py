@@ -119,9 +119,16 @@ def handoff_resolve(
         )
         db.add(task)
 
+    should_queue_sync = task.sync_status != "syncing"
+    if should_queue_sync:
+        task.sync_status = "syncing"
+        task.sync_started_at = datetime.now(timezone.utc)
+        task.sync_completed_at = None
+        task.sync_error = None
+
     db.commit()
 
-    if background_tasks is not None:
+    if should_queue_sync and background_tasks is not None:
         background_tasks.add_task(
             run_sync_pipeline_background,
             external_task_key,
