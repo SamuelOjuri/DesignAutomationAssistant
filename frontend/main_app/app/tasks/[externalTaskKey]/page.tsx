@@ -152,6 +152,22 @@ function formatColumnValue(col: ColumnValue): string {
   }
 }
 
+function findColumnValue(cols: ColumnValue[], titles: string[]): string {
+  const wanted = new Set(titles.map((title) => title.trim().toLowerCase()));
+  for (const col of cols) {
+    const title = col.column?.title?.trim().toLowerCase() ?? "";
+    if (!wanted.has(title)) continue;
+    const value = formatColumnValue(col).trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function projectNumberFromFilename(filename?: string | null): string {
+  const match = filename?.match(/\bTP[\s_-]*(\d{4,})(?=[^\d]|$)/i);
+  return match?.[1] ?? "";
+}
+
 // --- Sources helpers ---
 function formatBytes(bytes?: number | null): string {
   if (bytes == null) return "—";
@@ -202,9 +218,23 @@ export default function TaskPage() {
   }, [summary]);
 
   const mondayProject = useMemo(() => {
-    const raw = summary?.taskContext?.name;
-    return typeof raw === "string" ? raw.trim() : "";
-  }, [summary]);
+    const cols = summary?.taskContext?.column_values ?? [];
+    const columnValue = findColumnValue(cols, [
+      "Project",
+      "Monday Project",
+      "Project Number",
+      "Project No",
+      "Project Ref",
+    ]);
+    if (columnValue) return columnValue;
+
+    for (const file of sources?.files ?? []) {
+      const projectNumber = projectNumberFromFilename(file.originalFilename);
+      if (projectNumber) return projectNumber;
+    }
+
+    return "";
+  }, [sources, summary]);
 
   const summaryFields = useMemo(() => {
     if (!mondayProject) return validatedColumns;
