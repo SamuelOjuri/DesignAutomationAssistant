@@ -547,6 +547,12 @@ export default function TaskPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (summary?.syncStatus === "syncing") {
+      void pollForSnapshotChange(summary.snapshotVersion ?? null);
+    }
+  }, [pollForSnapshotChange, summary?.snapshotVersion, summary?.syncStatus]);
+
   const syncTask = useCallback(async () => {
     if (!externalTaskKey) return;
 

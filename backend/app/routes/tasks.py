@@ -116,6 +116,7 @@ def task_summary(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     task = require_task_access(externalTaskKey, db, current_user)
+    db.refresh(task)
 
     snapshot = (
         db.query(TaskSnapshot)
