@@ -111,7 +111,7 @@ const VALIDATED_COLUMN_TITLES = new Set([
 ]);
 
 const Markdown = ({ children }: { children: string }) => (
-  <div className="prose prose-sm max-w-none wrap-break-word prose-pre:whitespace-pre-wrap prose-pre:break-words prose-pre:overflow-hidden">
+  <div className="task-markdown max-w-none text-sm leading-6">
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[rehypeSanitize]}
@@ -642,29 +642,32 @@ export default function TaskPage() {
   // Show loading state if externalTaskKey is not yet available
   if (!externalTaskKey) {
     return (
-      <main className="mx-auto mt-10 max-w-3xl px-4 pb-16">
+      <main className="mx-auto min-h-screen max-w-5xl px-5 py-8">
         <p className="text-muted-foreground">Loading task...</p>
       </main>
     );
   }
 
   return (
-    <main className="mx-auto mt-10 max-w-3xl px-4 pb-16">
-      <div className="flex items-center justify-between">
+    <main className="mx-auto min-h-screen max-w-5xl px-5 py-8">
+      <div className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Task</h1>
-          <p className="text-muted-foreground mt-2">{externalTaskKey}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+            Design Automation Assistant
+          </p>
+          <h1 className="mt-1 text-2xl font-semibold text-foreground">Task</h1>
+          <p className="mt-2 break-all text-sm text-muted-foreground">{externalTaskKey}</p>
         </div>
         <button
           onClick={syncTask}
-          className="rounded border px-3 py-1 text-sm"
+          className="inline-flex items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           Sync task
         </button>
       </div>
 
       {summary?.syncStatus && (
-        <p className="text-muted-foreground mt-1 text-xs">
+        <p className="mt-3 inline-flex rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-foreground">
           Server sync status: {summary.syncStatus}
           {summary.syncCompletedAt ? ` • completed ${new Date(summary.syncCompletedAt).toLocaleString()}` : ""}
         </p>
@@ -674,18 +677,21 @@ export default function TaskPage() {
       {isLoadingSummary && <p className="text-sm text-muted-foreground">Loading summary…</p>}
       {summaryError && <p className="text-sm text-red-500">{summaryError}</p>}
       {summary && (
-        <section className="mt-6 rounded border p-3">
-          <div className="text-sm font-semibold">Summary</div>
+        <section className="mt-6 rounded-lg border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="h-2 w-2 rounded-full bg-primary" />
+            <div className="text-sm font-semibold text-foreground">Summary</div>
+          </div>
           {!hasSnapshot ? (
             <p className="mt-2 text-sm text-muted-foreground">Task data not yet synced.</p>
           ) : summaryFields.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">No validated columns found.</p>
           ) : (
-            <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+            <dl className="mt-4 grid grid-cols-1 gap-x-8 gap-y-4 text-sm sm:grid-cols-2">
               {summaryFields.map((c) => (
-                <div key={c.title}>
-                  <dt className="text-muted-foreground">{c.title}</dt>
-                  <dd className="font-medium text-foreground">{c.value}</dd>
+                <div key={c.title} className="rounded-md bg-secondary/70 px-3 py-2">
+                  <dt className="text-xs font-medium text-muted-foreground">{c.title}</dt>
+                  <dd className="mt-1 font-semibold text-foreground">{c.value}</dd>
                 </div>
               ))}
             </dl>
@@ -695,7 +701,7 @@ export default function TaskPage() {
               <div className="text-sm font-semibold">CSV Params</div>
               <div className="mt-2 space-y-3">
                 {csvParams.map((csv, idx) => (
-                  <div key={csv.assetId ?? `${csv.filename ?? "csv"}-${idx}`} className="rounded border p-2">
+                  <div key={csv.assetId ?? `${csv.filename ?? "csv"}-${idx}`} className="rounded-md border border-border bg-background p-3">
                     <div className="text-xs text-muted-foreground">
                       {csv.filename ?? "CSV"} • {csv.format}
                     </div>
@@ -726,7 +732,7 @@ export default function TaskPage() {
                             <div className="text-xs text-muted-foreground">
                               Showing {Math.min(5, csv.rows.length)} of {csv.rows.length} rows
                             </div>
-                            <pre className="mt-2 whitespace-pre-wrap rounded bg-muted p-2 text-xs">
+                            <pre className="mt-2 whitespace-pre-wrap rounded-md bg-secondary p-3 text-xs">
                               {JSON.stringify(csv.rows.slice(0, 5), null, 2)}
                             </pre>
                           </>
@@ -747,8 +753,11 @@ export default function TaskPage() {
       {isLoadingSources && <p className="text-sm text-muted-foreground">Loading sources…</p>}
       {sourcesError && <p className="text-sm text-red-500">{sourcesError}</p>}
       {sources && (
-        <section className="mt-6 rounded border p-3">
-          <div className="text-sm font-semibold">Sources</div>
+        <section className="mt-6 rounded-lg border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="h-2 w-2 rounded-full bg-primary" />
+            <div className="text-sm font-semibold text-foreground">Sources</div>
+          </div>
           {signedUrlError && (
             <p className="mt-2 text-sm text-red-500">{signedUrlError}</p>
           )}
@@ -757,11 +766,11 @@ export default function TaskPage() {
           ) : visibleSources.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">No files found.</p>
           ) : (
-            <ul className="mt-2 divide-y text-sm">
+            <ul className="mt-3 divide-y divide-border text-sm">
               {visibleSources.map((file) => (
-                <li key={file.id} className="py-2">
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
+                <li key={file.id} className="py-3 first:pt-0 last:pb-0">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
                       <div className="font-medium text-foreground">
                         {file.originalFilename || "Untitled"}
                       </div>
@@ -771,7 +780,7 @@ export default function TaskPage() {
                     </div>
                     <button
                       onClick={() => openSignedUrl(file.id)}
-                      className="rounded border px-2 py-1 text-xs"
+                      className="inline-flex items-center justify-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary"
                     >
                       View / Download
                     </button>
@@ -785,9 +794,9 @@ export default function TaskPage() {
 
       <div className="mt-8 space-y-4">
         {isAwaitingFirstToken && (
-          <div className="rounded border px-3 py-2 bg-muted">
-            <div className="text-xs uppercase text-muted-foreground">assistant</div>
-            <div className="text-sm text-muted-foreground flex items-center gap-2">
+          <div className="rounded-lg border border-border bg-secondary/70 px-4 py-3 shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">assistant</div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
               Thinking
               <span className="inline-flex items-center gap-1">
                 <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce" />
@@ -800,11 +809,11 @@ export default function TaskPage() {
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`rounded border px-3 py-2 ${
-              m.role === "user" ? "bg-background" : "bg-muted"
+            className={`rounded-lg border border-border px-4 py-3 shadow-sm ${
+              m.role === "user" ? "bg-card" : "bg-secondary/70"
             }`}
           >
-            <div className="text-xs uppercase text-muted-foreground">
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {m.role}
             </div>
             {m.role === "assistant" ? (
@@ -817,11 +826,14 @@ export default function TaskPage() {
       </div>
 
       {citations.length > 0 && (
-        <div className="mt-6 rounded border p-3">
-          <div className="text-sm font-semibold">Citations</div>
-          <ul className="mt-2 space-y-2 text-sm">
+        <div className="mt-6 rounded-lg border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="h-2 w-2 rounded-full bg-primary" />
+            <div className="text-sm font-semibold text-foreground">Citations</div>
+          </div>
+          <ul className="mt-3 space-y-3 text-sm">
             {citations.map((c, idx) => (
-              <li key={idx} className="text-muted-foreground">
+              <li key={idx} className="rounded-md border border-border bg-background p-3 text-muted-foreground">
                 <div className="font-medium text-foreground">
                   {c.filename || "Untitled"}
                 </div>
@@ -834,7 +846,7 @@ export default function TaskPage() {
                   <div className="mt-2">
                     <button
                       onClick={() => openSignedUrl(c.fileId as string)}
-                      className="rounded border px-2 py-1 text-xs"
+                      className="inline-flex items-center justify-center rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary"
                     >
                       View source
                     </button>
@@ -848,7 +860,7 @@ export default function TaskPage() {
 
       <div className="mt-8 flex gap-2">
         <textarea
-          className="min-h-[80px] w-full rounded border px-3 py-2"
+          className="min-h-[96px] w-full rounded-lg border border-input bg-card px-4 py-3 text-sm shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
           placeholder="Ask a question about this task..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -860,7 +872,7 @@ export default function TaskPage() {
           onClick={sendMessage}
           disabled={isStreaming || !input.trim()}
           aria-busy={isStreaming}
-          className="rounded bg-foreground px-3 py-1 text-sm text-background disabled:opacity-50 inline-flex items-center gap-2"
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isStreaming ? "Sending..." : "Send"}
           {isStreaming && (
@@ -870,7 +882,7 @@ export default function TaskPage() {
         {isStreaming && (
           <button
             onClick={stopStreaming}
-            className="rounded border px-3 py-1 text-sm"
+            className="rounded-md border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition hover:border-primary/50 hover:text-primary"
           >
             Stop
           </button>

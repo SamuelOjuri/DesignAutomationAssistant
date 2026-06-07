@@ -5,56 +5,125 @@
 @source "../lib/**/*.{ts,tsx}";
 
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
+  --background: 40 16% 96%;
+  --foreground: 220 9% 20%;
   --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
+  --card-foreground: 220 9% 20%;
   --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  --primary: 222.2 47.4% 11.2%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96.1%;
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96.1%;
-  --accent-foreground: 222.2 47.4% 11.2%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 222.2 84% 4.9%;
+  --popover-foreground: 220 9% 20%;
+  --primary: 3 61% 39%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 35 18% 94%;
+  --secondary-foreground: 220 9% 20%;
+  --muted: 35 18% 94%;
+  --muted-foreground: 220 6% 42%;
+  --accent: 3 45% 95%;
+  --accent-foreground: 3 61% 39%;
+  --destructive: 4 66% 41%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 30 15% 88%;
+  --input: 30 15% 88%;
+  --ring: 3 61% 39%;
   --radius: 0.5rem;
 }
 
 .dark {
-  --background: 222.2 84% 4.9%;
+  --background: 220 9% 13%;
   --foreground: 210 40% 98%;
-  --card: 222.2 84% 4.9%;
+  --card: 220 9% 16%;
   --card-foreground: 210 40% 98%;
-  --popover: 222.2 84% 4.9%;
+  --popover: 220 9% 16%;
   --popover-foreground: 210 40% 98%;
-  --primary: 210 40% 98%;
-  --primary-foreground: 222.2 47.4% 11.2%;
-  --secondary: 217.2 32.6% 17.5%;
+  --primary: 3 61% 48%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 8% 21%;
   --secondary-foreground: 210 40% 98%;
-  --muted: 217.2 32.6% 17.5%;
-  --muted-foreground: 215 20.2% 65.1%;
-  --accent: 217.2 32.6% 17.5%;
+  --muted: 220 8% 21%;
+  --muted-foreground: 215 20% 72%;
+  --accent: 3 36% 22%;
   --accent-foreground: 210 40% 98%;
-  --destructive: 0 62.8% 30.6%;
+  --destructive: 4 66% 45%;
   --destructive-foreground: 210 40% 98%;
-  --border: 217.2 32.6% 17.5%;
-  --input: 217.2 32.6% 17.5%;
-  --ring: 212.7 26.8% 83.9%;
+  --border: 220 8% 25%;
+  --input: 220 8% 25%;
+  --ring: 3 61% 48%;
 }
 
 @layer base {
+  html {
+    background: hsl(var(--background));
+  }
+
   * {
     @apply border-border;
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+  }
+}
+
+@layer components {
+  .task-markdown {
+    color: hsl(var(--foreground));
+    overflow-wrap: anywhere;
+  }
+
+  .task-markdown p {
+    margin: 0.45rem 0;
+  }
+
+  .task-markdown p:first-child {
+    margin-top: 0;
+  }
+
+  .task-markdown p:last-child {
+    margin-bottom: 0;
+  }
+
+  .task-markdown strong {
+    color: hsl(var(--foreground));
+    font-weight: 700;
+  }
+
+  .task-markdown ul,
+  .task-markdown ol {
+    margin: 0.5rem 0 0.5rem 1.25rem;
+  }
+
+  .task-markdown li + li {
+    margin-top: 0.25rem;
+  }
+
+  .task-markdown a {
+    color: hsl(var(--primary));
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .task-markdown code {
+    border-radius: 0.35rem;
+    background: hsl(var(--secondary));
+    padding: 0.1rem 0.3rem;
+    color: hsl(var(--foreground));
+    font-size: 0.86em;
+  }
+
+  .task-markdown pre {
+    margin: 0.75rem 0;
+    overflow: auto;
+    border-radius: 0.5rem;
+    background: hsl(var(--secondary));
+    padding: 0.75rem;
+    font-size: 0.82rem;
+  }
+
+  .task-markdown pre code {
+    background: transparent;
+    padding: 0;
   }
 }
