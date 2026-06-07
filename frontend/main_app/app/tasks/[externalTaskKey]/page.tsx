@@ -38,6 +38,7 @@ type CsvParamTable = {
 };
 
 type TaskContext = {
+  name?: string | null;
   column_values?: ColumnValue[];
   csv_params?: Array<CsvParamKeyValue | CsvParamTable>;
   // Keep any other fields from monday item JSON
@@ -199,6 +200,16 @@ export default function TaskPage() {
       })
       .filter((c) => c.title && VALIDATED_COLUMN_TITLES.has(c.title) && c.value);
   }, [summary]);
+
+  const mondayProject = useMemo(() => {
+    const raw = summary?.taskContext?.name;
+    return typeof raw === "string" ? raw.trim() : "";
+  }, [summary]);
+
+  const summaryFields = useMemo(() => {
+    if (!mondayProject) return validatedColumns;
+    return [{ title: "Monday Project", value: mondayProject }, ...validatedColumns];
+  }, [mondayProject, validatedColumns]);
 
   const csvParams = useMemo(() => {
     return summary?.taskContext?.csv_params ?? [];
@@ -637,11 +648,11 @@ export default function TaskPage() {
           <div className="text-sm font-semibold">Summary</div>
           {!hasSnapshot ? (
             <p className="mt-2 text-sm text-muted-foreground">Task data not yet synced.</p>
-          ) : validatedColumns.length === 0 ? (
+          ) : summaryFields.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">No validated columns found.</p>
           ) : (
             <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-              {validatedColumns.map((c) => (
+              {summaryFields.map((c) => (
                 <div key={c.title}>
                   <dt className="text-muted-foreground">{c.title}</dt>
                   <dd className="font-medium text-foreground">{c.value}</dd>
