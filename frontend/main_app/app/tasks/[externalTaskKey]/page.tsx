@@ -668,7 +668,7 @@ export default function TaskPage() {
 
       {summary?.syncStatus && (
         <p className="mt-3 inline-flex rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-foreground">
-          Server sync status: {summary.syncStatus}
+          Server Sync Status: {summary.syncStatus}
           {summary.syncCompletedAt ? ` • completed ${new Date(summary.syncCompletedAt).toLocaleString()}` : ""}
         </p>
       )}
