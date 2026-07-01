@@ -29,6 +29,21 @@ class Settings(BaseSettings):
     # Postgres
     database_url: str
 
+    # Auto-sync foundation
+    auto_sync_enabled: bool = False
+    auto_sync_board_id: str = "1882196103"
+    auto_sync_active_group_ids: str = "topics,group_mkpbs35c,group_mkqbx92r"
+    auto_sync_excluded_group_ids: str = "group_mkpbd6vy"
+    auto_sync_completed_group_id: str = "group_mkpbb3tx"
+    auto_sync_retention_days: int = 30
+    auto_sync_debounce_seconds: int = 90
+    auto_sync_backfill_batch_size: int = 10
+    auto_sync_worker_enabled: bool = False
+    auto_sync_reconciliation_enabled: bool = False
+    auto_sync_purge_enabled: bool = False
+    monday_ingestion_access_token: Optional[str] = None
+    monday_api_version: str = "2025-04"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
