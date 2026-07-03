@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from backend.app import monday_client
 from backend.app.db import Base
 from backend.app.models import AutoSyncJob, Task
 from backend.app.services.auto_sync import coalesce_auto_sync_job
@@ -42,6 +43,48 @@ def _task(item_id: str = "item-1") -> Task:
         auto_sync_enabled=True,
         auto_sync_state="active",
     )
+
+
+def test_source_revision_query_uses_account_fallback_not_board_account(monkeypatch):
+    calls = []
+
+    def fake_graphql_request(access_token, query, variables=None, *, timeout=10, allow_unauthorized=False):
+        calls.append(query)
+        return {
+            "data": {
+                "items": [
+                    {
+                        "id": "1",
+                        "name": "Test item",
+                        "updated_at": "2026-07-01T12:00:00Z",
+                        "board": {"id": "1882196103", "name": "Design queue"},
+                        "group": {"id": "topics", "title": "Hub A - Outstanding"},
+                        "assets": [],
+                        "column_values": [],
+                        "updates": [],
+                    }
+                ]
+            }
+        }
+
+    monkeypatch.setattr(monday_client, "monday_graphql_request", fake_graphql_request)
+
+    item = monday_client.fetch_current_source_revision_inputs("token", "1", account_id="acct")
+
+    assert "account" not in calls[0]
+    assert item["account_id"] == "acct"
+
+
+def test_fetch_current_account_id_reads_me_account(monkeypatch):
+    monkeypatch.setattr(
+        monday_client,
+        "monday_graphql_request",
+        lambda access_token, query, variables=None, *, timeout=10, allow_unauthorized=False: {
+            "data": {"me": {"account": {"id": "acct"}}}
+        },
+    )
+
+    assert monday_client.fetch_current_account_id("token") == "acct"
 
 
 def test_worker_runs_due_job_and_updates_task_state(db_session):
@@ -186,11 +229,12 @@ def test_active_backfill_dry_run_lists_only_configured_active_groups(db_session,
             "group_mkpbb3tx": ["completed-should-not-appear"],
         }
 
-    def fake_fetch_revision_inputs(token, item_id):
+    def fake_fetch_revision_inputs(token, item_id, *, account_id=None):
         return {
             "id": item_id,
             "updated_at": f"2026-07-01T12:00:0{item_id}Z",
-            "board": {"id": "1882196103", "account": {"id": "acct"}},
+            "account_id": account_id,
+            "board": {"id": "1882196103"},
             "group": {"id": "topics", "title": "Hub A - Outstanding"},
             "assets": [],
             "updates": [],
@@ -203,6 +247,10 @@ def test_active_backfill_dry_run_lists_only_configured_active_groups(db_session,
     monkeypatch.setattr(
         "backend.app.services.auto_sync_backfill.fetch_current_source_revision_inputs",
         fake_fetch_revision_inputs,
+    )
+    monkeypatch.setattr(
+        "backend.app.services.auto_sync_backfill.fetch_current_account_id",
+        lambda token: "acct",
     )
 
     result = active_backfill_once(db_session, dry_run=True, access_token="service-token", policy=policy)
@@ -232,11 +280,12 @@ def test_active_backfill_queues_small_batch_immediately(db_session, monkeypatch)
     def fake_list_item_ids(token, board_id, group_ids, limit):
         return {"topics": ["1"], "group_mkpbs35c": ["2"], "group_mkqbx92r": ["3"]}
 
-    def fake_fetch_revision_inputs(token, item_id):
+    def fake_fetch_revision_inputs(token, item_id, *, account_id=None):
         return {
             "id": item_id,
             "updated_at": f"2026-07-01T12:00:0{item_id}Z",
-            "board": {"id": "1882196103", "account": {"id": "acct"}},
+            "account_id": account_id,
+            "board": {"id": "1882196103"},
             "group": {"id": "topics", "title": "Hub A - Outstanding"},
             "assets": [],
             "updates": [],
@@ -249,6 +298,10 @@ def test_active_backfill_queues_small_batch_immediately(db_session, monkeypatch)
     monkeypatch.setattr(
         "backend.app.services.auto_sync_backfill.fetch_current_source_revision_inputs",
         fake_fetch_revision_inputs,
+    )
+    monkeypatch.setattr(
+        "backend.app.services.auto_sync_backfill.fetch_current_account_id",
+        lambda token: "acct",
     )
 
     result = active_backfill_once(db_session, dry_run=False, access_token="service-token", policy=policy)
@@ -279,7 +332,8 @@ def test_active_backfill_skips_already_indexed_revision(db_session, monkeypatch)
     item = {
         "id": "1",
         "updated_at": "2026-07-01T12:00:01Z",
-        "board": {"id": "1882196103", "account": {"id": "acct"}},
+        "account_id": "acct",
+        "board": {"id": "1882196103"},
         "group": {"id": "topics", "title": "Hub A - Outstanding"},
         "assets": [],
         "updates": [],
@@ -295,7 +349,11 @@ def test_active_backfill_skips_already_indexed_revision(db_session, monkeypatch)
     )
     monkeypatch.setattr(
         "backend.app.services.auto_sync_backfill.fetch_current_source_revision_inputs",
-        lambda token, item_id: item,
+        lambda token, item_id, *, account_id=None: item,
+    )
+    monkeypatch.setattr(
+        "backend.app.services.auto_sync_backfill.fetch_current_account_id",
+        lambda token: "acct",
     )
     monkeypatch.setattr(
         "backend.app.services.auto_sync_backfill.compute_desired_source_revision",

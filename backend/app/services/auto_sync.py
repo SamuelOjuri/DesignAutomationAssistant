@@ -61,12 +61,16 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def item_metadata_from_monday_item(item: dict[str, Any]) -> ItemMetadata:
+def item_metadata_from_monday_item(
+    item: dict[str, Any],
+    *,
+    fallback_account_id: Optional[str] = None,
+) -> ItemMetadata:
     board = item.get("board") or {}
     group = item.get("group") or {}
     account = item.get("account") or board.get("account") or {}
 
-    account_id = str(account.get("id") or item.get("account_id") or "")
+    account_id = str(account.get("id") or item.get("account_id") or fallback_account_id or "")
     board_id = str(board.get("id") or item.get("board_id") or "")
     item_id = str(item.get("id") or item.get("item_id") or "")
     group_id = group.get("id") or item.get("group_id")
@@ -242,10 +246,11 @@ def apply_auto_sync_policy_for_item(
     policy: Optional[AutoSyncPolicy] = None,
     now: Optional[datetime] = None,
     schedule_immediately: bool = False,
+    fallback_account_id: Optional[str] = None,
 ) -> QueueResult:
     now = now or utc_now()
     policy = policy or policy_from_settings()
-    metadata = item_metadata_from_monday_item(item)
+    metadata = item_metadata_from_monday_item(item, fallback_account_id=fallback_account_id)
     decision = policy.classify_group(metadata.board_id, metadata.group_id)
 
     if not decision.should_track_task:

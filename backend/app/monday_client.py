@@ -69,6 +69,29 @@ def can_read_item(access_token: str, item_id: str) -> bool:
         return False
     return bool(data.get("data", {}).get("items"))
 
+CURRENT_ACCOUNT_QUERY = """
+query {
+    me {
+        account { id }
+    }
+}
+"""
+
+
+def fetch_current_account_id(access_token: str) -> str:
+    payload = monday_graphql_request(
+        access_token,
+        CURRENT_ACCOUNT_QUERY,
+        timeout=10,
+    )
+    account_id = (
+        ((payload.get("data") or {}).get("me") or {})
+        .get("account") or {}
+    ).get("id")
+    if not account_id:
+        raise HTTPException(status_code=502, detail="monday account id not found")
+    return str(account_id)
+
 ASSET_QUERY = """
 query ($itemIds: [ID!]) {
   items(ids: $itemIds) {
@@ -130,7 +153,7 @@ query ($itemIds: [ID!]) {
         id
         name
         updated_at
-        board { id name account { id } }
+        board { id name }
         group { id title }
     }
 }
@@ -138,6 +161,7 @@ query ($itemIds: [ID!]) {
 
 
 def fetch_item_metadata(access_token: str, item_id: str) -> dict[str, Any]:
+    account_id = fetch_current_account_id(access_token)
     payload = monday_graphql_request(
         access_token,
         ITEM_METADATA_QUERY,
@@ -147,7 +171,9 @@ def fetch_item_metadata(access_token: str, item_id: str) -> dict[str, Any]:
     items = payload.get("data", {}).get("items") or []
     if not items:
         raise HTTPException(status_code=404, detail="monday item not found")
-    return items[0]
+    item = items[0]
+    item["account_id"] = account_id
+    return item
 
 
 BOARD_GROUPS_QUERY = """
@@ -250,7 +276,7 @@ query ($itemIds: [ID!]) {
         id
         name
         updated_at
-        board { id name account { id } }
+        board { id name }
         group { id title }
         assets {
             id
@@ -283,7 +309,14 @@ query ($itemIds: [ID!]) {
 """
 
 
-def fetch_current_source_revision_inputs(access_token: str, item_id: str) -> dict[str, Any]:
+def fetch_current_source_revision_inputs(
+    access_token: str,
+    item_id: str,
+    *,
+    account_id: Optional[str] = None,
+) -> dict[str, Any]:
+    if account_id is None:
+        account_id = fetch_current_account_id(access_token)
     payload = monday_graphql_request(
         access_token,
         SOURCE_REVISION_INPUTS_QUERY,
@@ -293,7 +326,9 @@ def fetch_current_source_revision_inputs(access_token: str, item_id: str) -> dic
     items = payload.get("data", {}).get("items") or []
     if not items:
         raise HTTPException(status_code=404, detail="monday item not found")
-    return items[0]
+    item = items[0]
+    item["account_id"] = account_id
+    return item
 
 
 def download_asset(url: str, access_token: Optional[str] = None) -> requests.Response:

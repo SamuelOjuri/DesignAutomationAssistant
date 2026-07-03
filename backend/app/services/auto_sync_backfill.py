@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..db import SessionLocal
 from ..models import Task
-from ..monday_client import fetch_current_source_revision_inputs, list_item_ids_in_groups
+from ..monday_client import fetch_current_account_id, fetch_current_source_revision_inputs, list_item_ids_in_groups
 from .auto_sync import (
     apply_auto_sync_policy_for_item,
     compute_desired_source_revision,
@@ -69,8 +69,9 @@ def _dry_run_result(
     *,
     policy: AutoSyncPolicy,
     desired_source_revision: str,
+    account_id: str,
 ) -> BackfillItemResult:
-    metadata = item_metadata_from_monday_item(item)
+    metadata = item_metadata_from_monday_item(item, fallback_account_id=account_id)
     decision = policy.classify_group(metadata.board_id, metadata.group_id)
     external_task_key = build_external_task_key(metadata.account_id, metadata.board_id, metadata.item_id)
 
@@ -104,6 +105,7 @@ def active_backfill_once(
 ) -> ActiveBackfillResult:
     policy = policy or policy_from_settings()
     token = access_token or get_monday_ingestion_access_token()
+    account_id = fetch_current_account_id(token)
     batch_limit = limit or policy.backfill_batch_size
     group_ids = _ordered_active_group_ids(policy)
     item_ids_by_group = list_item_ids_in_groups(token, policy.board_id, group_ids, limit=max(batch_limit, 1))
@@ -117,7 +119,7 @@ def active_backfill_once(
 
     for expected_group_id, item_id in selected_items:
         try:
-            item = fetch_current_source_revision_inputs(token, item_id)
+            item = fetch_current_source_revision_inputs(token, item_id, account_id=account_id)
             desired_source_revision = compute_desired_source_revision(item)
             if dry_run:
                 item_result = _dry_run_result(
@@ -125,6 +127,7 @@ def active_backfill_once(
                     item,
                     policy=policy,
                     desired_source_revision=desired_source_revision,
+                    account_id=account_id,
                 )
                 if item_result.action == "would_queue":
                     queued += 1
@@ -141,6 +144,7 @@ def active_backfill_once(
                 policy=policy,
                 now=now,
                 schedule_immediately=True,
+                fallback_account_id=account_id,
             )
             if queue_result.job is not None:
                 queued += 1
@@ -152,7 +156,7 @@ def active_backfill_once(
                 action = "skipped"
                 job_id = None
 
-            metadata = item_metadata_from_monday_item(item)
+            metadata = item_metadata_from_monday_item(item, fallback_account_id=account_id)
             item_results.append(
                 BackfillItemResult(
                     item_id=metadata.item_id,
