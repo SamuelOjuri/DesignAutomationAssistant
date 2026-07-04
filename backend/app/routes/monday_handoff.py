@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+import logging
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
@@ -9,8 +10,8 @@ from ..auth import CurrentUser, get_current_user
 from ..config import settings
 from ..db import get_db
 from ..monday_client import can_read_item, verify_session_token
-from ..models import HandoffCode, Task, UserMondayLink
-from ..services.sync_pipeline import run_sync_pipeline_background
+from ..models import HandoffCode, Task, TaskSnapshot, UserMondayLink
+from ..services.auto_sync import fetch_desired_source_revision
 from ..schemas import (
     HandoffInitRequest,
     HandoffInitResponse,
@@ -19,8 +20,56 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/api/monday/handoff", tags=["monday"])
+logger = logging.getLogger(__name__)
 
 MAIN_APP_BASE_URL = settings.main_app_base_url.rstrip("/")
+
+
+def _task_has_fresh_completed_snapshot(
+    db: Session,
+    task: Task,
+    *,
+    current_source_revision: str | None,
+) -> bool:
+    if task.sync_status != "completed" or task.auto_sync_state == "expired":
+        return False
+    if not current_source_revision:
+        return False
+    if current_source_revision not in {task.last_indexed_source_revision, task.latest_snapshot_version}:
+        return False
+    return (
+        db.query(TaskSnapshot)
+        .filter_by(
+            external_task_key=task.external_task_key,
+            snapshot_version=current_source_revision,
+        )
+        .first()
+        is not None
+    )
+
+
+def _safe_current_source_revision(access_token: str, item_id: str) -> str | None:
+    try:
+        return fetch_desired_source_revision(item_id, access_token=access_token)
+    except Exception:
+        logger.exception("Unable to check monday source freshness for item %s", item_id)
+        return None
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _run_sync_pipeline_background(
+    external_task_key: str,
+    access_token: str,
+    force: bool = False,
+) -> None:
+    from ..services.sync_pipeline import run_sync_pipeline_background
+
+    run_sync_pipeline_background(external_task_key, access_token, force)
 
 @router.post("/init", response_model=HandoffInitResponse)
 def handoff_init(payload: HandoffInitRequest, db: Session = Depends(get_db)):
@@ -85,7 +134,7 @@ def handoff_resolve(
 
     handoff_code = db.get(HandoffCode, payload.code)
     now = datetime.now(timezone.utc)
-    if not handoff_code or handoff_code.used or handoff_code.expires_at <= now:
+    if not handoff_code or handoff_code.used or _as_aware_utc(handoff_code.expires_at) <= now:
         raise HTTPException(status_code=400, detail="Invalid or expired code")
 
     link = (
@@ -119,7 +168,18 @@ def handoff_resolve(
         )
         db.add(task)
 
-    should_queue_sync = task.sync_status != "syncing"
+    current_source_revision = _safe_current_source_revision(link.access_token, handoff_code.monday_item_id)
+    force_refresh = bool(getattr(payload, "force", False))
+    has_fresh_snapshot = _task_has_fresh_completed_snapshot(
+        db,
+        task,
+        current_source_revision=current_source_revision,
+    )
+
+    should_queue_sync = (
+        force_refresh
+        or not has_fresh_snapshot
+    ) and task.sync_status not in {"queued", "syncing"}
     if should_queue_sync:
         task.sync_status = "syncing"
         task.sync_started_at = datetime.now(timezone.utc)
@@ -130,7 +190,7 @@ def handoff_resolve(
 
     if should_queue_sync and background_tasks is not None:
         background_tasks.add_task(
-            run_sync_pipeline_background,
+            _run_sync_pipeline_background,
             external_task_key,
             link.access_token,
             False,

@@ -19,6 +19,7 @@ class HandoffInitResponse(BaseModel):
 
 class HandoffResolveRequest(BaseModel):
     code: str
+    force: bool = False
 
 class HandoffResolveResponse(BaseModel):
     externalTaskKey: str
