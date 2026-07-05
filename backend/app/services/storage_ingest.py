@@ -149,6 +149,8 @@ def upsert_task_file(
                 "bucket": bucket,
                 "object_path": object_path,
                 "sha256": sha256,
+                "deleted_at": None,
+                "delete_error": None,
             },
         )
         .returning(TaskFile.id)

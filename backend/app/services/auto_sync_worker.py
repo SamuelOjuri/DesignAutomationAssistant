@@ -98,6 +98,7 @@ def _mark_task_completed(
         task.auto_synced_at = now
         task.last_successful_sync_at = now
         task.ingestion_actor = "service_token"
+        task.raw_purged_at = None
     task.updated_at = now
 
 

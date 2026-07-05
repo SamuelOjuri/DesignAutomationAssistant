@@ -40,7 +40,7 @@ class Task(Base):
     sync_completed_at = Column(DateTime(timezone=True), nullable=True)
     sync_error = Column(Text, nullable=True)
 
-    auto_sync_enabled = Column(Boolean, nullable=False, server_default="false")
+    auto_sync_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
     auto_sync_state = Column(String, nullable=True)
     source_group_id = Column(String, nullable=True)
     source_group_title = Column(String, nullable=True)
@@ -54,7 +54,7 @@ class Task(Base):
     last_sync_trigger = Column(String, nullable=True)
     last_sync_result = Column(String, nullable=True)
     last_indexed_source_revision = Column(String, nullable=True)
-    retention_hold = Column(Boolean, nullable=False, server_default="false")
+    retention_hold = Column(Boolean, nullable=False, server_default="false", default=False)
     retention_hold_at = Column(DateTime(timezone=True), nullable=True)
     retention_hold_by = Column(String, nullable=True)
     retention_hold_reason = Column(Text, nullable=True)

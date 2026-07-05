@@ -8,6 +8,7 @@ from ..auth import CurrentUser, get_current_user
 from ..db import get_db
 from ..models import Task, TaskSnapshot, TaskFile, UserMondayLink
 from ..monday_client import can_read_item
+from ..services.auto_sync_purge import mark_expired_task_restoring, record_meaningful_access
 from ..services.sync_pipeline import run_sync_pipeline, run_sync_pipeline_background
 from ..schemas import (
     TaskSyncRequest,
@@ -74,6 +75,8 @@ def sync_task(
     background_tasks: BackgroundTasks = None,
 ):
     task = require_task_access(externalTaskKey, db, current_user)
+    record_meaningful_access(db, task)
+    mark_expired_task_restoring(db, task)
 
     link = (
         db.query(UserMondayLink)
@@ -89,6 +92,7 @@ def sync_task(
 
     # Check if sync is already in progress
     if task.sync_status == "syncing":
+        db.commit()
         return TaskSyncResponse(status="already_syncing", snapshotVersion=task.latest_snapshot_version)
 
     # Mark sync as started immediately
@@ -212,5 +216,7 @@ def file_signed_url(
     )
     url = _signed_url_from_response(signed)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+    record_meaningful_access(db, task)
+    db.commit()
 
     return SignedUrlResponse(url=url, expiresAt=expires_at)

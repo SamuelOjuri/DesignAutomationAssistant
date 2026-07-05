@@ -12,6 +12,7 @@ from ..db import get_db
 from ..monday_client import can_read_item, verify_session_token
 from ..models import HandoffCode, Task, TaskSnapshot, UserMondayLink
 from ..services.auto_sync import fetch_desired_source_revision
+from ..services.auto_sync_purge import mark_expired_task_restoring, record_meaningful_access
 from ..schemas import (
     HandoffInitRequest,
     HandoffInitResponse,
@@ -180,6 +181,10 @@ def handoff_resolve(
         force_refresh
         or not has_fresh_snapshot
     ) and task.sync_status not in {"queued", "syncing"}
+    if force_refresh or task.auto_sync_state == "expired":
+        record_meaningful_access(db, task)
+    if task.auto_sync_state == "expired":
+        mark_expired_task_restoring(db, task)
     if should_queue_sync:
         task.sync_status = "syncing"
         task.sync_started_at = datetime.now(timezone.utc)

@@ -12,6 +12,9 @@ SYNC_RESULTS = ("done", "unchanged", "skipped", "failed")
 LIFECYCLE_STATES = (
     "active",
     "completed_retained",
+    "purge_pending",
+    "storage_deleting",
+    "database_cleaning",
     "expired",
     "excluded",
     "paused",

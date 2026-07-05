@@ -12,6 +12,7 @@ from ..auth import CurrentUser, get_current_user
 from ..config import settings
 from ..db import get_db
 from ..schemas import ChatRequest, ChatMessage
+from ..services.auto_sync_purge import record_meaningful_access
 from ..services.retrieval import get_task_context, search_task_docs
 from .tasks import require_task_access
 
@@ -182,7 +183,10 @@ def chat(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    require_task_access(payload.externalTaskKey, db, current_user)
+    task = require_task_access(payload.externalTaskKey, db, current_user)
+    if payload.message.strip():
+        record_meaningful_access(db, task)
+        db.commit()
 
     def event_stream():
         yield _sse({"type": "start", "ts": datetime.now(timezone.utc).isoformat()})

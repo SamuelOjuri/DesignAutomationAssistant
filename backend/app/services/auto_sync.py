@@ -116,6 +116,7 @@ def upsert_auto_sync_task(
     if lifecycle_state == "active":
         task.completed_at = None
         task.purge_after = None
+        task.raw_purged_at = None
 
     task.updated_at = now
     return task, created
