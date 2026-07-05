@@ -29,6 +29,9 @@ AUTO_SYNC_COMPLETED_GROUP_ID = "group_mkpbb3tx"  # Completed Folder
 - Keep lightweight task lifecycle metadata after heavy data is purged, so reconciliation does not re-index intentionally expired completed items.
 - User-facing authorization remains per-user. The service token prepares data but does not grant access.
 - New auto-sync work must use durable database jobs. Do not rely on FastAPI in-memory `BackgroundTasks` for webhook, debounce, retry, reconciliation, or purge execution.
+- The auto-sync worker is the shared executor for durable jobs created by backfill, reconciliation, webhooks, restore, and future admin retry flows.
+- Webhook and reconciliation code should enqueue or coalesce durable jobs only. Ingestion and extraction are performed by the worker.
+- Scheduled reconciliation should continue running after webhooks are enabled as a safety net for missed, delayed, duplicated, out-of-order, failed, or stuck webhook-driven work.
 - Keep current handoff/manual sync behavior stable until it can be migrated safely. The first auto-sync implementation should not regress existing user-triggered sync paths.
 
 ## Current Codebase Constraints
@@ -393,12 +396,13 @@ At this point the main business benefit can be tested before webhook complexity 
 19. Persist webhook events only after authentication succeeds.
 20. Normalize monday payloads into internal event fields.
 21. Subscribe to and test actual monday event payload types before hardcoding dispatch names. For example, item creation may appear as `create_pulse`, and column-change payloads may include `columnId`, `value`, and `previousValue`.
-22. For file changes, subscribe to relevant column-change events and filter by Email and AI Data column IDs.
-23. Coalesce events into durable jobs with debounce. Do not start extraction directly from the request.
+22. Subscribe to and test monday item-created and group-change or item-moved events so items entering `topics`, `group_mkpbs35c`, or `group_mkqbx92r` are queued without waiting for reconciliation.
+23. For file changes, subscribe to relevant column-change events and filter by Email and AI Data column IDs.
+24. Coalesce events into durable jobs with debounce. Do not start extraction directly from the request.
 
 ### Release 5: Completed Retention And Purge
 
-24. When an indexed active item moves to `group_mkpbb3tx`, set:
+25. When an indexed active item moves to `group_mkpbb3tx`, set:
 
 ```text
 auto_sync_state = completed_retained
@@ -406,9 +410,9 @@ completed_at = now if missing
 purge_after = completed_at + retention days
 ```
 
-25. Do not apply 30-day expiry while an item remains in an active group.
-26. Track meaningful access with `last_meaningful_access_at`. Do not let passive summary polling extend retention indefinitely.
-27. Count these as meaningful access:
+26. Do not apply 30-day expiry while an item remains in an active group.
+27. Track meaningful access with `last_meaningful_access_at`. Do not let passive summary polling extend retention indefinitely.
+28. Count these as meaningful access:
 
 ```text
 chat message sent
@@ -418,16 +422,18 @@ explicit refresh
 retention hold/pin action
 ```
 
-28. Implement retention hold fields rather than only a bare `pinned` boolean.
-29. Implement idempotent purge with a non-transactional Storage deletion flow.
-30. Add on-demand restoration for expired completed items when an authorized user opens or explicitly restores them.
+29. Implement retention hold fields rather than only a bare `pinned` boolean.
+30. Implement idempotent purge with a non-transactional Storage deletion flow.
+31. Add on-demand restoration for expired completed items when an authorized user opens or explicitly restores them.
 
 ### Release 6: Frontend And Operations
 
-31. Optionally update the task page to distinguish `pre-indexed`, `queued`, `syncing`, `expired`, `restoring`, and `failed` states.
-32. Add admin/debug endpoints or scripts to inspect events/jobs, retry failed jobs, cancel jobs, trigger active-group reconciliation, and place/remove retention holds.
-33. Add metrics for queue depth, oldest job age, sync duration, retries, failures, files, chunks, and purge errors.
-34. Document deployment setup: worker command, scheduler command, monday webhook subscriptions, env vars, service token setup, active group IDs, retention policy, and safe initial backfill procedure.
+32. Optionally update the task page to distinguish `pre-indexed`, `queued`, `syncing`, `expired`, `restoring`, and `failed` states.
+33. Add admin/debug endpoints or scripts to inspect events/jobs, retry failed jobs, cancel jobs, trigger active-group reconciliation, and place/remove retention holds.
+34. Add metrics for queue depth, oldest job age, sync duration, retries, failures, files, chunks, and purge errors.
+35. Document and deploy the auto-sync worker loop as the shared executor for jobs created by backfill, reconciliation, webhooks, restore, and admin retry flows.
+36. Document and deploy a scheduled reconciliation command, for example every 5-15 minutes, to scan the configured active groups for missed, stale, failed, stuck, or not-yet-indexed tasks.
+37. Document deployment setup: worker command, reconciliation scheduler command, monday webhook subscriptions, env vars, service token setup, active group IDs, retention policy, and safe initial backfill procedure.
 
 ## Webhook Requirements
 
