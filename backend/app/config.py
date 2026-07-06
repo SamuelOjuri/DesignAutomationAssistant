@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     monday_client_id: str
     monday_client_secret: str
     monday_signing_secret: str
+    monday_webhook_shared_secret: Optional[str] = None
     monday_oauth_redirect_uri: Optional[str] = None
 
     # URLs

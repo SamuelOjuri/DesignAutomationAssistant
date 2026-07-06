@@ -35,6 +35,7 @@ def db_session():
 @pytest.fixture(autouse=True)
 def auto_sync_settings(monkeypatch):
     monkeypatch.setattr(settings, "monday_signing_secret", "webhook-secret")
+    monkeypatch.setattr(settings, "monday_webhook_shared_secret", None)
     monkeypatch.setattr(settings, "backend_base_url", "https://design-automation-assistant-api.onrender.com")
     monkeypatch.setattr(settings, "auto_sync_enabled", True)
     monkeypatch.setattr(settings, "auto_sync_board_id", "1882196103")
@@ -105,6 +106,31 @@ def test_webhook_requires_valid_authorization_before_persisting(client, db_sessi
         json=_webhook_payload(),
         headers={"Authorization": "Bearer not-a-valid-token"},
     )
+
+    assert response.status_code == 401
+    assert db_session.query(MondayWebhookEvent).count() == 0
+
+
+def test_webhook_accepts_shared_secret_query_token(client, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "monday_webhook_shared_secret", "shared-secret")
+    payload = _webhook_payload(trigger_uuid="shared-secret-event")
+    payload["event"]["boardId"] = "other-board"
+
+    response = client.post("/api/monday/webhooks?token=shared-secret", json=payload)
+
+    event = db_session.query(MondayWebhookEvent).one()
+    assert response.status_code == 200
+    assert response.json()["status"] == "ignored"
+    assert event.authenticated is True
+    assert event.board_id == "other-board"
+    assert event.status == "ignored"
+    assert event.error == "board_not_managed"
+
+
+def test_webhook_rejects_invalid_shared_secret_before_persisting(client, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "monday_webhook_shared_secret", "shared-secret")
+
+    response = client.post("/api/monday/webhooks?token=wrong-secret", json=_webhook_payload())
 
     assert response.status_code == 401
     assert db_session.query(MondayWebhookEvent).count() == 0

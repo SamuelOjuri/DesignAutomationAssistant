@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import hmac
 import json
 import logging
 from typing import Any, Iterable, Optional
 import uuid
 
 import jwt
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -141,7 +142,22 @@ def _verify_audience_if_present(token_payload: dict[str, Any], request: Request)
         raise HTTPException(status_code=401, detail="Invalid monday webhook audience")
 
 
-def verify_webhook_authorization(authorization: Optional[str], request: Request) -> dict[str, Any]:
+def _verify_shared_secret(shared_secret_token: Optional[str]) -> bool:
+    expected = _as_string(settings.monday_webhook_shared_secret)
+    received = _as_string(shared_secret_token)
+    if expected is None or received is None:
+        return False
+    return hmac.compare_digest(received, expected)
+
+
+def verify_webhook_authorization(
+    authorization: Optional[str],
+    request: Request,
+    shared_secret_token: Optional[str] = None,
+) -> dict[str, Any]:
+    if _verify_shared_secret(shared_secret_token):
+        return {"auth": "shared_secret"}
+
     if not settings.monday_signing_secret:
         raise HTTPException(status_code=503, detail="MONDAY_SIGNING_SECRET is not configured")
     token = _extract_authorization_token(authorization)
@@ -252,6 +268,7 @@ def monday_webhook(
     payload: dict[str, Any],
     request: Request,
     authorization: Optional[str] = Header(default=None),
+    shared_secret_token: Optional[str] = Query(default=None, alias="token"),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     challenge = payload.get("challenge")
@@ -259,7 +276,7 @@ def monday_webhook(
         return {"challenge": challenge}
 
     require_https_for_deployed_webhooks(request)
-    verify_webhook_authorization(authorization, request)
+    verify_webhook_authorization(authorization, request, shared_secret_token)
 
     normalized = normalize_webhook_payload(payload)
     existing = db.query(MondayWebhookEvent).filter_by(idempotency_key=normalized.idempotency_key).one_or_none()
