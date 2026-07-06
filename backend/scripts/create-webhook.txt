@@ -1,0 +1,39 @@
+mutation {
+  createMovedToAnyGroupWebhook: create_webhook(
+    board_id: 1882196103,
+    url: "https://design-automation-assistant-api.onrender.com/api/monday/webhooks?token=<same-secret>",
+    event: item_moved_to_any_group
+  ) {
+    id
+    board_id
+  }
+
+  createItemWebhook: create_webhook(
+    board_id: 1882196103,
+    url: "https://design-automation-assistant-api.onrender.com/api/monday/webhooks?token=<same-secret>",
+    event: create_item
+  ) {
+    id
+    board_id
+  }
+
+  changeEmailFileColumnWebhook: create_webhook(
+    board_id: 1882196103,
+    url: "https://design-automation-assistant-api.onrender.com/api/monday/webhooks?token=<same-secret>",
+    event: change_specific_column_value,
+    config: "{\"columnId\":\"file_mkpbm883\"}"
+  ) {
+    id
+    board_id
+  }
+
+  changeAiDataFileColumnWebhook: create_webhook(
+    board_id: 1882196103,
+    url: "https://design-automation-assistant-api.onrender.com/api/monday/webhooks?token=<same-secret>",
+    event: change_specific_column_value,
+    config: "{\"columnId\":\"file_mkza7y37\"}"
+  ) {
+    id
+    board_id
+  }
+}

@@ -6,6 +6,7 @@ from typing import Any, Optional
 import uuid
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -106,8 +107,15 @@ def upsert_auto_sync_task(
             board_id=metadata.board_id,
             item_id=metadata.item_id,
         )
-        db.add(task)
-        created = True
+        try:
+            with db.begin_nested():
+                db.add(task)
+                db.flush([task])
+            created = True
+        except IntegrityError:
+            task = db.get(Task, metadata.external_task_key)
+            if task is None:
+                raise
 
     task.auto_sync_enabled = True
     task.auto_sync_state = lifecycle_state
@@ -168,7 +176,7 @@ def coalesce_auto_sync_job(
     created = False
     was_running = False
     if job is None:
-        job = AutoSyncJob(
+        candidate_job = AutoSyncJob(
             id=uuid.uuid4(),
             board_id=task.board_id,
             item_id=task.item_id,
@@ -182,9 +190,27 @@ def coalesce_auto_sync_job(
             created_at=now,
             updated_at=now,
         )
-        db.add(job)
-        created = True
-    else:
+        try:
+            with db.begin_nested():
+                db.add(candidate_job)
+                db.flush([candidate_job])
+            job = candidate_job
+            created = True
+        except IntegrityError:
+            job = (
+                db.query(AutoSyncJob)
+                .filter(
+                    AutoSyncJob.board_id == task.board_id,
+                    AutoSyncJob.item_id == task.item_id,
+                    AutoSyncJob.status.in_(ACTIVE_JOB_STATUSES),
+                )
+                .order_by(AutoSyncJob.created_at.asc())
+                .first()
+            )
+            if job is None:
+                raise
+
+    if job is not None and not created:
         was_running = job.status == "running"
         job.external_task_key = task.external_task_key
         job.trigger_type = trigger_type
@@ -197,6 +223,8 @@ def coalesce_auto_sync_job(
             job.locked_by = None
             job.heartbeat_at = None
         job.updated_at = now
+    else:
+        was_running = False
 
     if was_running:
         task.sync_requested_at = now

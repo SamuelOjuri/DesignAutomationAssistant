@@ -14,6 +14,7 @@ from backend.app.config import settings
 from backend.app.db import Base
 from backend.app.models import AutoSyncJob, MondayWebhookEvent, Task
 from backend.app.routes import monday_webhooks
+from backend.app.services import auto_sync as auto_sync_service
 
 
 @pytest.fixture()
@@ -134,6 +135,56 @@ def test_webhook_rejects_invalid_shared_secret_before_persisting(client, db_sess
 
     assert response.status_code == 401
     assert db_session.query(MondayWebhookEvent).count() == 0
+
+
+def test_auto_sync_task_upsert_recovers_from_concurrent_insert(db_session, monkeypatch):
+    metadata = auto_sync_service.ItemMetadata(
+        account_id="acct",
+        board_id="1882196103",
+        item_id="race-item",
+        group_id="group_mkpbd6vy",
+        group_title="Landing Zone",
+        external_task_key="acct:1882196103:race-item",
+    )
+    db_session.add(
+        Task(
+            external_task_key=metadata.external_task_key,
+            account_id=metadata.account_id,
+            board_id=metadata.board_id,
+            item_id=metadata.item_id,
+            auto_sync_enabled=True,
+            auto_sync_state="active",
+            source_group_id="topics",
+        )
+    )
+    db_session.commit()
+    db_session.expunge_all()
+
+    real_get = db_session.get
+    stale_gets = {"remaining": 1}
+
+    def stale_task_get(model, ident, *args, **kwargs):
+        if model is Task and ident == metadata.external_task_key and stale_gets["remaining"]:
+            stale_gets["remaining"] -= 1
+            return None
+        return real_get(model, ident, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "get", stale_task_get)
+
+    task, created = auto_sync_service.upsert_auto_sync_task(
+        db_session,
+        metadata,
+        lifecycle_state="excluded",
+        now=datetime(2026, 7, 6, 14, 33, tzinfo=timezone.utc),
+    )
+    db_session.commit()
+
+    assert created is False
+    assert task.external_task_key == metadata.external_task_key
+    assert task.auto_sync_state == "excluded"
+    assert task.source_group_id == "group_mkpbd6vy"
+    assert task.source_group_title == "Landing Zone"
+    assert db_session.query(Task).filter_by(external_task_key=metadata.external_task_key).count() == 1
 
 
 def test_webhook_persists_event_and_coalesces_jobs(client, db_session, monkeypatch):
