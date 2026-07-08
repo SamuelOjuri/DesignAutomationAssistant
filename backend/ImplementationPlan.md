@@ -18,7 +18,7 @@ todos:
     content: "Implement task sync/extraction pipeline: download monday assets, upload to Supabase Storage, parse CSV + email/attachments, chunk+embed into pgvector."
     status: pending
   - id: chat-retrieval-agent
-    content: Implement pgvector retrieval + LangChain tool-calling agent with Gemini-3-flash-preview and citations.
+    content: Implement pgvector retrieval + LangChain tool-calling agent with Gemini-3.5-flash and citations.
     status: pending
   - id: main-app-integration
     content: Add main app routes /monday-handoff/:code and /tasks/:externalTaskKey that call backend endpoints and render summary/sources/chat.
@@ -38,7 +38,7 @@ isProject: false
 
 - **Capture the active monday item** from inside monday (Item View) and **handoff securely** to your main app.
 - **Sync and cache** monday item columns + email/attachments + CSV outputs into Supabase.
-- **Answer task-scoped questions** using Gemini-3-flash-preview via a LangChain tool-calling agent, grounded by **pgvector retrieval**.
+- **Answer task-scoped questions** using Gemini-3.5-flash via a LangChain tool-calling agent, grounded by **pgvector retrieval**.
 - **Lifecycle**: delete **raw binaries** (emails, PDFs, images, CSVs) **30 days after Done**, while **retaining derived** `TaskContext` + text chunks + embeddings.
 
 ## Architecture (high-level)
@@ -82,7 +82,7 @@ flowchart TD
   mainUI[mainAppUI] --> Chat[ChatEndpoint]
   Chat --> Context
   Chat -->|pgvector topK| Chunks
-  Chat --> Gemini[Gemini3FlashPreview]
+  Chat --> Gemini[Gemini35Flash]
 ```
 
 

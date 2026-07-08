@@ -30,7 +30,7 @@ def upload_with_retry(bucket: str, path: str, file_content: Any, content_type: s
     """
     Uploads file directly using httpx to allow for custom timeouts.
     """
-    url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{path}"
+    url = f"{settings.supabase_url.rstrip('/')}/storage/v1/object/{bucket}/{path}"
     headers = {
         "Authorization": f"Bearer {settings.supabase_service_role_key}",
         "apikey": settings.supabase_service_role_key,

@@ -281,6 +281,8 @@ def detect_completed_transitions_once(
     access_token: Optional[str] = None,
     policy: Optional[AutoSyncPolicy] = None,
     limit: Optional[int] = None,
+    item_id: Optional[str] = None,
+    external_task_key: Optional[str] = None,
 ) -> ReconciliationResult:
     policy = policy or policy_from_settings()
     token = access_token or get_monday_ingestion_access_token()
@@ -297,6 +299,10 @@ def detect_completed_transitions_once(
         )
         .order_by(Task.updated_at.asc())
     )
+    if item_id is not None:
+        query = query.filter(Task.item_id == item_id)
+    if external_task_key is not None:
+        query = query.filter(Task.external_task_key == external_task_key)
     if limit is not None:
         query = query.limit(limit)
     tasks = query.all()
@@ -385,18 +391,27 @@ def detect_completed_transitions_once(
 def _run_from_new_session(args: argparse.Namespace) -> tuple[ReconciliationResult, Optional[ReconciliationResult]]:
     db = SessionLocal()
     try:
-        active_result = reconcile_active_items_once(
-            db,
-            dry_run=args.dry_run,
-            limit=args.limit,
-            stuck_after_seconds=args.stuck_after_seconds,
-        )
+        if args.skip_active:
+            policy = policy_from_settings()
+            active_result = ReconciliationResult(
+                dry_run=args.dry_run,
+                board_id=policy.board_id,
+            )
+        else:
+            active_result = reconcile_active_items_once(
+                db,
+                dry_run=args.dry_run,
+                limit=args.limit,
+                stuck_after_seconds=args.stuck_after_seconds,
+            )
         completed_result = None
         if args.completed_transitions:
             completed_result = detect_completed_transitions_once(
                 db,
                 dry_run=args.dry_run,
                 limit=args.completed_limit,
+                item_id=args.completed_item_id,
+                external_task_key=args.completed_external_task_key,
             )
         return active_result, completed_result
     finally:
@@ -406,6 +421,7 @@ def _run_from_new_session(args: argparse.Namespace) -> tuple[ReconciliationResul
 def main() -> int:
     parser = argparse.ArgumentParser(description="Reconcile durable auto-sync jobs with monday current state")
     parser.add_argument("--limit", type=int, default=None, help="Maximum active items to inspect")
+    parser.add_argument("--skip-active", action="store_true", help="Skip active-group reconciliation")
     parser.add_argument("--dry-run", action="store_true", help="Inspect monday state without creating jobs")
     parser.add_argument(
         "--stuck-after-seconds",
@@ -423,6 +439,17 @@ def main() -> int:
         type=int,
         default=None,
         help="Maximum indexed active tasks to inspect for completed transitions",
+    )
+    completed_target = parser.add_mutually_exclusive_group()
+    completed_target.add_argument(
+        "--completed-item-id",
+        default=None,
+        help="Only inspect this monday item ID for completed-transition reconciliation",
+    )
+    completed_target.add_argument(
+        "--completed-external-task-key",
+        default=None,
+        help="Only inspect this external task key for completed-transition reconciliation",
     )
     args = parser.parse_args()
 

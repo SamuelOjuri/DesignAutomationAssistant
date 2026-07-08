@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # Gemini
     gemini_api_key: str
-    gemini_model: str = "gemini-3-flash-preview"
+    gemini_model: str = "gemini-3.5-flash"
 
     # Postgres
     database_url: str
