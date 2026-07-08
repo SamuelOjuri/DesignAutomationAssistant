@@ -17,6 +17,35 @@ from .thread_pool import process_items_in_parallel
 
 logger = logging.getLogger(__name__)
 
+def _attachment_data_to_bytes(attachment, filename: str) -> bytes | None:
+    try:
+        data = attachment.data
+    except Exception:
+        logger.exception("[EMAIL_EXTRACT] Failed to read attachment data: %s", filename)
+        return None
+
+    if data is None:
+        return None
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, (bytearray, memoryview)):
+        return bytes(data)
+    if isinstance(data, str):
+        return data.encode("utf-8", errors="replace")
+    if hasattr(data, "exportBytes"):
+        try:
+            return data.exportBytes()
+        except Exception:
+            logger.exception("[EMAIL_EXTRACT] Failed to export embedded message attachment: %s", filename)
+            return None
+
+    logger.warning(
+        "[EMAIL_EXTRACT] Skipping unsupported attachment payload for %s: %s",
+        filename,
+        type(data).__name__,
+    )
+    return None
+
 def process_email_content(email_content: bytes, filename: str) -> Tuple[str, str, List[Dict], List[Dict]]:
     if filename.lower().endswith(".msg"):
         with io.BytesIO(email_content) as bio:
@@ -31,15 +60,18 @@ def process_email_content(email_content: bytes, filename: str) -> Tuple[str, str
                     att_filename = attachment.longFilename or attachment.shortFilename
                     if not att_filename:
                         continue
+                    content = _attachment_data_to_bytes(attachment, att_filename)
+                    if content is None:
+                        continue
                     if is_inline_attachment(attachment, msg, att_filename):
                         inline_images.append({
                             "filename": att_filename,
-                            "content": attachment.data,
+                            "content": content,
                             "content_id": getattr(attachment, "cid", None),
                             "mime_type": f"image/{att_filename.split('.')[-1].lower()}",
                         })
                     else:
-                        attachments_data.append({"filename": att_filename, "content": attachment.data})
+                        attachments_data.append({"filename": att_filename, "content": content})
             finally:
                 msg.close()
     else:
@@ -106,12 +138,17 @@ def process_email_content_to_temp(
                     if not att_filename:
                         continue
 
-                    att_size = len(attachment.data) if attachment.data else 0
+                    content = _attachment_data_to_bytes(attachment, att_filename)
+                    if content is None:
+                        logger.warning("[EMAIL_EXTRACT] Skipping empty/unsupported attachment: %s", att_filename)
+                        continue
+
+                    att_size = len(content)
                     logger.info(f"[EMAIL_EXTRACT] Attachment {idx}: {att_filename}, size: {att_size / (1024*1024):.2f} MB")
 
                     # Write to temp file instead of holding in memory
                     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{att_filename}")
-                    tmp.write(attachment.data)
+                    tmp.write(content)
                     tmp.close()
                     logger.info(f"[EMAIL_EXTRACT] Wrote attachment to temp: {tmp.name}")
 
