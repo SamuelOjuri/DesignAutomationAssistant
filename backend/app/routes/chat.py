@@ -1,10 +1,8 @@
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from google import genai
 from google.genai import types
@@ -38,10 +36,6 @@ def _describe_response(response: Any) -> str:
             part_kinds.append("+".join(kind) or "empty")
         descriptions.append(f"finish_reason={finish_reason} parts={part_kinds}")
     return "; ".join(descriptions) or "no candidates"
-
-
-def _sse(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
 
 
 def _history_to_contents(history: Optional[List[ChatMessage]]) -> List[types.Content]:
@@ -146,11 +140,6 @@ def _sources_payload(context: Any, citations: List[Dict[str, Any]]) -> str:
         },
         default=str,
     )
-
-
-def _answer_preview(answer: str, limit: int = 240) -> str:
-    text = " ".join((answer or "").split())
-    return text if len(text) <= limit else f"{text[:limit]}..."
 
 
 def _citation_debug_payload(citations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -272,11 +261,13 @@ def _run_with_tools(
             answer = _response_text(response)
             if answer:
                 logger.info(
-                    "chat: final answer from tool loop (%s chars), citations=%s",
+                    "chat: final answer from tool loop (%s chars)",
                     len(answer),
+                )
+                logger.debug(
+                    "chat: final answer citations=%s",
                     _citation_debug_payload(latest_citations),
                 )
-                logger.debug("chat: final answer preview: %s", _answer_preview(answer))
                 return answer, latest_citations, True
 
             logger.warning(
@@ -339,7 +330,7 @@ def _run_with_tools(
                 except Exception:
                     k = 8
                 results = search_task_docs(db, external_task_key, query, k=k)
-                logger.info(
+                logger.debug(
                     "chat: search_task_docs query=%r k=%s results=%s citations=%s",
                     query,
                     k,
@@ -381,57 +372,6 @@ def _run_with_tools(
     )
     fallback = _fallback_answer_from_sources(latest_context, latest_citations)
     return fallback, latest_citations, False
-
-
-@router.post("/chat")
-def chat(
-    payload: ChatRequest,
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
-    _csrf: None = Depends(require_csrf_token),
-):
-    task = require_task_access(payload.externalTaskKey, db, current_user)
-    if payload.message.strip():
-        record_meaningful_access(db, task)
-        db.commit()
-
-    def event_stream():
-        yield _sse({"type": "start", "ts": datetime.now(timezone.utc).isoformat()})
-        try:
-            answer, citations, ok = _run_with_tools(
-                db=db,
-                external_task_key=payload.externalTaskKey,
-                prompt=payload.message,
-                history=payload.history,
-            )
-            if not ok and not answer:
-                answer = (
-                    "I found relevant sources, but the model did not finish a "
-                    "plain-text answer. Please try rephrasing the question."
-                )
-
-            if answer:
-                yield _sse({"type": "message", "content": answer})
-            else:
-                yield _sse(
-                    {
-                        "type": "message",
-                        "content": (
-                            "I found relevant sources, but no final answer was "
-                            "returned. Please try again."
-                        ),
-                    }
-                )
-
-            if citations:
-                yield _sse({"type": "citations", "citations": citations})
-
-        except Exception as e:
-            yield _sse({"type": "message", "content": f"Error: {e}"})
-        finally:
-            yield _sse({"type": "done"})
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/chat/complete", response_model=ChatCompleteResponse)

@@ -326,9 +326,9 @@ def test_cookie_session_resolves_handoff_and_authorizes_task_chat_and_signed_url
 
     monkeypatch.setattr(chat, "_run_with_tools", lambda **kwargs: ("answer", [], True))
     chat_response = client.post(
-        "/api/chat",
+        "/api/chat/complete",
         json={"externalTaskKey": "acct:board-1:item-1", "message": "hello"},
         headers=_csrf_headers(client),
     )
     assert chat_response.status_code == 200
-    assert '"content": "answer"' in chat_response.text
+    assert chat_response.json()["content"] == "answer"

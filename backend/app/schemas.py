@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any, Dict, Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class HandoffContext(BaseModel):
     accountId: Optional[str] = None
@@ -70,12 +70,7 @@ class ChatRequest(BaseModel):
     message: str
     history: Optional[List[ChatMessage]] = None
 
-class ChatStreamChunk(BaseModel):
-    type: str
-    content: Optional[str] = None
-    citations: Optional[List[Dict[str, Any]]] = None
-
 class ChatCompleteResponse(BaseModel):
     content: str
-    citations: List[Dict[str, Any]] = []
+    citations: List[Dict[str, Any]] = Field(default_factory=list)
     ok: bool = True
