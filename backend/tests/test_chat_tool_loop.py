@@ -14,6 +14,7 @@ class FakeResponse:
 
 def test_run_with_tools_returns_function_response_as_user_content(monkeypatch):
     generated_contents = []
+    search_calls = []
 
     model_tool_content = types.Content(
         role="model",
@@ -35,11 +36,12 @@ def test_run_with_tools_returns_function_response_as_user_content(monkeypatch):
             self.models = FakeModels()
 
     monkeypatch.setattr(chat.genai, "Client", FakeClient)
-    monkeypatch.setattr(
-        chat,
-        "search_task_docs",
-        lambda db, external_task_key, query, k=8: [{"snippet": "Relevant project details."}],
-    )
+
+    def fake_search_task_docs(db, external_task_key, query, k=8):
+        search_calls.append({"query": query, "k": k})
+        return [{"snippet": "Relevant project details."}]
+
+    monkeypatch.setattr(chat, "search_task_docs", fake_search_task_docs)
 
     answer, citations, ok = chat._run_with_tools(
         db=None,
@@ -52,6 +54,7 @@ def test_run_with_tools_returns_function_response_as_user_content(monkeypatch):
     assert ok is True
     assert answer == "The project needs a concise summary."
     assert citations == [{"snippet": "Relevant project details."}]
+    assert search_calls == [{"query": "summary", "k": 1}]
 
     function_response_content = generated_contents[1][-1]
     assert function_response_content.role == "user"

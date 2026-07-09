@@ -148,6 +148,22 @@ def _sources_payload(context: Any, citations: List[Dict[str, Any]]) -> str:
     )
 
 
+def _answer_preview(answer: str, limit: int = 240) -> str:
+    text = " ".join((answer or "").split())
+    return text if len(text) <= limit else f"{text[:limit]}..."
+
+
+def _citation_debug_payload(citations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "filename": citation.get("filename"),
+            "section": citation.get("section"),
+            "score": citation.get("score"),
+        }
+        for citation in citations[:6]
+    ]
+
+
 def _fallback_answer_from_sources(context: Any, citations: List[Dict[str, Any]]) -> str:
     details: List[str] = []
     if isinstance(context, dict):
@@ -255,7 +271,12 @@ def _run_with_tools(
         if not function_calls:
             answer = _response_text(response)
             if answer:
-                logger.info("chat: final answer from tool loop (%s chars)", len(answer))
+                logger.info(
+                    "chat: final answer from tool loop (%s chars), citations=%s",
+                    len(answer),
+                    _citation_debug_payload(latest_citations),
+                )
+                logger.debug("chat: final answer preview: %s", _answer_preview(answer))
                 return answer, latest_citations, True
 
             logger.warning(
@@ -318,6 +339,13 @@ def _run_with_tools(
                 except Exception:
                     k = 8
                 results = search_task_docs(db, external_task_key, query, k=k)
+                logger.info(
+                    "chat: search_task_docs query=%r k=%s results=%s citations=%s",
+                    query,
+                    k,
+                    len(results),
+                    _citation_debug_payload(results),
+                )
                 latest_citations = results
                 tool_payload = {"citations": results}
 
