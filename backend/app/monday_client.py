@@ -3,12 +3,31 @@ from typing import Any, Optional, Sequence
 import jwt
 import requests
 from fastapi import HTTPException
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from .config import settings
 
 MONDAY_API_URL = "https://api.monday.com/v2"
 MONDAY_OAUTH_URL = "https://auth.monday.com/oauth2/authorize"
 MONDAY_TOKEN_URL = "https://auth.monday.com/oauth2/token"
+TRANSIENT_MONDAY_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+class TransientMondayAPIError(Exception):
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+        super().__init__(f"monday API error ({status_code})")
+
+
+def _is_transient_monday_error(exc: BaseException) -> bool:
+    return isinstance(
+        exc,
+        (
+            TransientMondayAPIError,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+        ),
+    )
 
 
 def monday_headers(access_token: str) -> dict[str, str]:
@@ -16,6 +35,30 @@ def monday_headers(access_token: str) -> dict[str, str]:
     if settings.monday_api_version:
         headers["API-Version"] = settings.monday_api_version
     return headers
+
+
+@retry(
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=1, min=2, max=15),
+    retry=retry_if_exception(_is_transient_monday_error),
+    reraise=True,
+)
+def _post_monday_graphql(
+    access_token: str,
+    query: str,
+    variables: Optional[dict[str, Any]],
+    *,
+    timeout: int,
+) -> requests.Response:
+    resp = requests.post(
+        MONDAY_API_URL,
+        json={"query": query, "variables": variables or {}},
+        headers=monday_headers(access_token),
+        timeout=timeout,
+    )
+    if resp.status_code in TRANSIENT_MONDAY_STATUS_CODES:
+        raise TransientMondayAPIError(resp.status_code)
+    return resp
 
 
 def monday_graphql_request(
@@ -26,12 +69,17 @@ def monday_graphql_request(
     timeout: int = 10,
     allow_unauthorized: bool = False,
 ) -> Optional[dict[str, Any]]:
-    resp = requests.post(
-        MONDAY_API_URL,
-        json={"query": query, "variables": variables or {}},
-        headers=monday_headers(access_token),
-        timeout=timeout,
-    )
+    try:
+        resp = _post_monday_graphql(
+            access_token,
+            query,
+            variables,
+            timeout=timeout,
+        )
+    except TransientMondayAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except requests.exceptions.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"monday API request failed: {exc}")
 
     if resp.status_code == 401 and allow_unauthorized:
         return None

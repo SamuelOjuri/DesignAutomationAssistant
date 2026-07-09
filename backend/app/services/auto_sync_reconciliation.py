@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 from typing import Optional
 
+from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -453,7 +454,17 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    active_result, completed_result = _run_from_new_session(args)
+    try:
+        active_result, completed_result = _run_from_new_session(args)
+    except HTTPException as exc:
+        logger.error("Auto-sync reconciliation command failed: %s", exc.detail)
+        print(f"Auto-sync reconciliation failed: {exc.detail}")
+        return 1
+    except Exception as exc:
+        logger.exception("Auto-sync reconciliation command failed unexpectedly")
+        print(f"Auto-sync reconciliation failed unexpectedly: {exc}")
+        return 1
+
     logger.info("Active auto-sync reconciliation result: %s", active_result)
     print(active_result)
     if completed_result is not None:

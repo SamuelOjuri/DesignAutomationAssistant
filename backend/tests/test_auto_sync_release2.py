@@ -4,8 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import pytest
+import requests
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from tenacity import stop_after_attempt, wait_none
 
 from backend.app import monday_client
 from backend.app.db import Base
@@ -85,6 +88,72 @@ def test_fetch_current_account_id_reads_me_account(monkeypatch):
     )
 
     assert monday_client.fetch_current_account_id("token") == "acct"
+
+
+def test_monday_graphql_request_retries_transient_status(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, payload=None):
+            self.status_code = status_code
+            self._payload = payload or {}
+            self.ok = 200 <= status_code < 300
+
+        def json(self):
+            return self._payload
+
+    responses = [
+        FakeResponse(502),
+        FakeResponse(200, {"data": {"ok": True}}),
+    ]
+
+    def fake_post(*args, **kwargs):
+        calls.append((args, kwargs))
+        return responses.pop(0)
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(
+        monday_client,
+        "_post_monday_graphql",
+        monday_client._post_monday_graphql.retry_with(wait=wait_none()),
+    )
+
+    payload = monday_client.monday_graphql_request("token", "query { ok }")
+
+    assert payload == {"data": {"ok": True}}
+    assert len(calls) == 2
+
+
+def test_monday_graphql_request_reports_transient_failure_after_retries(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        status_code = 502
+        ok = False
+
+        def json(self):
+            return {}
+
+    def fake_post(*args, **kwargs):
+        calls.append((args, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(
+        monday_client,
+        "_post_monday_graphql",
+        monday_client._post_monday_graphql.retry_with(
+            stop=stop_after_attempt(2),
+            wait=wait_none(),
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        monday_client.monday_graphql_request("token", "query { ok }")
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == "monday API error (502)"
+    assert len(calls) == 2
 
 
 def test_worker_runs_due_job_and_updates_task_state(db_session):

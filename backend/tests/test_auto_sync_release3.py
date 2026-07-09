@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import uuid
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -12,6 +13,7 @@ from backend.app.db import Base
 from backend.app.models import AutoSyncJob, HandoffCode, Task, TaskSnapshot, UserMondayLink
 from backend.app.routes import monday_handoff
 from backend.app.schemas import HandoffResolveRequest
+from backend.app.services import auto_sync_reconciliation
 from backend.app.services.auto_sync_policy import AutoSyncPolicy
 from backend.app.services.auto_sync_reconciliation import (
     detect_completed_transitions_once,
@@ -64,6 +66,19 @@ def _task(item_id: str, *, sync_status: str = "completed", revision: str | None 
         latest_snapshot_version=revision,
         last_indexed_source_revision=revision,
     )
+
+
+def test_reconciliation_cli_reports_http_exception(monkeypatch, capsys):
+    def fail_from_new_session(args):
+        raise HTTPException(status_code=502, detail="monday API error (502)")
+
+    monkeypatch.setattr(auto_sync_reconciliation, "_run_from_new_session", fail_from_new_session)
+    monkeypatch.setattr("sys.argv", ["auto_sync_reconciliation", "--limit", "25"])
+
+    assert auto_sync_reconciliation.main() == 1
+
+    captured = capsys.readouterr()
+    assert "Auto-sync reconciliation failed: monday API error (502)" in captured.out
 
 
 def _handoff_fixture(db_session, *, task: Task, snapshot_revision: str | None = None) -> None:
