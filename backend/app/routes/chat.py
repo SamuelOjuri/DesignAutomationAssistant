@@ -104,6 +104,91 @@ def _response_text(response: Any) -> str:
     return "".join(parts).strip()
 
 
+def _limited_text(value: Any, limit: int = 2000) -> str:
+    text = str(value or "").strip()
+    return text if len(text) <= limit else f"{text[:limit]}..."
+
+
+def _sources_payload(context: Any, citations: List[Dict[str, Any]]) -> str:
+    return json.dumps(
+        {
+            "task_context": context,
+            "citations": [
+                {
+                    "filename": citation.get("filename"),
+                    "page": citation.get("page"),
+                    "section": citation.get("section"),
+                    "snippet": _limited_text(citation.get("snippet"), 1800),
+                }
+                for citation in citations[:6]
+            ],
+        },
+        default=str,
+    )
+
+
+def _fallback_answer_from_sources(context: Any, citations: List[Dict[str, Any]]) -> str:
+    details: List[str] = []
+    if isinstance(context, dict):
+        for key, value in context.items():
+            if value in (None, "", [], {}):
+                continue
+            details.append(f"{key}: {_limited_text(value, 220)}")
+            if len(details) >= 5:
+                break
+
+    snippets = [
+        _limited_text(citation.get("snippet"), 260)
+        for citation in citations[:3]
+        if citation.get("snippet")
+    ]
+
+    lines = ["I found relevant task context and source material, but the model did not produce a final synthesis."]
+    if details:
+        lines.append("Task details: " + "; ".join(details))
+    if snippets:
+        lines.append("Relevant source excerpts: " + " | ".join(snippets))
+    return "\n\n".join(lines)
+
+
+def _synthesize_without_tools(
+    client: genai.Client,
+    *,
+    prompt: str,
+    context: Any,
+    citations: List[Dict[str, Any]],
+) -> str:
+    if context is None and not citations:
+        return ""
+
+    synthesis_config = types.GenerateContentConfig(
+        system_instruction=(
+            "You are a helpful technical design assistant. Produce a concise "
+            "plain-text answer using only the supplied task context and source "
+            "excerpts. Do not call tools. If the supplied material is incomplete, "
+            "say what is missing."
+        )
+    )
+    response = client.models.generate_content(
+        model=settings.gemini_model,
+        contents=[
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part(
+                        text=(
+                            f"User question:\n{prompt}\n\n"
+                            f"Task context and source excerpts:\n{_sources_payload(context, citations)}"
+                        )
+                    )
+                ],
+            )
+        ],
+        config=synthesis_config,
+    )
+    return _response_text(response)
+
+
 def _run_with_tools(
     db: Session,
     external_task_key: str,
@@ -118,6 +203,7 @@ def _run_with_tools(
     contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
 
     latest_citations: List[Dict[str, Any]] = []
+    latest_context: Any = None
 
     for _ in range(max_turns):
         response = client.models.generate_content(
@@ -148,6 +234,7 @@ def _run_with_tools(
 
             if name == "get_task_context":
                 context = get_task_context(db, external_task_key)
+                latest_context = context
                 tool_payload = {"task_context": context}
 
             elif name == "search_task_docs":
@@ -174,7 +261,17 @@ def _run_with_tools(
         if tool_parts:
             contents.append(types.Content(role="user", parts=tool_parts))
 
-    return "", latest_citations, False
+    synthesis = _synthesize_without_tools(
+        client,
+        prompt=prompt,
+        context=latest_context,
+        citations=latest_citations,
+    )
+    if synthesis:
+        return synthesis, latest_citations, True
+
+    fallback = _fallback_answer_from_sources(latest_context, latest_citations)
+    return fallback, latest_citations, False
 
 
 @router.post("/chat")
@@ -198,7 +295,7 @@ def chat(
                 prompt=payload.message,
                 history=payload.history,
             )
-            if not ok:
+            if not ok and not answer:
                 answer = (
                     "I found relevant sources, but the model did not finish a "
                     "plain-text answer. Please try rephrasing the question."
