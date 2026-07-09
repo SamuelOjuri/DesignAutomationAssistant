@@ -153,6 +153,45 @@ def _citation_debug_payload(citations: List[Dict[str, Any]]) -> List[Dict[str, A
     ]
 
 
+def _display_section(section: Any) -> Any:
+    if not isinstance(section, str):
+        return section
+    parts = section.split(":")
+    if len(parts) >= 3 and parts[-2] == "chunk" and parts[-1].isdigit():
+        return ":".join(parts[:-2])
+    return section
+
+
+def _citation_display_key(citation: Dict[str, Any]) -> tuple[Any, Any, Any]:
+    return (
+        citation.get("fileId") or citation.get("filename"),
+        citation.get("page"),
+        _display_section(citation.get("section")),
+    )
+
+
+def _dedupe_citations_for_display(
+    citations: List[Dict[str, Any]],
+    limit: int = 6,
+) -> List[Dict[str, Any]]:
+    seen = set()
+    deduped: List[Dict[str, Any]] = []
+
+    for citation in citations:
+        key = _citation_display_key(citation)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        display_citation = dict(citation)
+        display_citation["section"] = _display_section(citation.get("section"))
+        deduped.append(display_citation)
+        if len(deduped) >= limit:
+            break
+
+    return deduped
+
+
 def _fallback_answer_from_sources(context: Any, citations: List[Dict[str, Any]]) -> str:
     details: List[str] = []
     if isinstance(context, dict):
@@ -403,4 +442,8 @@ def chat_complete(
             "returned. Please try again."
         )
 
-    return ChatCompleteResponse(content=answer, citations=citations, ok=ok)
+    return ChatCompleteResponse(
+        content=answer,
+        citations=_dedupe_citations_for_display(citations),
+        ok=ok,
+    )

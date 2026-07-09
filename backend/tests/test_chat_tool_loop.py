@@ -186,7 +186,25 @@ def test_chat_complete_returns_json_answer_and_citations(monkeypatch):
         "_run_with_tools",
         lambda **kwargs: (
             "This is the final project summary.",
-            [{"filename": "monday_columns.txt", "section": "monday:columns"}],
+            [
+                {
+                    "filename": "source.msg",
+                    "fileId": "file-1",
+                    "section": "email:body:chunk:1",
+                    "snippet": "first body chunk",
+                },
+                {
+                    "filename": "source.msg",
+                    "fileId": "file-1",
+                    "section": "email:body:chunk:2",
+                    "snippet": "second body chunk",
+                },
+                {
+                    "filename": "monday_columns.txt",
+                    "fileId": "file-2",
+                    "section": "monday:columns",
+                },
+            ],
             True,
         ),
     )
@@ -204,7 +222,17 @@ def test_chat_complete_returns_json_answer_and_citations(monkeypatch):
 
     assert response.content == "This is the final project summary."
     assert response.citations == [
-        {"filename": "monday_columns.txt", "section": "monday:columns"}
+        {
+            "filename": "source.msg",
+            "fileId": "file-1",
+            "section": "email:body",
+            "snippet": "first body chunk",
+        },
+        {
+            "filename": "monday_columns.txt",
+            "fileId": "file-2",
+            "section": "monday:columns",
+        },
     ]
     assert response.ok is True
     assert calls == {"access": 1, "commits": 1}
