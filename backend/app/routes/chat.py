@@ -189,6 +189,24 @@ def _synthesize_without_tools(
     return _response_text(response)
 
 
+def _function_response_part(
+    *,
+    name: str | None,
+    response: dict[str, Any],
+    call_id: str | None,
+) -> types.Part:
+    function_response_kwargs = {
+        "name": name or "unknown_tool",
+        "response": {"result": response},
+    }
+    if call_id:
+        function_response_kwargs["id"] = call_id
+
+    return types.Part(
+        function_response=types.FunctionResponse(**function_response_kwargs)
+    )
+
+
 def _run_with_tools(
     db: Session,
     external_task_key: str,
@@ -245,6 +263,10 @@ def _run_with_tools(
             if args is None and hasattr(fc, "function_call"):
                 args = fc.function_call.args
 
+            call_id = getattr(fc, "id", None)
+            if call_id is None and hasattr(fc, "function_call"):
+                call_id = fc.function_call.id
+
             if args is None:
                 args = {}
 
@@ -268,9 +290,10 @@ def _run_with_tools(
                 tool_payload = {"error": f"Unknown tool: {name}"}
 
             tool_parts.append(
-                types.Part.from_function_response(
+                _function_response_part(
                     name=name,
                     response=tool_payload,
+                    call_id=call_id,
                 )
             )
         

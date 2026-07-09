@@ -25,7 +25,7 @@ def test_run_with_tools_returns_function_response_as_user_content(monkeypatch):
             generated_contents.append(contents)
             if len(generated_contents) == 1:
                 return FakeResponse(
-                    function_calls=[SimpleNamespace(name="search_task_docs", args={"query": "summary", "k": 1})],
+                    function_calls=[SimpleNamespace(id="call-1", name="search_task_docs", args={"query": "summary", "k": 1})],
                     candidates=[SimpleNamespace(content=model_tool_content)],
                 )
             return FakeResponse(text="The project needs a concise summary.")
@@ -55,7 +55,10 @@ def test_run_with_tools_returns_function_response_as_user_content(monkeypatch):
 
     function_response_content = generated_contents[1][-1]
     assert function_response_content.role == "user"
-    assert function_response_content.parts[0].function_response is not None
+    function_response = function_response_content.parts[0].function_response
+    assert function_response is not None
+    assert function_response.id == "call-1"
+    assert "result" in function_response.response
 
 
 def test_run_with_tools_synthesizes_answer_after_repeated_tool_calls(monkeypatch):
@@ -71,7 +74,7 @@ def test_run_with_tools_synthesizes_answer_after_repeated_tool_calls(monkeypatch
             generated_contents.append(contents)
             if len(generated_contents) <= 2:
                 return FakeResponse(
-                    function_calls=[SimpleNamespace(name="search_task_docs", args={"query": "summary", "k": 1})],
+                    function_calls=[SimpleNamespace(id=f"call-{len(generated_contents)}", name="search_task_docs", args={"query": "summary", "k": 1})],
                     candidates=[SimpleNamespace(content=model_tool_content)],
                 )
             return FakeResponse(text="This enquiry is low priority and currently needs design work.")
@@ -119,7 +122,7 @@ def test_run_with_tools_synthesizes_when_final_tool_response_has_no_text(monkeyp
             generated_contents.append(contents)
             if len(generated_contents) == 1:
                 return FakeResponse(
-                    function_calls=[SimpleNamespace(name="search_task_docs", args={"query": "summary", "k": 1})],
+                    function_calls=[SimpleNamespace(id="call-1", name="search_task_docs", args={"query": "summary", "k": 1})],
                     candidates=[SimpleNamespace(content=model_tool_content)],
                 )
             if len(generated_contents) == 2:
