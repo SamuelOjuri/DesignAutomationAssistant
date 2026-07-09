@@ -160,3 +160,51 @@ def test_run_with_tools_synthesizes_when_final_tool_response_has_no_text(monkeyp
     assert answer == "This enquiry is low priority and needs design work."
     assert citations[0]["filename"] == "monday_columns.txt"
     assert len(generated_contents) == 3
+
+
+def test_chat_complete_returns_json_answer_and_citations(monkeypatch):
+    calls = {"access": 0, "commits": 0}
+    task = SimpleNamespace(external_task_key="acct:board:item")
+
+    class FakeDb:
+        def commit(self):
+            calls["commits"] += 1
+
+    def fake_require_task_access(external_task_key, db, current_user):
+        assert external_task_key == "acct:board:item"
+        assert current_user.id == "user-1"
+        return task
+
+    def fake_record_meaningful_access(db, task_arg):
+        assert task_arg is task
+        calls["access"] += 1
+
+    monkeypatch.setattr(chat, "require_task_access", fake_require_task_access)
+    monkeypatch.setattr(chat, "record_meaningful_access", fake_record_meaningful_access)
+    monkeypatch.setattr(
+        chat,
+        "_run_with_tools",
+        lambda **kwargs: (
+            "This is the final project summary.",
+            [{"filename": "monday_columns.txt", "section": "monday:columns"}],
+            True,
+        ),
+    )
+
+    response = chat.chat_complete(
+        payload=chat.ChatRequest(
+            externalTaskKey="acct:board:item",
+            message="Provide a concise summary",
+            history=None,
+        ),
+        db=FakeDb(),
+        current_user=SimpleNamespace(id="user-1"),
+        _csrf=None,
+    )
+
+    assert response.content == "This is the final project summary."
+    assert response.citations == [
+        {"filename": "monday_columns.txt", "section": "monday:columns"}
+    ]
+    assert response.ok is True
+    assert calls == {"access": 1, "commits": 1}

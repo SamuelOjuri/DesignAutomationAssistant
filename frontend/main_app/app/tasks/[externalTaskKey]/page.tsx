@@ -81,13 +81,11 @@ type Citation = {
   mondayAssetId?: string | null;
 };
 
-type StreamEvent =
-  | { type: "start"; ts: string }
-  | { type: "message"; content: string }
-  | { type: "citations"; citations: Citation[] }
-  | { type: "done" };
-
-
+type ChatCompleteResponse = {
+  content: string;
+  citations?: Citation[];
+  ok?: boolean;
+};
 
 type SignedUrlResponse = { url: string; expiresAt: string };
 
@@ -322,48 +320,6 @@ export default function TaskPage() {
     });
   }, []);
 
-  const parseSse = useCallback(async (response: Response) => {
-    const reader = response.body?.getReader();
-    if (!reader) return false;
-
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let receivedMessage = false;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let idx;
-      while ((idx = buffer.indexOf("\n\n")) !== -1) {
-        const rawEvent = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 2);
-
-        if (!rawEvent.startsWith("data:")) continue;
-        const json = rawEvent.replace(/^data:\s*/, "");
-        if (!json) continue;
-
-        let evt: StreamEvent | null = null;
-        try {
-          evt = JSON.parse(json);
-        } catch {
-          continue;
-        }
-
-        if (!evt) continue;
-        if (evt.type === "message" && evt.content) {
-          receivedMessage = true;
-          appendAssistantChunk(evt.content);
-        } else if (evt.type === "citations") {
-          setCitations(evt.citations || []);
-        }
-      }
-    }
-
-    return receivedMessage;
-  }, [appendAssistantChunk]);
-
   // --- Fetch summary and sources helpers ---
   const fetchSummary = useCallback(async (): Promise<TaskSummaryResponse | null> => {
     if (!externalTaskKey) return null;
@@ -453,7 +409,7 @@ export default function TaskPage() {
     abortRef.current = controller;
 
     try {
-      const response = await fetch(`${baseUrl}/api/chat`, {
+      const response = await fetch(`${baseUrl}/api/chat/complete`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -471,18 +427,21 @@ export default function TaskPage() {
         signal: controller.signal,
       });
 
-      if (!response.ok || !response.body) {
+      if (!response.ok) {
         appendAssistantChunk(`Error: ${response.status}`);
         setIsStreaming(false);
         return;
       }
 
-      const receivedMessage = await parseSse(response);
-      if (!receivedMessage) {
+      const data = (await response.json()) as ChatCompleteResponse;
+      if (data.content) {
+        appendAssistantChunk(data.content);
+      } else {
         appendAssistantChunk(
           "I found relevant sources, but no final answer was returned. Please try again."
         );
       }
+      setCitations(data.citations || []);
     } catch (e: any) {
       if (e?.name !== "AbortError") {
         appendAssistantChunk(`Error: ${String(e)}`);
@@ -491,7 +450,7 @@ export default function TaskPage() {
       setIsStreaming(false);
       abortRef.current = null;
     }
-  }, [appendAssistantChunk, baseUrl, input, isStreaming, messages, externalTaskKey, parseSse]);
+  }, [appendAssistantChunk, baseUrl, input, isStreaming, messages, externalTaskKey]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();

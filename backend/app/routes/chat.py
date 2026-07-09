@@ -12,7 +12,7 @@ from google.genai import types
 from ..auth import CurrentUser, get_current_user, require_csrf_token
 from ..config import settings
 from ..db import get_db
-from ..schemas import ChatRequest, ChatMessage
+from ..schemas import ChatRequest, ChatMessage, ChatCompleteResponse
 from ..services.auto_sync_purge import record_meaningful_access
 from ..services.retrieval import get_task_context, search_task_docs
 from .tasks import require_task_access
@@ -432,3 +432,35 @@ def chat(
             yield _sse({"type": "done"})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/chat/complete", response_model=ChatCompleteResponse)
+def chat_complete(
+    payload: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+    _csrf: None = Depends(require_csrf_token),
+) -> ChatCompleteResponse:
+    task = require_task_access(payload.externalTaskKey, db, current_user)
+    if payload.message.strip():
+        record_meaningful_access(db, task)
+        db.commit()
+
+    answer, citations, ok = _run_with_tools(
+        db=db,
+        external_task_key=payload.externalTaskKey,
+        prompt=payload.message,
+        history=payload.history,
+    )
+    if not ok and not answer:
+        answer = (
+            "I found relevant sources, but the model did not finish a "
+            "plain-text answer. Please try rephrasing the question."
+        )
+    if not answer:
+        answer = (
+            "I found relevant sources, but no final answer was "
+            "returned. Please try again."
+        )
+
+    return ChatCompleteResponse(content=answer, citations=citations, ok=ok)

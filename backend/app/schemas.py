@@ -74,3 +74,8 @@ class ChatStreamChunk(BaseModel):
     type: str
     content: Optional[str] = None
     citations: Optional[List[Dict[str, Any]]] = None
+
+class ChatCompleteResponse(BaseModel):
+    content: str
+    citations: List[Dict[str, Any]] = []
+    ok: bool = True
