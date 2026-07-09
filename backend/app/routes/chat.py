@@ -215,7 +215,23 @@ def _run_with_tools(
         function_calls = response.function_calls or []
         if not function_calls:
             answer = _response_text(response)
-            return answer, latest_citations, True
+            if answer:
+                return answer, latest_citations, True
+
+            synthesis = _synthesize_without_tools(
+                client,
+                prompt=prompt,
+                context=latest_context,
+                citations=latest_citations,
+            )
+            if synthesis:
+                return synthesis, latest_citations, True
+
+            if latest_context is not None or latest_citations:
+                fallback = _fallback_answer_from_sources(latest_context, latest_citations)
+                return fallback, latest_citations, False
+
+            return "", latest_citations, False
 
         contents.append(response.candidates[0].content)
 
