@@ -155,6 +155,66 @@ def _csrf_headers(client: TestClient) -> dict[str, str]:
     return {"X-CSRF-Token": csrf_token}
 
 
+def _monday_session_token(*, user_id: str = "monday-user", account_id: str = "acct") -> str:
+    claims = {
+        "dat": {
+            "user_id": user_id,
+            "account_id": account_id,
+        },
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+    }
+    return jwt.encode(claims, settings.monday_client_secret, algorithm="HS256")
+
+
+def test_handoff_init_accepts_session_token_signed_with_monday_client_secret(client, db_session):
+    response = client.post(
+        "/api/monday/handoff/init",
+        json={
+            "sessionToken": _monday_session_token(),
+            "context": {
+                "accountId": "acct",
+                "boardId": "board-1",
+                "itemId": "item-1",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "/monday-handoff/" in body["url"]
+
+    handoff_code = db_session.get(HandoffCode, body["code"])
+    assert handoff_code is not None
+    assert handoff_code.monday_account_id == "acct"
+    assert handoff_code.monday_user_id == "monday-user"
+
+
+def test_handoff_init_rejects_session_token_signed_with_monday_signing_secret(client):
+    token = jwt.encode(
+        {
+            "dat": {"user_id": "monday-user", "account_id": "acct"},
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+        },
+        settings.monday_signing_secret,
+        algorithm="HS256",
+    )
+
+    response = client.post(
+        "/api/monday/handoff/init",
+        json={
+            "sessionToken": token,
+            "context": {
+                "accountId": "acct",
+                "boardId": "board-1",
+                "itemId": "item-1",
+            },
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid monday session token"
+
+
 def test_monday_first_oauth_callback_creates_app_user_link_and_session(client, db_session, monkeypatch):
     _add_handoff_code(db_session)
     state = _monday_first_state_from_login(client, "handoff-code")
