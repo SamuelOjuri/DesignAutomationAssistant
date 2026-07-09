@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +18,26 @@ from ..services.retrieval import get_task_context, search_task_docs
 from .tasks import require_task_access
 
 router = APIRouter(prefix="/api", tags=["chat"])
+logger = logging.getLogger(__name__)
+
+
+def _describe_response(response: Any) -> str:
+    descriptions = []
+    for candidate in getattr(response, "candidates", []) or []:
+        finish_reason = getattr(candidate, "finish_reason", None)
+        content = getattr(candidate, "content", None)
+        part_kinds = []
+        for part in getattr(content, "parts", []) or []:
+            kind = []
+            if getattr(part, "text", None):
+                kind.append(f"text[{len(str(part.text))}]")
+            if getattr(part, "function_call", None):
+                kind.append(f"function_call[{getattr(part.function_call, 'name', '?')}]")
+            if getattr(part, "thought", None):
+                kind.append("thought")
+            part_kinds.append("+".join(kind) or "empty")
+        descriptions.append(f"finish_reason={finish_reason} parts={part_kinds}")
+    return "; ".join(descriptions) or "no candidates"
 
 
 def _sse(data: dict) -> str:
@@ -234,7 +255,12 @@ def _run_with_tools(
         if not function_calls:
             answer = _response_text(response)
             if answer:
+                logger.info("chat: final answer from tool loop (%s chars)", len(answer))
                 return answer, latest_citations, True
+
+            logger.warning(
+                "chat: empty final text; response: %s", _describe_response(response)
+            )
 
             synthesis = _synthesize_without_tools(
                 client,
@@ -243,12 +269,21 @@ def _run_with_tools(
                 citations=latest_citations,
             )
             if synthesis:
+                logger.info(
+                    "chat: answer from no-tool synthesis (%s chars)", len(synthesis)
+                )
                 return synthesis, latest_citations, True
 
             if latest_context is not None or latest_citations:
+                logger.warning(
+                    "chat: synthesis empty; grounded fallback (context=%s, citations=%s)",
+                    latest_context is not None,
+                    len(latest_citations),
+                )
                 fallback = _fallback_answer_from_sources(latest_context, latest_citations)
                 return fallback, latest_citations, False
 
+            logger.warning("chat: no answer and no retrieved context/citations")
             return "", latest_citations, False
 
         contents.append(response.candidates[0].content)
@@ -300,6 +335,7 @@ def _run_with_tools(
         if tool_parts:
             contents.append(types.Content(role="user", parts=tool_parts))
 
+    logger.warning("chat: tool loop exhausted max_turns=%s without final text", max_turns)
     synthesis = _synthesize_without_tools(
         client,
         prompt=prompt,
@@ -307,8 +343,14 @@ def _run_with_tools(
         citations=latest_citations,
     )
     if synthesis:
+        logger.info("chat: answer from post-loop synthesis (%s chars)", len(synthesis))
         return synthesis, latest_citations, True
 
+    logger.warning(
+        "chat: post-loop synthesis empty; grounded fallback (context=%s, citations=%s)",
+        latest_context is not None,
+        len(latest_citations),
+    )
     fallback = _fallback_answer_from_sources(latest_context, latest_citations)
     return fallback, latest_citations, False
 
