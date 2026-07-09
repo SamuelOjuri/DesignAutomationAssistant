@@ -172,7 +172,7 @@ def _run_with_tools(
             )
         
         if tool_parts:
-            contents.append(types.Content(role="tool", parts=tool_parts))
+            contents.append(types.Content(role="user", parts=tool_parts))
 
     return "", latest_citations, False
 
