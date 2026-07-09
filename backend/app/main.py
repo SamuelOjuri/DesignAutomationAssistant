@@ -1,6 +1,7 @@
 # backend/app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from backend.app.config import settings
 from backend.app.routes.monday_handoff import router as monday_handoff_router
 from backend.app.routes.monday_auth import router as monday_auth_router
 from backend.app.routes.monday_webhooks import router as monday_webhooks_router
@@ -14,7 +15,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten for prod
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

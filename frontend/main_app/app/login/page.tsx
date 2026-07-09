@@ -2,11 +2,12 @@ import { Suspense } from "react";
 import LoginClient from "./login-client";
 
 type PageProps = {
-  searchParams?: { returnTo?: string | string[] };
+  searchParams?: Promise<{ returnTo?: string | string[] }>;
 };
 
-export default function LoginPage({ searchParams }: PageProps) {
-  const rawReturnTo = searchParams?.returnTo;
+export default async function LoginPage({ searchParams }: PageProps) {
+  const resolvedSearchParams = await searchParams;
+  const rawReturnTo = resolvedSearchParams?.returnTo;
   const returnTo = Array.isArray(rawReturnTo) ? rawReturnTo[0] : rawReturnTo;
   const safeReturnTo = returnTo || "/";
 

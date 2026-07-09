@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.app.auth import CurrentUser
 from backend.app.db import Base
-from backend.app.models import AutoSyncJob, HandoffCode, Task, TaskSnapshot, UserMondayLink
+from backend.app.models import AppUser, AutoSyncJob, HandoffCode, Task, TaskSnapshot, UserMondayLink
 from backend.app.routes import monday_handoff
 from backend.app.schemas import HandoffResolveRequest
 from backend.app.services import auto_sync_reconciliation
@@ -95,9 +95,17 @@ def _handoff_fixture(db_session, *, task: Task, snapshot_revision: str | None = 
         )
     )
     db_session.add(
+        AppUser(
+            id="app-user",
+            monday_account_id="acct",
+            monday_user_id="monday-user",
+        )
+    )
+    db_session.add(
         UserMondayLink(
             id=uuid.uuid4(),
             target_user_id="app-user",
+            app_user_id="app-user",
             monday_user_id="monday-user",
             monday_account_id="acct",
             access_token="user-token",

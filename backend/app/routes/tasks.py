@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
+from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 
-from ..auth import CurrentUser, get_current_user
+from ..auth import CurrentUser, get_current_user, require_csrf_token
 from ..db import get_db
 from ..models import Task, TaskSnapshot, TaskFile, UserMondayLink
 from ..monday_client import can_read_item
@@ -43,7 +44,7 @@ def require_task_access(
     link = (
         db.query(UserMondayLink)
         .filter_by(
-            target_user_id=current_user.id,
+            app_user_id=current_user.id,
             monday_account_id=task.account_id,
         )
         .one_or_none()
@@ -72,6 +73,7 @@ def sync_task(
     payload: Optional[TaskSyncRequest] = Body(default=None),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
+    _csrf: None = Depends(require_csrf_token),
     background_tasks: BackgroundTasks = None,
 ):
     task = require_task_access(externalTaskKey, db, current_user)
@@ -81,7 +83,7 @@ def sync_task(
     link = (
         db.query(UserMondayLink)
         .filter_by(
-            target_user_id=current_user.id,
+            app_user_id=current_user.id,
             monday_account_id=task.account_id,
         )
         .one_or_none()
@@ -196,11 +198,15 @@ def file_signed_url(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     task = require_task_access(externalTaskKey, db, current_user)
+    try:
+        file_uuid = UUID(fileId)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid fileId")
 
     file_record = (
         db.query(TaskFile)
         .filter(
-            TaskFile.id == fileId,
+            TaskFile.id == file_uuid,
             TaskFile.external_task_key == task.external_task_key,
             TaskFile.deleted_at.is_(None),
         )

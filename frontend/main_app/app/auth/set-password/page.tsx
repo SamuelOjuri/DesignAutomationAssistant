@@ -2,11 +2,12 @@ import { Suspense } from "react";
 import SetPasswordClient from "./set-password-client";
 
 type PageProps = {
-  searchParams?: { returnTo?: string | string[] };
+  searchParams?: Promise<{ returnTo?: string | string[] }>;
 };
 
-export default function SetPasswordPage({ searchParams }: PageProps) {
-  const rawReturnTo = searchParams?.returnTo;
+export default async function SetPasswordPage({ searchParams }: PageProps) {
+  const resolvedSearchParams = await searchParams;
+  const rawReturnTo = resolvedSearchParams?.returnTo;
   const returnTo = Array.isArray(rawReturnTo) ? rawReturnTo[0] : rawReturnTo;
 
   return (

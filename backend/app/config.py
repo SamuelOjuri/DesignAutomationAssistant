@@ -13,6 +13,15 @@ class Settings(BaseSettings):
     # URLs
     main_app_base_url: str = "https://design-automation-assistant.netlify.app"
     backend_base_url: str = "https://design-automation-assistant-api.onrender.com"
+    cors_allowed_origins: Optional[str] = None
+
+    # Backend app session cookies
+    app_session_cookie_name: str = "daa_session"
+    app_csrf_cookie_name: str = "daa_csrf"
+    app_session_cookie_secure: bool = True
+    app_session_cookie_samesite: str = "none"
+    app_session_cookie_domain: Optional[str] = None
+    app_session_max_age_seconds: int = 60 * 60 * 8
 
     # Supabase / main-app auth
     supabase_jwt_secret: str  # used to validate main app JWTs
@@ -56,5 +65,23 @@ class Settings(BaseSettings):
         if isinstance(v, str) and v and not v.endswith("/"):
             return v + "/"
         return v
+
+    @field_validator("app_session_cookie_samesite", mode="before")
+    def _normalize_cookie_samesite(cls, v: str) -> str:
+        value = (v or "none").lower()
+        if value not in {"lax", "strict", "none"}:
+            raise ValueError("app_session_cookie_samesite must be lax, strict, or none")
+        return value
+
+    @property
+    def cors_origins(self) -> list[str]:
+        if self.cors_allowed_origins:
+            return [origin.strip().rstrip("/") for origin in self.cors_allowed_origins.split(",") if origin.strip()]
+
+        return [
+            self.main_app_base_url.rstrip("/"),
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ]
 
 settings = Settings()

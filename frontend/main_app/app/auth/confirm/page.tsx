@@ -2,18 +2,19 @@ import { Suspense } from "react";
 import ConfirmClickClient from "./confirm-click-client";
 
 type PageProps = {
-  searchParams?: {
+  searchParams?: Promise<{
     token?: string;
     type?: string;
     redirect_to?: string;
     returnTo?: string;
-  };
+  }>;
 };
 
-export default function ConfirmPage({ searchParams }: PageProps) {
-  const token = searchParams?.token;
-  const type = searchParams?.type;
-  const returnTo = searchParams?.redirect_to || searchParams?.returnTo || "/";
+export default async function ConfirmPage({ searchParams }: PageProps) {
+  const resolvedSearchParams = await searchParams;
+  const token = resolvedSearchParams?.token;
+  const type = resolvedSearchParams?.type;
+  const returnTo = resolvedSearchParams?.redirect_to || resolvedSearchParams?.returnTo || "/";
 
   return (
     <Suspense fallback={null}>

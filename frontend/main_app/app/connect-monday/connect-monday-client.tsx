@@ -23,16 +23,21 @@ export default function ConnectMondayClient({ returnTo }: ConnectMondayClientPro
   const handleConnect = async () => {
     try {
       if (!apiBaseUrl) throw new Error("NEXT_PUBLIC_FASTAPI_BASE_URL is not set");
+
+      const loginUrl = new URL(`${apiBaseUrl}/auth/monday/login`);
+      loginUrl.searchParams.set("return_to", returnTo || "/?monday=connected");
       const token = await getAccessToken();
-      if (!token) {
+
+      const response = await fetch(loginUrl.toString(), {
+        method: "GET",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: "include",
+      });
+
+      if (response.status === 401) {
         router.push(`/login?returnTo=${encodeURIComponent(returnTo)}`);
         return;
       }
-
-      const response = await fetch(`${apiBaseUrl}/auth/monday/login`, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
-      });
 
       const data = await response.json();
 

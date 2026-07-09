@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { getBrowserSupabase } from "@/lib/supabase/client";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
@@ -92,6 +91,8 @@ type StreamEvent =
 
 type SignedUrlResponse = { url: string; expiresAt: string };
 
+const CSRF_COOKIE_NAME = "daa_csrf";
+
 // --- Summary helpers ---
 const VALIDATED_COLUMN_TITLES = new Set([
   "Priority",
@@ -134,10 +135,16 @@ const Markdown = ({ children }: { children: string }) => (
   </div>
 );
 
-async function getAccessToken(): Promise<string | null> {
-  const supabase = getBrowserSupabase();
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
+function getCookie(name: string): string | null {
+  const value = document.cookie
+    .split("; ")
+    .find((part) => part.startsWith(`${name}=`));
+  return value ? decodeURIComponent(value.split("=").slice(1).join("=")) : null;
+}
+
+function csrfHeaders(): HeadersInit {
+  const token = getCookie(CSRF_COOKIE_NAME);
+  return token ? { "X-CSRF-Token": token } : {};
 }
 
 function formatColumnValue(col: ColumnValue): string {
@@ -279,18 +286,13 @@ export default function TaskPage() {
         }
       }
       try {
-        const accessToken = await getAccessToken();
-        if (!accessToken) {
-          setSignedUrlError("Not authenticated.");
-          return;
-        }
         if (!baseUrl) {
           setSignedUrlError("FASTAPI base URL is not configured.");
           return;
         }
         const response = await fetch(
           `${baseUrl}/api/tasks/${externalTaskKey}/files/${fileId}/signed-url`,
-          { headers: { Authorization: `Bearer ${accessToken}` } }
+          { credentials: "include" }
         );
         if (!response.ok) {
           setSignedUrlError(`Signed URL failed (${response.status})`);
@@ -368,11 +370,6 @@ export default function TaskPage() {
     setIsLoadingSummary(true);
     setSummaryError(null);
     try {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        setSummaryError("Not authenticated.");
-        return null;
-      }
       if (!baseUrl) {
         setSummaryError("FASTAPI base URL is not configured.");
         return null;
@@ -380,7 +377,7 @@ export default function TaskPage() {
       const response = await fetch(
         `${baseUrl}/api/tasks/${externalTaskKey}/summary`,
         {
-          headers: { Authorization: `Bearer ${accessToken}` },
+          credentials: "include",
           cache: "no-store",
         }
       );
@@ -404,11 +401,6 @@ export default function TaskPage() {
     setIsLoadingSources(true);
     setSourcesError(null);
     try {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        setSourcesError("Not authenticated.");
-        return;
-      }
       if (!baseUrl) {
         setSourcesError("FASTAPI base URL is not configured.");
         return;
@@ -416,7 +408,7 @@ export default function TaskPage() {
       const response = await fetch(
         `${baseUrl}/api/tasks/${externalTaskKey}/sources`,
         {
-          headers: { Authorization: `Bearer ${accessToken}` },
+          credentials: "include",
           cache: "no-store",
         }
       );
@@ -451,11 +443,6 @@ export default function TaskPage() {
 
     setMessages((prev) => [...prev, { role: "user", content: prompt }]);
 
-    const accessToken = await getAccessToken();
-    if (!accessToken) {
-      appendAssistantChunk("Not authenticated. Please log in.");
-      return;
-    }
     if (!baseUrl) {
       appendAssistantChunk("FASTAPI base URL is not configured.");
       return;
@@ -470,7 +457,7 @@ export default function TaskPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
+          ...csrfHeaders(),
         },
         body: JSON.stringify({
           externalTaskKey: decodeURIComponent(externalTaskKey),
@@ -480,6 +467,7 @@ export default function TaskPage() {
             content: m.content,
           })),
         }),
+        credentials: "include",
         signal: controller.signal,
       });
 
@@ -597,11 +585,6 @@ export default function TaskPage() {
   const syncTask = useCallback(async () => {
     if (!externalTaskKey) return;
 
-    const accessToken = await getAccessToken();
-    if (!accessToken) {
-      setSyncStatus("Not authenticated.");
-      return;
-    }
     if (!baseUrl) {
       setSyncStatus("FASTAPI base URL is not configured.");
       return;
@@ -615,9 +598,10 @@ export default function TaskPage() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
+            ...csrfHeaders(),
           },
           body: JSON.stringify({ runAsync: true }),
+          credentials: "include",
         }
       );
 

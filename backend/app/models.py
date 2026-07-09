@@ -13,10 +13,51 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+import uuid
 
 from pgvector.sqlalchemy import Vector
 
 from .db import Base
+
+
+class AppUser(Base):
+    __tablename__ = "app_users"
+    __table_args__ = (
+        UniqueConstraint(
+            "monday_account_id",
+            "monday_user_id",
+            name="uq_app_users_monday_identity",
+        ),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    auth_provider = Column(String, nullable=False, server_default="monday", default="monday")
+    monday_account_id = Column(String, nullable=True)
+    monday_user_id = Column(String, nullable=True)
+    monday_email = Column(String, nullable=True)
+    monday_user_name = Column(String, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class AppSession(Base):
+    __tablename__ = "app_sessions"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    app_user_id = Column(String, ForeignKey("app_users.id"), nullable=False)
+    session_token_hash = Column(String, nullable=False, unique=True)
+    csrf_token = Column(String, nullable=False)
+
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    user_agent = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+
+    app_user = relationship("AppUser")
 
 
 class Task(Base):
@@ -132,11 +173,21 @@ class TaskChunk(Base):
 
 class UserMondayLink(Base):
     __tablename__ = "user_monday_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "monday_account_id",
+            "monday_user_id",
+            name="uq_user_monday_links_monday_identity",
+        ),
+    )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    target_user_id = Column(String, nullable=False)  # your app's user id
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid(), default=uuid.uuid4)
+    target_user_id = Column(String, nullable=True)  # legacy Supabase/app user id
+    app_user_id = Column(String, ForeignKey("app_users.id"), nullable=False)
     monday_user_id = Column(String, nullable=False)
     monday_account_id = Column(String, nullable=False)
+    monday_email = Column(String, nullable=True)
+    monday_user_name = Column(String, nullable=True)
 
     access_token = Column(Text, nullable=False)
     refresh_token = Column(Text, nullable=True)
@@ -144,6 +195,8 @@ class UserMondayLink(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    app_user = relationship("AppUser")
 
 
 class HandoffCode(Base):
@@ -209,6 +262,8 @@ class AutoSyncJob(Base):
 
 
 # Indexes
+Index("ix_app_sessions_app_user_id", AppSession.app_user_id)
+Index("ix_app_sessions_expires_at", AppSession.expires_at)
 Index("ix_tasks_auto_sync_state", Task.auto_sync_state)
 Index("ix_tasks_purge_after", Task.purge_after)
 Index("ix_tasks_source_group_id", Task.source_group_id)
@@ -218,6 +273,7 @@ Index("ix_task_snapshots_external_task_key", TaskSnapshot.external_task_key)
 Index("ix_task_files_external_task_key", TaskFile.external_task_key)
 Index("ix_task_files_snapshot_id", TaskFile.snapshot_id)
 Index("ix_task_chunks_file_id", TaskChunk.file_id)
+Index("ix_user_monday_links_app_user_id", UserMondayLink.app_user_id)
 Index("ix_user_monday_links_target_user_id", UserMondayLink.target_user_id)
 Index("ix_monday_webhook_events_board_item", MondayWebhookEvent.board_id, MondayWebhookEvent.item_id)
 Index("ix_monday_webhook_events_received_at", MondayWebhookEvent.received_at)

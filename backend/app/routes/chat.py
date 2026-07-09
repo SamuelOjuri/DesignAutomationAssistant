@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from google import genai
 from google.genai import types
 
-from ..auth import CurrentUser, get_current_user
+from ..auth import CurrentUser, get_current_user, require_csrf_token
 from ..config import settings
 from ..db import get_db
 from ..schemas import ChatRequest, ChatMessage
@@ -182,6 +182,7 @@ def chat(
     payload: ChatRequest,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
+    _csrf: None = Depends(require_csrf_token),
 ):
     task = require_task_access(payload.externalTaskKey, db, current_user)
     if payload.message.strip():

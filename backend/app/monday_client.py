@@ -97,7 +97,7 @@ def verify_session_token(session_token: str) -> dict[str, Any]:
     try:
         return jwt.decode(
             session_token,
-            settings.monday_client_secret,  
+            settings.monday_signing_secret,
             algorithms=["HS256"],
             options={"verify_aud": False},
         )

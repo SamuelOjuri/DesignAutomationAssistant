@@ -6,7 +6,7 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 
-from ..auth import CurrentUser, get_current_user
+from ..auth import CurrentUser, get_current_user, require_csrf_token
 from ..config import settings
 from ..db import get_db
 from ..monday_client import can_read_item, verify_session_token
@@ -128,6 +128,7 @@ def handoff_resolve(
     payload: HandoffResolveRequest,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
+    _csrf: None = Depends(require_csrf_token),
     background_tasks: BackgroundTasks = None,
 ):
     if not payload.code:
@@ -141,7 +142,7 @@ def handoff_resolve(
     link = (
         db.query(UserMondayLink)
         .filter_by(
-            target_user_id=current_user.id,
+            app_user_id=current_user.id,
             monday_user_id=handoff_code.monday_user_id,
             monday_account_id=handoff_code.monday_account_id,
         )
