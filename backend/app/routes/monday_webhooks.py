@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
@@ -10,6 +11,7 @@ import uuid
 
 import jwt
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -24,9 +26,12 @@ from ..services.auto_sync import (
     utc_now,
 )
 from ..services.auto_sync_policy import policy_from_settings
+from ..services.db_retry import is_retryable_auto_sync_error, run_transaction_with_retry
 
 router = APIRouter(prefix="/api/monday/webhooks", tags=["monday"])
 logger = logging.getLogger(__name__)
+
+WEBHOOK_PROCESSING_LEASE = timedelta(minutes=5)
 
 
 @dataclass(frozen=True)
@@ -192,11 +197,48 @@ def require_https_for_deployed_webhooks(request: Request) -> None:
             raise HTTPException(status_code=400, detail="monday webhooks must use HTTPS")
 
 
-def _create_event_record(
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _event_claim_query(db: Session, *, idempotency_key: str):
+    query = db.query(MondayWebhookEvent).filter_by(idempotency_key=idempotency_key)
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        query = query.with_for_update()
+    return query
+
+
+def _claim_event_record(
     db: Session,
     payload: dict[str, Any],
     normalized: NormalizedWebhookEvent,
-) -> MondayWebhookEvent:
+) -> tuple[MondayWebhookEvent, bool]:
+    now = utc_now()
+    event = _event_claim_query(db, idempotency_key=normalized.idempotency_key).one_or_none()
+    if event is not None:
+        stale_processing = (
+            event.status == "processing"
+            and (
+                event.processing_started_at is None
+                or _as_aware_utc(event.processing_started_at) <= now - WEBHOOK_PROCESSING_LEASE
+            )
+        )
+        if event.status not in {"failed", "received"} and not stale_processing:
+            db.commit()
+            return event, False
+
+        event.status = "processing"
+        event.processing_started_at = now
+        event.processed_at = None
+        event.error = None
+        event.attempt_count = (event.attempt_count or 0) + 1
+        event.payload_json = payload
+        db.commit()
+        db.refresh(event)
+        return event, True
+
     event = MondayWebhookEvent(
         id=uuid.uuid4(),
         idempotency_key=normalized.idempotency_key,
@@ -209,14 +251,20 @@ def _create_event_record(
         event_type=normalized.event_type,
         column_id=normalized.column_id,
         payload_json=payload,
-        received_at=utc_now(),
+        received_at=now,
         authenticated=True,
-        status="received",
+        processing_started_at=now,
+        attempt_count=1,
+        status="processing",
     )
-    db.add(event)
-    db.commit()
+    try:
+        db.add(event)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return _claim_event_record(db, payload, normalized)
     db.refresh(event)
-    return event
+    return event, True
 
 
 def _mark_event(
@@ -229,6 +277,7 @@ def _mark_event(
     event.status = status
     event.error = error
     event.processed_at = utc_now()
+    event.processing_started_at = None
     db.commit()
 
 
@@ -279,11 +328,11 @@ def monday_webhook(
     verify_webhook_authorization(authorization, request, shared_secret_token)
 
     normalized = normalize_webhook_payload(payload)
-    existing = db.query(MondayWebhookEvent).filter_by(idempotency_key=normalized.idempotency_key).one_or_none()
-    if existing is not None:
-        return _event_response(existing, status="duplicate")
+    event, claimed = _claim_event_record(db, payload, normalized)
+    if not claimed:
+        response_status = "in_progress" if event.status == "processing" else "duplicate"
+        return _event_response(event, status=response_status)
 
-    event = _create_event_record(db, payload, normalized)
     policy = policy_from_settings()
 
     if normalized.board_id != policy.board_id:
@@ -297,18 +346,31 @@ def monday_webhook(
         access_token = get_monday_ingestion_access_token()
         item = fetch_current_source_revision_inputs(access_token, normalized.item_id)
         desired_source_revision = compute_desired_source_revision(item)
-        result = apply_auto_sync_policy_for_item(
+
+        def process_event_attempt() -> tuple[MondayWebhookEvent, str, QueueResult]:
+            event_attempt = db.get(MondayWebhookEvent, event.id)
+            if event_attempt is None:
+                raise RuntimeError("Webhook event disappeared during processing")
+            result = apply_auto_sync_policy_for_item(
+                db,
+                item,
+                trigger_type="webhook",
+                desired_source_revision=desired_source_revision,
+                policy=policy,
+            )
+            status = _status_from_queue_result(result)
+            event_attempt.status = status
+            event_attempt.processed_at = utc_now()
+            event_attempt.processing_started_at = None
+            event_attempt.error = None if status != "ignored" else result.decision.reason
+            db.commit()
+            return event_attempt, status, result
+
+        event, status, result = run_transaction_with_retry(
             db,
-            item,
-            trigger_type="webhook",
-            desired_source_revision=desired_source_revision,
-            policy=policy,
+            process_event_attempt,
+            operation_name=f"monday webhook {normalized.idempotency_key}",
         )
-        status = _status_from_queue_result(result)
-        event.status = status
-        event.processed_at = utc_now()
-        event.error = None if status != "ignored" else result.decision.reason
-        db.commit()
         return _event_response(event, status=status, result=result)
     except Exception as exc:
         db.rollback()
@@ -316,4 +378,10 @@ def monday_webhook(
         if event is not None:
             _mark_event(db, event, status="failed", error=str(exc))
         logger.exception("Failed to process monday webhook event %s", normalized.idempotency_key)
+        if is_retryable_auto_sync_error(exc):
+            raise HTTPException(
+                status_code=503,
+                detail="Webhook processing temporarily unavailable",
+                headers={"Retry-After": "1"},
+            ) from exc
         return _event_response(event, status="failed") if event is not None else {"status": "failed"}

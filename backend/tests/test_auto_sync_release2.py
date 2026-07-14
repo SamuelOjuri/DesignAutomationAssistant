@@ -16,7 +16,7 @@ from backend.app.models import AutoSyncJob, Task
 from backend.app.services.auto_sync import coalesce_auto_sync_job
 from backend.app.services.auto_sync_backfill import active_backfill_once
 from backend.app.services.auto_sync_policy import AutoSyncPolicy
-from backend.app.services.auto_sync_worker import run_due_jobs_once
+from backend.app.services.auto_sync_worker import claim_due_jobs, execute_claimed_job, run_due_jobs_once
 
 
 @dataclass
@@ -273,6 +273,46 @@ def test_worker_retries_failed_job_without_losing_durable_state(db_session):
     assert job.locked_at is None
     assert task.sync_status == "failed"
     assert task.last_sync_result == "failed"
+
+
+def test_worker_does_not_finalize_job_cancelled_during_pipeline(db_session):
+    now = datetime.now(timezone.utc)
+    task = _task()
+    db_session.add(task)
+    db_session.flush()
+    job, _ = coalesce_auto_sync_job(
+        db_session,
+        task,
+        trigger_type="backfill",
+        desired_source_revision="rev-cancelled",
+        scheduled_for=now,
+        now=now,
+    )
+    db_session.commit()
+
+    def cancelling_pipeline(db, external_task_key, access_token, force):
+        running_job = db.get(AutoSyncJob, job.id)
+        running_job.status = "cancelled"
+        running_job.locked_at = None
+        running_job.locked_by = None
+        running_job.heartbeat_at = None
+        db.commit()
+        return FakeSyncResult(status="done", snapshot_version="rev-cancelled")
+
+    claimed = claim_due_jobs(db_session, worker_id="worker-1", now=now)
+    status = execute_claimed_job(
+        db_session,
+        claimed[0].id,
+        worker_id="worker-1",
+        access_token="service-token",
+        pipeline_runner=cancelling_pipeline,
+    )
+
+    db_session.refresh(task)
+    db_session.refresh(job)
+    assert status == "not_claimed"
+    assert job.status == "cancelled"
+    assert task.last_indexed_source_revision is None
 
 
 def test_active_backfill_dry_run_lists_only_configured_active_groups(db_session, monkeypatch):

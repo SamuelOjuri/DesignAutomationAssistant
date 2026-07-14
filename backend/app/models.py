@@ -231,6 +231,8 @@ class MondayWebhookEvent(Base):
     received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     authenticated = Column(Boolean, nullable=False, server_default="false")
     processed_at = Column(DateTime(timezone=True), nullable=True)
+    processing_started_at = Column(DateTime(timezone=True), nullable=True)
+    attempt_count = Column(Integer, nullable=False, server_default="0", default=0)
     status = Column(String, nullable=False)
     error = Column(Text, nullable=True)
 

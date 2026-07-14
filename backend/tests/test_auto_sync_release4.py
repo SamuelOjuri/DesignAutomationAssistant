@@ -7,6 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -92,6 +93,10 @@ def _monday_item(*, item_id: str = "item-1", group_id: str = "topics", group_tit
         "updates": [],
         "column_values": [],
     }
+
+
+class FakeDeadlockError(Exception):
+    pgcode = "40P01"
 
 
 def test_webhook_challenge_responds_without_auth(client):
@@ -278,3 +283,78 @@ def test_webhook_uses_current_item_state_for_out_of_order_events(client, db_sess
     assert task.auto_sync_state == "completed_retained"
     assert task.completed_at is not None
     assert task.purge_after is not None
+
+
+def test_webhook_retries_deadlock_and_commits_once(client, db_session, monkeypatch):
+    monkeypatch.setattr(monday_webhooks, "get_monday_ingestion_access_token", lambda: "service-token")
+    monkeypatch.setattr(
+        monday_webhooks,
+        "fetch_current_source_revision_inputs",
+        lambda token, item_id: _monday_item(item_id=item_id),
+    )
+    monkeypatch.setattr(monday_webhooks, "compute_desired_source_revision", lambda item: "rev-deadlock")
+    monkeypatch.setattr("backend.app.services.db_retry.time.sleep", lambda delay: None)
+
+    real_apply = monday_webhooks.apply_auto_sync_policy_for_item
+    calls = {"count": 0}
+
+    def flaky_apply(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise OperationalError("UPDATE auto_sync_jobs", {}, FakeDeadlockError())
+        return real_apply(*args, **kwargs)
+
+    monkeypatch.setattr(monday_webhooks, "apply_auto_sync_policy_for_item", flaky_apply)
+
+    response = client.post(
+        "/api/monday/webhooks",
+        json=_webhook_payload(trigger_uuid="deadlock-then-success"),
+        headers=_auth_headers(),
+    )
+
+    event = db_session.query(MondayWebhookEvent).one()
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
+    assert calls["count"] == 2
+    assert event.status == "queued"
+    assert event.attempt_count == 1
+    assert db_session.query(AutoSyncJob).count() == 1
+
+
+def test_failed_deadlock_event_can_be_redelivered(client, db_session, monkeypatch):
+    monkeypatch.setattr(monday_webhooks, "get_monday_ingestion_access_token", lambda: "service-token")
+    monkeypatch.setattr(
+        monday_webhooks,
+        "fetch_current_source_revision_inputs",
+        lambda token, item_id: _monday_item(item_id=item_id),
+    )
+    monkeypatch.setattr(monday_webhooks, "compute_desired_source_revision", lambda item: "rev-recovered")
+    monkeypatch.setattr("backend.app.services.db_retry.time.sleep", lambda delay: None)
+
+    real_apply = monday_webhooks.apply_auto_sync_policy_for_item
+    monkeypatch.setattr(
+        monday_webhooks,
+        "apply_auto_sync_policy_for_item",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            OperationalError("UPDATE auto_sync_jobs", {}, FakeDeadlockError())
+        ),
+    )
+    payload = _webhook_payload(trigger_uuid="deadlock-redelivery")
+    first_response = client.post("/api/monday/webhooks", json=payload, headers=_auth_headers())
+
+    event = db_session.query(MondayWebhookEvent).one()
+    assert first_response.status_code == 503
+    assert first_response.headers["retry-after"] == "1"
+    assert event.status == "failed"
+    assert event.attempt_count == 1
+
+    monkeypatch.setattr(monday_webhooks, "apply_auto_sync_policy_for_item", real_apply)
+    second_response = client.post("/api/monday/webhooks", json=payload, headers=_auth_headers())
+
+    db_session.refresh(event)
+    assert second_response.status_code == 200
+    assert second_response.json()["status"] == "queued"
+    assert event.status == "queued"
+    assert event.attempt_count == 2
+    assert db_session.query(MondayWebhookEvent).count() == 1
+    assert db_session.query(AutoSyncJob).count() == 1

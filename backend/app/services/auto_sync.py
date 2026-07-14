@@ -19,6 +19,7 @@ from .auto_sync_policy import (
     build_external_task_key,
     policy_from_settings,
 )
+from .db_retry import AutoSyncConcurrencyError
 from .storage_ingest import compute_snapshot_version
 
 
@@ -62,6 +63,38 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _supports_row_locks(db: Session) -> bool:
+    return db.bind is not None and db.bind.dialect.name == "postgresql"
+
+
+def _active_jobs_query(db: Session, *, board_id: str, item_id: str):
+    query = (
+        db.query(AutoSyncJob)
+        .filter(
+            AutoSyncJob.board_id == str(board_id),
+            AutoSyncJob.item_id == str(item_id),
+            AutoSyncJob.status.in_(ACTIVE_JOB_STATUSES),
+        )
+        .order_by(AutoSyncJob.created_at.asc(), AutoSyncJob.id.asc())
+    )
+    return query.with_for_update() if _supports_row_locks(db) else query
+
+
+def lock_auto_sync_state(
+    db: Session,
+    *,
+    board_id: str,
+    item_id: str,
+    external_task_key: str,
+) -> tuple[list[AutoSyncJob], Optional[Task]]:
+    active_jobs = _active_jobs_query(db, board_id=board_id, item_id=item_id).all()
+    task_query = db.query(Task).filter(Task.external_task_key == external_task_key)
+    if _supports_row_locks(db):
+        task_query = task_query.with_for_update()
+    task = task_query.one_or_none()
+    return active_jobs, task
+
+
 def item_metadata_from_monday_item(
     item: dict[str, Any],
     *,
@@ -96,9 +129,13 @@ def upsert_auto_sync_task(
     *,
     lifecycle_state: str,
     now: Optional[datetime] = None,
+    existing_task: Optional[Task] = None,
+    task_lookup_complete: bool = False,
 ) -> tuple[Task, bool]:
     now = now or utc_now()
-    task = db.get(Task, metadata.external_task_key)
+    task = existing_task
+    if not task_lookup_complete:
+        task = db.get(Task, metadata.external_task_key)
     created = False
     if task is None:
         task = Task(
@@ -113,7 +150,10 @@ def upsert_auto_sync_task(
                 db.flush([task])
             created = True
         except IntegrityError:
-            task = db.get(Task, metadata.external_task_key)
+            task_query = db.query(Task).filter(Task.external_task_key == metadata.external_task_key)
+            if task_lookup_complete and _supports_row_locks(db):
+                task_query = task_query.with_for_update()
+            task = task_query.one_or_none()
             if task is None:
                 raise
 
@@ -157,22 +197,21 @@ def coalesce_auto_sync_job(
     scheduled_for: Optional[datetime] = None,
     debounce_seconds: Optional[int] = None,
     now: Optional[datetime] = None,
+    existing_job: Optional[AutoSyncJob] = None,
+    active_job_lookup_complete: bool = False,
 ) -> tuple[AutoSyncJob, bool]:
     now = now or utc_now()
     if scheduled_for is None:
         delay = debounce_seconds if debounce_seconds is not None else policy_from_settings().debounce_seconds
         scheduled_for = now + timedelta(seconds=delay)
 
-    job = (
-        db.query(AutoSyncJob)
-        .filter(
-            AutoSyncJob.board_id == task.board_id,
-            AutoSyncJob.item_id == task.item_id,
-            AutoSyncJob.status.in_(ACTIVE_JOB_STATUSES),
-        )
-        .order_by(AutoSyncJob.created_at.asc())
-        .first()
-    )
+    job = existing_job
+    if not active_job_lookup_complete:
+        job = _active_jobs_query(
+            db,
+            board_id=task.board_id,
+            item_id=task.item_id,
+        ).first()
     created = False
     was_running = False
     if job is None:
@@ -196,17 +235,16 @@ def coalesce_auto_sync_job(
                 db.flush([candidate_job])
             job = candidate_job
             created = True
-        except IntegrityError:
-            job = (
-                db.query(AutoSyncJob)
-                .filter(
-                    AutoSyncJob.board_id == task.board_id,
-                    AutoSyncJob.item_id == task.item_id,
-                    AutoSyncJob.status.in_(ACTIVE_JOB_STATUSES),
-                )
-                .order_by(AutoSyncJob.created_at.asc())
-                .first()
-            )
+        except IntegrityError as exc:
+            if active_job_lookup_complete:
+                raise AutoSyncConcurrencyError(
+                    "An active auto-sync job was created concurrently"
+                ) from exc
+            job = _active_jobs_query(
+                db,
+                board_id=task.board_id,
+                item_id=task.item_id,
+            ).first()
             if job is None:
                 raise
 
@@ -244,17 +282,14 @@ def cancel_active_auto_sync_jobs(
     item_id: str,
     reason: str,
     now: Optional[datetime] = None,
+    existing_jobs: Optional[list[AutoSyncJob]] = None,
+    active_job_lookup_complete: bool = False,
 ) -> int:
     now = now or utc_now()
-    jobs = (
-        db.query(AutoSyncJob)
-        .filter(
-            AutoSyncJob.board_id == str(board_id),
-            AutoSyncJob.item_id == str(item_id),
-            AutoSyncJob.status.in_(ACTIVE_JOB_STATUSES),
-        )
-        .all()
-    )
+    jobs = existing_jobs
+    if not active_job_lookup_complete:
+        jobs = _active_jobs_query(db, board_id=board_id, item_id=item_id).all()
+    jobs = jobs or []
     for job in jobs:
         job.status = "cancelled"
         job.completed_at = now
@@ -285,7 +320,12 @@ def apply_auto_sync_policy_for_item(
     if not decision.should_track_task:
         return QueueResult(task=None, job=None, decision=decision)
 
-    task = db.get(Task, metadata.external_task_key)
+    active_jobs, task = lock_auto_sync_state(
+        db,
+        board_id=metadata.board_id,
+        item_id=metadata.item_id,
+        external_task_key=metadata.external_task_key,
+    )
     created_task = False
     job = None
     created_job = False
@@ -299,6 +339,8 @@ def apply_auto_sync_policy_for_item(
             metadata,
             lifecycle_state=decision.lifecycle_state or "active",
             now=now,
+            existing_task=task,
+            task_lookup_complete=True,
         )
     elif decision.lifecycle_state == "completed_retained":
         task.auto_sync_state = "completed_retained"
@@ -316,6 +358,8 @@ def apply_auto_sync_policy_for_item(
             item_id=metadata.item_id,
             reason=decision.reason,
             now=now,
+            existing_jobs=active_jobs,
+            active_job_lookup_complete=True,
         )
 
     if (
@@ -342,6 +386,8 @@ def apply_auto_sync_policy_for_item(
             scheduled_for=now if schedule_immediately else None,
             debounce_seconds=policy.debounce_seconds,
             now=now,
+            existing_job=active_jobs[0] if active_jobs else None,
+            active_job_lookup_complete=True,
         )
 
     return QueueResult(task=task, job=job, decision=decision, created_task=created_task, created_job=created_job)

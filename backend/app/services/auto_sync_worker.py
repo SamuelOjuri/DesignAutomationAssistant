@@ -56,17 +56,45 @@ def _retry_delay(attempt_count: int) -> timedelta:
     return timedelta(seconds=seconds)
 
 
-def _task_for_job(db: Session, job: AutoSyncJob) -> Optional[Task]:
+def _task_for_job(db: Session, job: AutoSyncJob, *, for_update: bool = False) -> Optional[Task]:
     if job.external_task_key:
-        task = db.get(Task, job.external_task_key)
+        task_query = (
+            db.query(Task)
+            .filter(Task.external_task_key == job.external_task_key)
+            .populate_existing()
+        )
+        if for_update and _supports_skip_locked(db):
+            task_query = task_query.with_for_update()
+        task = task_query.one_or_none()
         if task is not None:
             return task
-    return (
+    task_query = (
         db.query(Task)
         .filter(Task.board_id == job.board_id, Task.item_id == job.item_id)
         .order_by(Task.created_at.asc())
-        .first()
     )
+    if for_update and _supports_skip_locked(db):
+        task_query = task_query.with_for_update()
+    return task_query.first()
+
+
+def _lock_claimed_job_and_task(
+    db: Session,
+    job_id: object,
+    *,
+    worker_id: str,
+) -> tuple[Optional[AutoSyncJob], Optional[Task]]:
+    job_query = (
+        db.query(AutoSyncJob)
+        .filter(AutoSyncJob.id == job_id)
+        .populate_existing()
+    )
+    if _supports_skip_locked(db):
+        job_query = job_query.with_for_update()
+    job = job_query.one_or_none()
+    if job is None or job.status != "running" or job.locked_by != worker_id:
+        return job, None
+    return job, _task_for_job(db, job, for_update=True)
 
 
 def _mark_task_syncing(task: Task, job: AutoSyncJob, now: datetime) -> None:
@@ -139,7 +167,7 @@ def recover_stuck_jobs(
     stuck_jobs = _with_row_locks(db, query).all()
 
     for job in stuck_jobs:
-        task = _task_for_job(db, job)
+        task = _task_for_job(db, job, for_update=True)
         job.locked_at = None
         job.locked_by = None
         job.heartbeat_at = None
@@ -192,7 +220,7 @@ def claim_due_jobs(
         job.started_at = now
         job.attempt_count = (job.attempt_count or 0) + 1
         job.updated_at = now
-        task = _task_for_job(db, job)
+        task = _task_for_job(db, job, for_update=True)
         if task is not None:
             job.external_task_key = task.external_task_key
             _mark_task_syncing(task, job, now)
@@ -255,25 +283,69 @@ def execute_claimed_job(
 
     task = _task_for_job(db, job)
     if task is None:
+        job, task = _lock_claimed_job_and_task(db, job_id, worker_id=worker_id)
+        if job is None:
+            db.rollback()
+            return "missing"
+        if job.status != "running" or job.locked_by != worker_id:
+            db.rollback()
+            return "not_claimed"
+        if task is not None:
+            db.rollback()
+            task = _task_for_job(db, job)
+        else:
+            _finish_job(job, status="failed", now=now, error="Task not found for auto-sync job")
+            db.commit()
+            return "failed"
+
+    if job.desired_source_revision and job.desired_source_revision == task.last_indexed_source_revision:
+        job, task = _lock_claimed_job_and_task(db, job_id, worker_id=worker_id)
+        if job is None:
+            db.rollback()
+            return "missing"
+        if job.status != "running" or job.locked_by != worker_id:
+            db.rollback()
+            return "not_claimed"
+        if task is None:
+            _finish_job(job, status="failed", now=now, error="Task not found for auto-sync job")
+            db.commit()
+            return "failed"
+        if not (
+            job.desired_source_revision
+            and job.desired_source_revision == task.last_indexed_source_revision
+        ):
+            db.rollback()
+            job = db.get(AutoSyncJob, job_id)
+            task = _task_for_job(db, job) if job is not None else None
+            if job is None or task is None:
+                return "missing"
+        else:
+            _finish_job(job, status="skipped", now=now)
+            _mark_task_completed(task, result="skipped", source_revision=job.desired_source_revision, now=now)
+            db.commit()
+            return "skipped"
+
+    if task is None:
         _finish_job(job, status="failed", now=now, error="Task not found for auto-sync job")
         db.commit()
         return "failed"
-
-    if job.desired_source_revision and job.desired_source_revision == task.last_indexed_source_revision:
-        _finish_job(job, status="skipped", now=now)
-        _mark_task_completed(task, result="skipped", source_revision=job.desired_source_revision, now=now)
-        db.commit()
-        return "skipped"
 
     job_id_for_retry = job.id
     try:
         token = access_token or get_monday_ingestion_access_token()
         result = pipeline_runner(db, task.external_task_key, token, force)
         finished_at = utc_now()
-        job = db.get(AutoSyncJob, job_id)
-        task = db.get(Task, task.external_task_key)
-        if job is None or task is None:
+        job, task = _lock_claimed_job_and_task(db, job_id, worker_id=worker_id)
+        if job is None:
+            db.rollback()
             return "missing"
+        if job.status != "running" or job.locked_by != worker_id:
+            db.rollback()
+            return "not_claimed"
+        if task is None:
+            _finish_job(job, status="failed", now=finished_at, error="Task not found for auto-sync job")
+            db.commit()
+            return "failed"
         source_revision = result.snapshot_version or job.desired_source_revision
         result_status = "unchanged" if result.status == "unchanged" else "done"
         _finish_job(job, status="completed", now=finished_at)
@@ -283,10 +355,17 @@ def execute_claimed_job(
     except Exception as exc:
         db.rollback()
         failed_at = utc_now()
-        job = db.get(AutoSyncJob, job_id_for_retry)
-        task = _task_for_job(db, job) if job is not None else None
+        job, task = _lock_claimed_job_and_task(
+            db,
+            job_id_for_retry,
+            worker_id=worker_id,
+        )
         if job is None:
+            db.rollback()
             return "missing"
+        if job.status != "running" or job.locked_by != worker_id:
+            db.rollback()
+            return "not_claimed"
         error = str(exc)[:1000]
         job.locked_at = None
         job.locked_by = None
