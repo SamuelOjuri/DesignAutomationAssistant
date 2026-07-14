@@ -6,102 +6,76 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..auth import CurrentUser, get_current_user, require_csrf_token
 from ..config import settings
 from ..db import get_db
 from ..schemas import ChatRequest, ChatMessage, ChatCompleteResponse
 from ..services.auto_sync_purge import record_meaningful_access
-from ..services.retrieval import get_task_context, search_task_docs
+from ..services.retrieval import get_task_context, search_task_docs_batch
 from .tasks import require_task_access
 
 router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
 
 
-def _describe_response(response: Any) -> str:
-    descriptions = []
-    for candidate in getattr(response, "candidates", []) or []:
-        finish_reason = getattr(candidate, "finish_reason", None)
-        content = getattr(candidate, "content", None)
-        part_kinds = []
-        for part in getattr(content, "parts", []) or []:
-            kind = []
-            if getattr(part, "text", None):
-                kind.append(f"text[{len(str(part.text))}]")
-            if getattr(part, "function_call", None):
-                kind.append(f"function_call[{getattr(part.function_call, 'name', '?')}]")
-            if getattr(part, "thought", None):
-                kind.append("thought")
-            part_kinds.append("+".join(kind) or "empty")
-        descriptions.append(f"finish_reason={finish_reason} parts={part_kinds}")
-    return "; ".join(descriptions) or "no candidates"
+class _RetrievalPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-
-def _history_to_contents(history: Optional[List[ChatMessage]]) -> List[types.Content]:
-    contents: List[types.Content] = []
-    if not history:
-        return contents
-
-    for msg in history:
-        # Map app roles -> GenAI roles
-        role = "user" if msg.role == "user" else "model"
-        text = (msg.content or "").strip()
-        if not text:
-            continue
-        contents.append(
-            types.Content(role=role, parts=[types.Part(text=text)])
-        )
-    return contents
-
-
-def _build_tool_config() -> types.GenerateContentConfig:
-    tool_decls = [
-        {
-            "name": "get_task_context",
-            "description": "Get structured task context for the current task.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-        {
-            "name": "search_task_docs",
-            "description": "Search task documents for relevant passages.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query text.",
-                    },
-                    "k": {
-                        "type": "integer",
-                        "description": "Max number of results (1-20).",
-                    },
-                },
-                "required": ["query"],
-            },
-        },
-    ]
-
-    tools = types.Tool(function_declarations=tool_decls)
-
-    # #if uncondition tool call is needed
-    # tool_config = types.ToolConfig(
-    #     function_calling_config=types.FunctionCallingConfig(
-    #         mode="ANY",
-    #         allowed_function_names=["search_task_docs"],  # or include get_task_context too
-    #     )
-    # )
-
-    return types.GenerateContentConfig(
-        tools=[tools],
-        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-        system_instruction=(
-            "You are a helpful technical design assistant. Use tools when needed "
-            "to answer questions about the current task. After tool results are "
-            "provided, produce a concise plain-text answer. When using retrieved "
-            "sources, base your answer strictly on tool results."
-        ),
+    search_queries: List[str] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Distinct searches needed to answer the user's question.",
     )
+    third_search_justified: bool = Field(
+        default=False,
+        description="True only when the question contains three independent subquestions.",
+    )
+    exhaustive: bool = Field(
+        default=False,
+        description="Whether the question asks for an exhaustive or absence-sensitive answer.",
+    )
+
+
+def _normalize_search_query(query: Any) -> str:
+    if not isinstance(query, str):
+        return ""
+    return " ".join(query.split())
+
+
+def _sanitize_retrieval_plan(
+    plan: Optional[_RetrievalPlan],
+    original_question: str,
+) -> _RetrievalPlan:
+    fallback_query = _normalize_search_query(original_question)
+    if plan is None:
+        return _RetrievalPlan(
+            search_queries=[fallback_query] if fallback_query else [],
+        )
+
+    query_limit = (
+        settings.chat_retrieval_max_compound_queries
+        if plan.third_search_justified
+        else settings.chat_retrieval_max_queries
+    )
+    normalized_queries: List[str] = []
+    seen_queries = set()
+
+    for query in plan.search_queries:
+        normalized_query = _normalize_search_query(query)
+        dedupe_key = normalized_query.casefold()
+        if not normalized_query or dedupe_key in seen_queries:
+            continue
+        seen_queries.add(dedupe_key)
+        normalized_queries.append(normalized_query)
+        if len(normalized_queries) >= query_limit:
+            break
+
+    if plan.search_queries and not normalized_queries and fallback_query:
+        normalized_queries.append(fallback_query)
+
+    return plan.model_copy(update={"search_queries": normalized_queries})
 
 
 def _response_text(response: Any) -> str:
@@ -124,18 +98,93 @@ def _limited_text(value: Any, limit: int = 2000) -> str:
     return text if len(text) <= limit else f"{text[:limit]}..."
 
 
-def _sources_payload(context: Any, citations: List[Dict[str, Any]]) -> str:
+def _history_payload(
+    history: Optional[List[ChatMessage]],
+    limit: int = 8,
+) -> List[Dict[str, str]]:
+    messages: List[Dict[str, str]] = []
+    for message in (history or [])[-limit:]:
+        content = _limited_text(message.content, 2000)
+        if content:
+            messages.append({"role": message.role, "content": content})
+    return messages
+
+
+def _plan_retrieval(
+    client: genai.Client,
+    *,
+    prompt: str,
+    history: Optional[List[ChatMessage]],
+    context: Any,
+) -> _RetrievalPlan:
+    planning_config = types.GenerateContentConfig(
+        temperature=0.1,
+        response_mime_type="application/json",
+        response_schema=_RetrievalPlan,
+        system_instruction=(
+            "Plan bounded document retrieval for a technical design assistant. "
+            "Return no search queries when the supplied task context is enough to "
+            "answer the question. Otherwise return one or two distinct, focused "
+            "queries. Return three only when the question has three independent "
+            "subquestions, and then set third_search_justified to true. Mark "
+            "exhaustive true for inventories, audits, chronologies, contradiction "
+            "checks, completeness requests, or claims that something is absent. "
+            "Do not answer the question."
+        ),
+    )
+    response = client.models.generate_content(
+        model=settings.gemini_model,
+        contents=json.dumps(
+            {
+                "user_question": prompt,
+                "recent_history": _history_payload(history),
+                "task_context": context,
+            },
+            default=str,
+        ),
+        config=planning_config,
+    )
+
+    parsed = getattr(response, "parsed", None)
+    if isinstance(parsed, _RetrievalPlan):
+        return parsed
+    if isinstance(parsed, dict):
+        return _RetrievalPlan.model_validate(parsed)
+
+    response_text = _response_text(response)
+    if not response_text:
+        raise ValueError("Retrieval planner returned no structured plan")
+    return _RetrievalPlan.model_validate_json(response_text)
+
+
+def _synthesis_payload(
+    *,
+    prompt: str,
+    history: Optional[List[ChatMessage]],
+    context: Any,
+    plan: _RetrievalPlan,
+    citations: List[Dict[str, Any]],
+) -> str:
     return json.dumps(
         {
+            "user_question": prompt,
+            "recent_history": _history_payload(history),
             "task_context": context,
-            "citations": [
+            "retrieval_plan": plan.model_dump(),
+            "selected_evidence": [
                 {
+                    "chunkId": citation.get("chunkId"),
                     "filename": citation.get("filename"),
                     "page": citation.get("page"),
                     "section": citation.get("section"),
                     "snippet": _limited_text(citation.get("snippet"), 1800),
+                    "score": citation.get("score"),
+                    "matchedQueries": citation.get("matchedQueries"),
+                    "selectedByQuery": citation.get("selectedByQuery"),
                 }
-                for citation in citations[:6]
+                for citation in citations[
+                    : settings.chat_retrieval_max_evidence_chunks
+                ]
             ],
         },
         default=str,
@@ -183,7 +232,19 @@ def _dedupe_citations_for_display(
             continue
         seen.add(key)
 
-        display_citation = dict(citation)
+        display_citation = {
+            key: citation[key]
+            for key in (
+                "filename",
+                "page",
+                "section",
+                "snippet",
+                "score",
+                "fileId",
+                "mondayAssetId",
+            )
+            if key in citation
+        }
         display_citation["section"] = _display_section(citation.get("section"))
         deduped.append(display_citation)
         if len(deduped) >= limit:
@@ -192,7 +253,12 @@ def _dedupe_citations_for_display(
     return deduped
 
 
-def _fallback_answer_from_sources(context: Any, citations: List[Dict[str, Any]]) -> str:
+def _fallback_answer_from_sources(
+    context: Any,
+    citations: List[Dict[str, Any]],
+    *,
+    exhaustive: bool,
+) -> str:
     details: List[str] = []
     if isinstance(context, dict):
         for key, value in context.items():
@@ -208,209 +274,133 @@ def _fallback_answer_from_sources(context: Any, citations: List[Dict[str, Any]])
         if citation.get("snippet")
     ]
 
-    lines = ["I found relevant task context and source material, but the model did not produce a final synthesis."]
+    lines = ["The model did not produce a final synthesis."]
+    if exhaustive:
+        lines.append(
+            "This answer is non-exhaustive because only bounded evidence was reviewed."
+        )
     if details:
         lines.append("Task details: " + "; ".join(details))
     if snippets:
         lines.append("Relevant source excerpts: " + " | ".join(snippets))
+    if not details and not snippets:
+        lines.append("No usable task context or document evidence was available.")
     return "\n\n".join(lines)
 
 
-def _synthesize_without_tools(
+def _synthesize_answer(
     client: genai.Client,
     *,
     prompt: str,
+    history: Optional[List[ChatMessage]],
     context: Any,
+    plan: _RetrievalPlan,
     citations: List[Dict[str, Any]],
 ) -> str:
-    if context is None and not citations:
-        return ""
-
     synthesis_config = types.GenerateContentConfig(
+        temperature=0.2,
         system_instruction=(
             "You are a helpful technical design assistant. Produce a concise "
-            "plain-text answer using only the supplied task context and source "
-            "excerpts. Do not call tools. If the supplied material is incomplete, "
-            "say what is missing."
+            "plain-text answer using only the supplied task context and selected "
+            "evidence. Do not call tools and do not invent facts. If the supplied "
+            "material is incomplete, identify the missing evidence needed for a "
+            "firmer answer. When retrieval_plan.exhaustive is true, explicitly "
+            "state that the answer is non-exhaustive because retrieval was bounded; "
+            "apply the same qualification to any broad inventory, audit, chronology, "
+            "contradiction, completeness, or absence request even if that flag is "
+            "false. Never claim corpus-wide completeness or prove absence from these "
+            "results."
         )
     )
     response = client.models.generate_content(
         model=settings.gemini_model,
-        contents=[
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part(
-                        text=(
-                            f"User question:\n{prompt}\n\n"
-                            f"Task context and source excerpts:\n{_sources_payload(context, citations)}"
-                        )
-                    )
-                ],
-            )
-        ],
+        contents=_synthesis_payload(
+            prompt=prompt,
+            history=history,
+            context=context,
+            plan=plan,
+            citations=citations,
+        ),
         config=synthesis_config,
     )
     return _response_text(response)
 
 
-def _function_response_part(
-    *,
-    name: str | None,
-    response: dict[str, Any],
-    call_id: str | None,
-) -> types.Part:
-    function_response_kwargs = {
-        "name": name or "unknown_tool",
-        "response": {"result": response},
-    }
-    if call_id:
-        function_response_kwargs["id"] = call_id
-
-    return types.Part(
-        function_response=types.FunctionResponse(**function_response_kwargs)
-    )
-
-
-def _run_with_tools(
+def _run_bounded_retrieval(
     db: Session,
     external_task_key: str,
     prompt: str,
     history: Optional[List[ChatMessage]],
-    max_turns: int = 8,
 ) -> tuple[str, List[Dict[str, Any]], bool]:
     client = genai.Client(api_key=settings.gemini_api_key)
-    config = _build_tool_config()
+    context = get_task_context(db, external_task_key)
 
-    contents = _history_to_contents(history)
-    contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
-
-    latest_citations: List[Dict[str, Any]] = []
-    latest_context: Any = None
-
-    for _ in range(max_turns):
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=contents,
-            config=config,
+    try:
+        proposed_plan = _plan_retrieval(
+            client,
+            prompt=prompt,
+            history=history,
+            context=context,
         )
+    except Exception as exc:
+        logger.warning(
+            "chat: retrieval planning failed; using original question (%s)",
+            type(exc).__name__,
+        )
+        proposed_plan = None
 
-        function_calls = response.function_calls or []
-        if not function_calls:
-            answer = _response_text(response)
-            if answer:
-                logger.info(
-                    "chat: final answer from tool loop (%s chars)",
-                    len(answer),
-                )
-                logger.debug(
-                    "chat: final answer citations=%s",
-                    _citation_debug_payload(latest_citations),
-                )
-                return answer, latest_citations, True
+    plan = _sanitize_retrieval_plan(proposed_plan, prompt)
+    logger.info(
+        "chat: retrieval plan searches=%s exhaustive=%s",
+        len(plan.search_queries),
+        plan.exhaustive,
+    )
+    logger.debug("chat: planned search queries=%r", plan.search_queries)
 
+    citations: List[Dict[str, Any]] = []
+    if plan.search_queries:
+        try:
+            citations = search_task_docs_batch(
+                db,
+                external_task_key,
+                plan.search_queries,
+                k=settings.chat_retrieval_candidates_per_query,
+            )
+        except Exception as exc:
             logger.warning(
-                "chat: empty final text; response: %s", _describe_response(response)
+                "chat: batch retrieval failed; synthesizing without document "
+                "evidence (%s)",
+                type(exc).__name__,
             )
+    logger.info("chat: selected evidence chunks=%s", len(citations))
+    logger.debug(
+        "chat: selected evidence=%s",
+        _citation_debug_payload(citations),
+    )
 
-            synthesis = _synthesize_without_tools(
-                client,
-                prompt=prompt,
-                context=latest_context,
-                citations=latest_citations,
-            )
-            if synthesis:
-                logger.info(
-                    "chat: answer from no-tool synthesis (%s chars)", len(synthesis)
-                )
-                return synthesis, latest_citations, True
-
-            if latest_context is not None or latest_citations:
-                logger.warning(
-                    "chat: synthesis empty; grounded fallback (context=%s, citations=%s)",
-                    latest_context is not None,
-                    len(latest_citations),
-                )
-                fallback = _fallback_answer_from_sources(latest_context, latest_citations)
-                return fallback, latest_citations, False
-
-            logger.warning("chat: no answer and no retrieved context/citations")
-            return "", latest_citations, False
-
-        contents.append(response.candidates[0].content)
-
-        tool_parts = []
-        for fc in function_calls:
-            name = getattr(fc, "name", None)
-            if name is None and hasattr(fc, "function_call"):
-                name = fc.function_call.name
-
-            args = getattr(fc, "args", None)
-            if args is None and hasattr(fc, "function_call"):
-                args = fc.function_call.args
-
-            call_id = getattr(fc, "id", None)
-            if call_id is None and hasattr(fc, "function_call"):
-                call_id = fc.function_call.id
-
-            if args is None:
-                args = {}
-
-            if name == "get_task_context":
-                context = get_task_context(db, external_task_key)
-                latest_context = context
-                tool_payload = {"task_context": context}
-
-            elif name == "search_task_docs":
-                query = (args.get("query") or "").strip()
-                k = args.get("k", 8)
-                try:
-                    k = max(1, min(20, int(k)))
-                except Exception:
-                    k = 8
-                results = search_task_docs(db, external_task_key, query, k=k)
-                logger.debug(
-                    "chat: search_task_docs query=%r k=%s results=%s citations=%s",
-                    query,
-                    k,
-                    len(results),
-                    _citation_debug_payload(results),
-                )
-                latest_citations = results
-                tool_payload = {"citations": results}
-
-            else:
-                tool_payload = {"error": f"Unknown tool: {name}"}
-
-            tool_parts.append(
-                _function_response_part(
-                    name=name,
-                    response=tool_payload,
-                    call_id=call_id,
-                )
-            )
-        
-        if tool_parts:
-            contents.append(types.Content(role="user", parts=tool_parts))
-
-    logger.warning("chat: tool loop exhausted max_turns=%s without final text", max_turns)
-    synthesis = _synthesize_without_tools(
+    answer = _synthesize_answer(
         client,
         prompt=prompt,
-        context=latest_context,
-        citations=latest_citations,
+        history=history,
+        context=context,
+        plan=plan,
+        citations=citations,
     )
-    if synthesis:
-        logger.info("chat: answer from post-loop synthesis (%s chars)", len(synthesis))
-        return synthesis, latest_citations, True
+    if answer:
+        logger.info("chat: final synthesis (%s chars)", len(answer))
+        return answer, citations, True
 
     logger.warning(
-        "chat: post-loop synthesis empty; grounded fallback (context=%s, citations=%s)",
-        latest_context is not None,
-        len(latest_citations),
+        "chat: synthesis empty; grounded fallback (context=%s, citations=%s)",
+        context is not None,
+        len(citations),
     )
-    fallback = _fallback_answer_from_sources(latest_context, latest_citations)
-    return fallback, latest_citations, False
+    fallback = _fallback_answer_from_sources(
+        context,
+        citations,
+        exhaustive=plan.exhaustive,
+    )
+    return fallback, citations, False
 
 
 @router.post("/chat/complete", response_model=ChatCompleteResponse)
@@ -425,7 +415,7 @@ def chat_complete(
         record_meaningful_access(db, task)
         db.commit()
 
-    answer, citations, ok = _run_with_tools(
+    answer, citations, ok = _run_bounded_retrieval(
         db=db,
         external_task_key=payload.externalTaskKey,
         prompt=payload.message,

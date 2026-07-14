@@ -324,7 +324,11 @@ def test_cookie_session_resolves_handoff_and_authorizes_task_chat_and_signed_url
     assert signed_url_response.status_code == 200
     assert signed_url_response.json()["url"] == "https://signed.example/source.pdf"
 
-    monkeypatch.setattr(chat, "_run_with_tools", lambda **kwargs: ("answer", [], True))
+    monkeypatch.setattr(
+        chat,
+        "_run_bounded_retrieval",
+        lambda **kwargs: ("answer", [], True),
+    )
     chat_response = client.post(
         "/api/chat/complete",
         json={"externalTaskKey": "acct:board-1:item-1", "message": "hello"},

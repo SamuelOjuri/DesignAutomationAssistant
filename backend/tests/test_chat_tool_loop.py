@@ -1,165 +1,341 @@
+import json
 from types import SimpleNamespace
 
-from google.genai import types
+import pytest
 
 from backend.app.routes import chat
 
 
 class FakeResponse:
-    def __init__(self, *, function_calls=None, candidates=None, text=""):
-        self.function_calls = function_calls or []
+    def __init__(self, *, candidates=None, text="", parsed=None):
         self.candidates = candidates or []
         self.text = text
+        self.parsed = parsed
 
 
-def test_run_with_tools_returns_function_response_as_user_content(monkeypatch):
-    generated_contents = []
+def test_sanitize_retrieval_plan_normalizes_deduplicates_and_limits_queries():
+    normal_plan = chat._RetrievalPlan(
+        search_queries=["  Roof   U-value  ", "roof u-VALUE", "Roof falls"],
+        third_search_justified=False,
+        exhaustive=True,
+    )
+
+    sanitized = chat._sanitize_retrieval_plan(normal_plan, "original question")
+
+    assert sanitized.search_queries == ["Roof U-value", "Roof falls"]
+    assert sanitized.third_search_justified is False
+    assert sanitized.exhaustive is True
+
+    capped_normal = chat._sanitize_retrieval_plan(
+        chat._RetrievalPlan(search_queries=["U-values", "roof falls", "drainage"]),
+        "original question",
+    )
+    assert capped_normal.search_queries == ["U-values", "roof falls"]
+
+    compound = chat._sanitize_retrieval_plan(
+        chat._RetrievalPlan(
+            search_queries=["U-values", "roof falls", "drainage"],
+            third_search_justified=True,
+        ),
+        "original question",
+    )
+    assert compound.search_queries == ["U-values", "roof falls", "drainage"]
+
+
+def test_retrieval_plan_rejects_more_than_three_queries():
+    with pytest.raises(ValueError):
+        chat._RetrievalPlan(search_queries=["one", "two", "three", "four"])
+
+
+def test_sanitize_retrieval_plan_falls_back_only_for_failed_or_unusable_plans():
+    failed = chat._sanitize_retrieval_plan(None, "  Original   question  ")
+    unusable = chat._sanitize_retrieval_plan(
+        chat._RetrievalPlan(search_queries=["  "]),
+        "  Original   question  ",
+    )
+    context_only = chat._sanitize_retrieval_plan(
+        chat._RetrievalPlan(search_queries=[]),
+        "Original question",
+    )
+
+    assert failed.search_queries == ["Original question"]
+    assert unusable.search_queries == ["Original question"]
+    assert context_only.search_queries == []
+
+
+def test_synthesis_keeps_twelve_chunks_while_ui_keeps_six_public_citations():
+    citations = [
+        {
+            "chunkId": f"chunk-{index}",
+            "fileId": f"file-{index}",
+            "filename": f"source-{index}.pdf",
+            "section": f"section-{index}",
+            "snippet": f"evidence {index}",
+            "matchedQuery": "roof design",
+            "matchedQueryIndex": 0,
+        }
+        for index in range(15)
+    ]
+    plan = chat._RetrievalPlan(
+        search_queries=["roof design"],
+        exhaustive=True,
+    )
+
+    synthesis_payload = json.loads(
+        chat._synthesis_payload(
+            prompt="List every roof requirement",
+            history=[chat.ChatMessage(role="user", content="Review the roof")],
+            context={"status": "Design"},
+            plan=plan,
+            citations=citations,
+        )
+    )
+    display_citations = chat._dedupe_citations_for_display(citations)
+
+    assert synthesis_payload["user_question"] == "List every roof requirement"
+    assert synthesis_payload["recent_history"] == [
+        {"role": "user", "content": "Review the roof"}
+    ]
+    assert synthesis_payload["task_context"] == {"status": "Design"}
+    assert synthesis_payload["retrieval_plan"] == plan.model_dump()
+    assert len(synthesis_payload["selected_evidence"]) == 12
+    assert len(display_citations) == 6
+    assert all("chunkId" not in citation for citation in display_citations)
+    assert all("matchedQuery" not in citation for citation in display_citations)
+
+
+def test_run_bounded_retrieval_preloads_context_batches_and_forces_synthesis(
+    monkeypatch,
+):
+    events = []
+    generated = []
+    context = {"status": "Design Needed", "priority": "Low"}
+    plan = chat._RetrievalPlan(
+        search_queries=["roof U-values", "roof falls"],
+        exhaustive=False,
+    )
+    evidence = [
+        {
+            "chunkId": "chunk-1",
+            "filename": "roof.pdf",
+            "snippet": "Roof evidence",
+            "matchedQueries": ["roof U-values"],
+            "selectedByQuery": "roof U-values",
+        }
+    ]
+
+    class FakeModels:
+        def generate_content(self, *, model, contents, config):
+            generated.append({"contents": contents, "config": config})
+            if config.response_schema is chat._RetrievalPlan:
+                events.append("planning")
+                return FakeResponse(parsed=plan)
+            events.append("synthesis")
+            return FakeResponse(text="The roof requires the retrieved design values.")
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(chat.genai, "Client", FakeClient)
+
+    def fake_get_task_context(db, external_task_key):
+        events.append("context")
+        return context
+
+    def fake_search_task_docs_batch(db, external_task_key, queries, k):
+        events.append("retrieval")
+        assert queries == ["roof U-values", "roof falls"]
+        assert k == 8
+        return evidence
+
+    monkeypatch.setattr(chat, "get_task_context", fake_get_task_context)
+    monkeypatch.setattr(chat, "search_task_docs_batch", fake_search_task_docs_batch)
+
+    answer, citations, ok = chat._run_bounded_retrieval(
+        db=None,
+        external_task_key="acct:board:item",
+        prompt="What are the roof U-values and falls?",
+        history=[chat.ChatMessage(role="user", content="Review the roof design")],
+    )
+
+    assert ok is True
+    assert answer == "The roof requires the retrieved design values."
+    assert citations == evidence
+    assert events == ["context", "planning", "retrieval", "synthesis"]
+    assert len(generated) == 2
+    assert generated[0]["config"].temperature == 0.1
+    assert generated[0]["config"].tools is None
+    assert generated[1]["config"].tools is None
+
+    planning_payload = json.loads(generated[0]["contents"])
+    synthesis_payload = json.loads(generated[1]["contents"])
+    assert planning_payload["task_context"] == context
+    assert synthesis_payload["task_context"] == context
+    assert synthesis_payload["retrieval_plan"] == plan.model_dump()
+    assert synthesis_payload["selected_evidence"][0]["chunkId"] == "chunk-1"
+
+
+def test_run_bounded_retrieval_skips_search_for_context_only_question(monkeypatch):
+    generated_calls = []
+
+    class FakeModels:
+        def generate_content(self, *, model, contents, config):
+            generated_calls.append(config)
+            if config.response_schema is chat._RetrievalPlan:
+                return FakeResponse(parsed=chat._RetrievalPlan(search_queries=[]))
+            return FakeResponse(text="The task status is Design Needed.")
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(chat.genai, "Client", FakeClient)
+    monkeypatch.setattr(
+        chat, "get_task_context", lambda db, external_task_key: {"status": "Design Needed"}
+    )
+    monkeypatch.setattr(
+        chat,
+        "search_task_docs_batch",
+        lambda *args, **kwargs: pytest.fail("Context-only plan must not search"),
+    )
+
+    answer, citations, ok = chat._run_bounded_retrieval(
+        db=None,
+        external_task_key="acct:board:item",
+        prompt="What is the current status?",
+        history=None,
+    )
+
+    assert ok is True
+    assert answer == "The task status is Design Needed."
+    assert citations == []
+    assert len(generated_calls) == 2
+
+
+def test_run_bounded_retrieval_uses_original_question_when_planning_fails(
+    monkeypatch,
+):
+    generation_count = 0
     search_calls = []
 
-    model_tool_content = types.Content(
-        role="model",
-        parts=[types.Part.from_function_call(name="search_task_docs", args={"query": "summary", "k": 1})],
-    )
-
     class FakeModels:
         def generate_content(self, *, model, contents, config):
-            generated_contents.append(contents)
-            if len(generated_contents) == 1:
-                return FakeResponse(
-                    function_calls=[SimpleNamespace(id="call-1", name="search_task_docs", args={"query": "summary", "k": 1})],
-                    candidates=[SimpleNamespace(content=model_tool_content)],
-                )
-            return FakeResponse(text="The project needs a concise summary.")
+            nonlocal generation_count
+            generation_count += 1
+            if generation_count == 1:
+                raise ValueError("malformed plan")
+            synthesis_payload = json.loads(contents)
+            assert synthesis_payload["retrieval_plan"]["search_queries"] == [
+                "Summarize the roof design"
+            ]
+            return FakeResponse(text="The available roof evidence is summarized.")
 
     class FakeClient:
         def __init__(self, *, api_key):
             self.models = FakeModels()
 
     monkeypatch.setattr(chat.genai, "Client", FakeClient)
+    monkeypatch.setattr(chat, "get_task_context", lambda db, external_task_key: None)
 
-    def fake_search_task_docs(db, external_task_key, query, k=8):
-        search_calls.append({"query": query, "k": k})
-        return [{"snippet": "Relevant project details."}]
+    def fake_search_task_docs_batch(db, external_task_key, queries, k):
+        search_calls.append(queries)
+        return [{"chunkId": "chunk-1", "snippet": "Roof evidence"}]
 
-    monkeypatch.setattr(chat, "search_task_docs", fake_search_task_docs)
-
-    answer, citations, ok = chat._run_with_tools(
-        db=None,
-        external_task_key="acct:board:item",
-        prompt="Provide a concise summary",
-        history=None,
-        max_turns=2,
-    )
-
-    assert ok is True
-    assert answer == "The project needs a concise summary."
-    assert citations == [{"snippet": "Relevant project details."}]
-    assert search_calls == [{"query": "summary", "k": 1}]
-
-    function_response_content = generated_contents[1][-1]
-    assert function_response_content.role == "user"
-    function_response = function_response_content.parts[0].function_response
-    assert function_response is not None
-    assert function_response.id == "call-1"
-    assert "result" in function_response.response
-
-
-def test_run_with_tools_synthesizes_answer_after_repeated_tool_calls(monkeypatch):
-    generated_contents = []
-
-    model_tool_content = types.Content(
-        role="model",
-        parts=[types.Part.from_function_call(name="search_task_docs", args={"query": "summary", "k": 1})],
-    )
-
-    class FakeModels:
-        def generate_content(self, *, model, contents, config):
-            generated_contents.append(contents)
-            if len(generated_contents) <= 2:
-                return FakeResponse(
-                    function_calls=[SimpleNamespace(id=f"call-{len(generated_contents)}", name="search_task_docs", args={"query": "summary", "k": 1})],
-                    candidates=[SimpleNamespace(content=model_tool_content)],
-                )
-            return FakeResponse(text="This enquiry is low priority and currently needs design work.")
-
-    class FakeClient:
-        def __init__(self, *, api_key):
-            self.models = FakeModels()
-
-    monkeypatch.setattr(chat.genai, "Client", FakeClient)
     monkeypatch.setattr(
         chat,
-        "search_task_docs",
-        lambda db, external_task_key, query, k=8: [
-            {
-                "filename": "monday_columns.txt",
-                "snippet": "Priority: Low Priority. Status: Design Needed. New Enquiry.",
-            }
-        ],
+        "search_task_docs_batch",
+        fake_search_task_docs_batch,
     )
 
-    answer, citations, ok = chat._run_with_tools(
+    answer, citations, ok = chat._run_bounded_retrieval(
         db=None,
         external_task_key="acct:board:item",
-        prompt="Provide a concise summary",
+        prompt="  Summarize   the roof design  ",
         history=None,
-        max_turns=2,
     )
 
     assert ok is True
-    assert answer == "This enquiry is low priority and currently needs design work."
-    assert citations[0]["filename"] == "monday_columns.txt"
-    assert len(generated_contents) == 3
+    assert answer == "The available roof evidence is summarized."
+    assert citations == [{"chunkId": "chunk-1", "snippet": "Roof evidence"}]
+    assert search_calls == [["Summarize the roof design"]]
+    assert generation_count == 2
 
 
-def test_run_with_tools_synthesizes_when_final_tool_response_has_no_text(monkeypatch):
-    generated_contents = []
-
-    model_tool_content = types.Content(
-        role="model",
-        parts=[types.Part.from_function_call(name="search_task_docs", args={"query": "summary", "k": 1})],
-    )
+def test_run_bounded_retrieval_synthesizes_when_batch_retrieval_fails(monkeypatch):
+    generation_count = 0
 
     class FakeModels:
         def generate_content(self, *, model, contents, config):
-            generated_contents.append(contents)
-            if len(generated_contents) == 1:
+            nonlocal generation_count
+            generation_count += 1
+            if config.response_schema is chat._RetrievalPlan:
                 return FakeResponse(
-                    function_calls=[SimpleNamespace(id="call-1", name="search_task_docs", args={"query": "summary", "k": 1})],
-                    candidates=[SimpleNamespace(content=model_tool_content)],
+                    parsed=chat._RetrievalPlan(search_queries=["roof details"])
                 )
-            if len(generated_contents) == 2:
-                return FakeResponse(text="")
-            return FakeResponse(text="This enquiry is low priority and needs design work.")
+            assert json.loads(contents)["selected_evidence"] == []
+            return FakeResponse(
+                text="Document evidence was unavailable; the task context is limited."
+            )
 
     class FakeClient:
         def __init__(self, *, api_key):
             self.models = FakeModels()
 
     monkeypatch.setattr(chat.genai, "Client", FakeClient)
+    monkeypatch.setattr(chat, "get_task_context", lambda db, key: {"status": "Design"})
     monkeypatch.setattr(
         chat,
-        "search_task_docs",
-        lambda db, external_task_key, query, k=8: [
-            {
-                "filename": "monday_columns.txt",
-                "snippet": "Priority: Low Priority. Status: Design Needed.",
-            }
-        ],
+        "search_task_docs_batch",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("unavailable")),
     )
 
-    answer, citations, ok = chat._run_with_tools(
+    answer, citations, ok = chat._run_bounded_retrieval(
         db=None,
         external_task_key="acct:board:item",
-        prompt="Provide a concise summary",
+        prompt="Summarize the roof details",
         history=None,
-        max_turns=2,
     )
 
     assert ok is True
-    assert answer == "This enquiry is low priority and needs design work."
-    assert citations[0]["filename"] == "monday_columns.txt"
-    assert len(generated_contents) == 3
+    assert answer == "Document evidence was unavailable; the task context is limited."
+    assert citations == []
+    assert generation_count == 2
+
+
+def test_synthesis_requires_non_exhaustive_qualification():
+    generated = []
+
+    class FakeModels:
+        def generate_content(self, *, model, contents, config):
+            generated.append({"contents": contents, "config": config})
+            return FakeResponse(text="A bounded answer.")
+
+    client = SimpleNamespace(models=FakeModels())
+    plan = chat._RetrievalPlan(
+        search_queries=["all roof requirements"],
+        exhaustive=True,
+    )
+
+    answer = chat._synthesize_answer(
+        client,
+        prompt="List every roof requirement",
+        history=None,
+        context=None,
+        plan=plan,
+        citations=[],
+    )
+
+    assert answer == "A bounded answer."
+    assert "explicitly state that the answer is non-exhaustive" in str(
+        generated[0]["config"].system_instruction
+    )
+    assert json.loads(generated[0]["contents"])["retrieval_plan"]["exhaustive"] is True
+    assert "non-exhaustive" in chat._fallback_answer_from_sources(
+        None,
+        [],
+        exhaustive=True,
+    )
 
 
 def test_chat_complete_returns_json_answer_and_citations(monkeypatch):
@@ -183,7 +359,7 @@ def test_chat_complete_returns_json_answer_and_citations(monkeypatch):
     monkeypatch.setattr(chat, "record_meaningful_access", fake_record_meaningful_access)
     monkeypatch.setattr(
         chat,
-        "_run_with_tools",
+        "_run_bounded_retrieval",
         lambda **kwargs: (
             "This is the final project summary.",
             [

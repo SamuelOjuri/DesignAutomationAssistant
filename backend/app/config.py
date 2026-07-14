@@ -1,6 +1,6 @@
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator  
+from pydantic import Field, field_validator, model_validator
 
 class Settings(BaseSettings):
     # monday
@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str
     gemini_model: str = "gemini-3.5-flash"
+
+    # Chat retrieval
+    chat_retrieval_max_queries: int = Field(default=2, ge=1, le=2)
+    chat_retrieval_max_compound_queries: int = Field(default=3, ge=1, le=3)
+    chat_retrieval_candidates_per_query: int = Field(default=8, ge=1, le=8)
+    chat_retrieval_max_evidence_chunks: int = Field(default=12, ge=1, le=12)
+    chat_retrieval_max_chunks_per_file: int = Field(default=3, ge=1, le=3)
 
     # Postgres
     database_url: str
@@ -72,6 +79,20 @@ class Settings(BaseSettings):
         if value not in {"lax", "strict", "none"}:
             raise ValueError("app_session_cookie_samesite must be lax, strict, or none")
         return value
+
+    @model_validator(mode="after")
+    def _validate_chat_retrieval_limits(self) -> "Settings":
+        if self.chat_retrieval_max_compound_queries < self.chat_retrieval_max_queries:
+            raise ValueError(
+                "chat_retrieval_max_compound_queries must be greater than or equal "
+                "to chat_retrieval_max_queries"
+            )
+        if self.chat_retrieval_max_chunks_per_file > self.chat_retrieval_max_evidence_chunks:
+            raise ValueError(
+                "chat_retrieval_max_chunks_per_file must be less than or equal to "
+                "chat_retrieval_max_evidence_chunks"
+            )
+        return self
 
     @property
     def cors_origins(self) -> list[str]:
