@@ -163,7 +163,7 @@ def _plan_retrieval(
     planning_config = types.GenerateContentConfig(
         temperature=0.1,
         response_mime_type="application/json",
-        response_schema=_RetrievalPlan,
+        response_json_schema=_RetrievalPlan.model_json_schema(),
         system_instruction=(
             "Plan bounded document retrieval for a technical design assistant. "
             "Return no search queries when the supplied task context is enough to "
@@ -363,7 +363,7 @@ def _synthesize_answer(
     synthesis_config = types.GenerateContentConfig(
         temperature=0.2,
         response_mime_type="application/json",
-        response_schema=_SynthesisResult,
+        response_json_schema=_SynthesisResult.model_json_schema(),
         system_instruction=(
             "You are a technical design assistant. Answer the user's specific "
             "question first, concisely, using only the supplied task context and "
@@ -447,8 +447,10 @@ def _execute_bounded_retrieval(
         )
     except Exception as exc:
         logger.warning(
-            "chat: retrieval planning failed; using original question (%s)",
+            "chat: retrieval planning failed; using original question (%s) "
+            "details=%s",
             type(exc).__name__,
+            _limited_text(exc, 500),
         )
         proposed_plan = None
     finally:
@@ -493,6 +495,8 @@ def _execute_bounded_retrieval(
     )
 
     synthesis_started = perf_counter()
+    answer = ""
+    cited_evidence: List[Dict[str, Any]] = []
     try:
         answer, cited_evidence = _synthesize_answer(
             client,
@@ -501,6 +505,12 @@ def _execute_bounded_retrieval(
             context=context,
             plan=plan,
             citations=citations,
+        )
+    except Exception as exc:
+        logger.warning(
+            "chat: synthesis failed; using grounded fallback (%s) details=%s",
+            type(exc).__name__,
+            _limited_text(exc, 500),
         )
     finally:
         logger.info(

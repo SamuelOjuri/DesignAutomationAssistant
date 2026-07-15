@@ -14,6 +14,10 @@ class FakeResponse:
         self.parsed = parsed
 
 
+def _is_retrieval_plan_config(config):
+    return config.response_json_schema == chat._RetrievalPlan.model_json_schema()
+
+
 def test_sanitize_retrieval_plan_normalizes_deduplicates_and_limits_queries():
     normal_plan = chat._RetrievalPlan(
         search_queries=["  Roof   U-value  ", "roof u-VALUE", "Roof falls"],
@@ -132,9 +136,9 @@ def test_u_value_roof_fall_compound_question_batches_and_forces_synthesis(
     class FakeModels:
         def generate_content(self, *, model, contents, config):
             generated.append({"contents": contents, "config": config})
-            if config.response_schema is chat._RetrievalPlan:
+            if _is_retrieval_plan_config(config):
                 events.append("planning")
-                return FakeResponse(parsed=plan)
+                return FakeResponse(parsed=plan.model_dump())
             events.append("synthesis")
             return FakeResponse(
                 parsed=chat._SynthesisResult(
@@ -177,6 +181,14 @@ def test_u_value_roof_fall_compound_question_batches_and_forces_synthesis(
     assert generated[0]["config"].temperature == 0.1
     assert generated[0]["config"].tools is None
     assert generated[1]["config"].tools is None
+    assert generated[0]["config"].response_schema is None
+    assert generated[1]["config"].response_schema is None
+    assert generated[0]["config"].response_json_schema[
+        "additionalProperties"
+    ] is False
+    assert generated[1]["config"].response_json_schema[
+        "additionalProperties"
+    ] is False
 
     planning_payload = json.loads(generated[0]["contents"])
     synthesis_payload = json.loads(generated[1]["contents"])
@@ -211,7 +223,7 @@ def test_run_bounded_retrieval_skips_search_for_context_only_question(monkeypatc
     class FakeModels:
         def generate_content(self, *, model, contents, config):
             generated_calls.append(config)
-            if config.response_schema is chat._RetrievalPlan:
+            if _is_retrieval_plan_config(config):
                 return FakeResponse(parsed=chat._RetrievalPlan(search_queries=[]))
             return FakeResponse(
                 parsed=chat._SynthesisResult(
@@ -309,7 +321,7 @@ def test_run_bounded_retrieval_synthesizes_when_batch_retrieval_fails(monkeypatc
         def generate_content(self, *, model, contents, config):
             nonlocal generation_count
             generation_count += 1
-            if config.response_schema is chat._RetrievalPlan:
+            if _is_retrieval_plan_config(config):
                 return FakeResponse(
                     parsed=chat._RetrievalPlan(search_queries=["roof details"])
                 )
@@ -346,6 +358,54 @@ def test_run_bounded_retrieval_synthesizes_when_batch_retrieval_fails(monkeypatc
     assert answer == "Document evidence was unavailable; the task context is limited."
     assert citations == []
     assert generation_count == 2
+
+
+def test_synthesis_api_failure_returns_grounded_fallback(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING, logger=chat.__name__)
+    evidence = [
+        {
+            "chunkId": "chunk-1",
+            "filename": "roof.pdf",
+            "snippet": "The roof insulation requirement is 0.14 W/m2K.",
+        }
+    ]
+
+    class FakeModels:
+        def generate_content(self, *, model, contents, config):
+            if _is_retrieval_plan_config(config):
+                return FakeResponse(
+                    parsed={
+                        "search_queries": ["roof insulation requirement"],
+                        "third_search_justified": False,
+                        "corpus_wide_requested": False,
+                    }
+                )
+            raise RuntimeError("Gemini unavailable")
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(chat.genai, "Client", FakeClient)
+    monkeypatch.setattr(chat, "get_task_context", lambda db, key: None)
+    monkeypatch.setattr(
+        chat,
+        "search_task_docs_batch",
+        lambda *args, **kwargs: evidence,
+    )
+
+    answer, citations, ok = chat._run_bounded_retrieval(
+        db=None,
+        external_task_key="acct:board:item",
+        prompt="What is the roof insulation requirement?",
+        history=None,
+    )
+
+    assert ok is False
+    assert answer.startswith("The model did not produce a final synthesis.")
+    assert "0.14 W/m2K" in answer
+    assert citations == evidence
+    assert "synthesis failed; using grounded fallback (RuntimeError)" in caplog.text
 
 
 def test_synthesis_requires_project_wide_coverage_qualification():
