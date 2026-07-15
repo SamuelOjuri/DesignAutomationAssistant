@@ -18,14 +18,14 @@ def test_sanitize_retrieval_plan_normalizes_deduplicates_and_limits_queries():
     normal_plan = chat._RetrievalPlan(
         search_queries=["  Roof   U-value  ", "roof u-VALUE", "Roof falls"],
         third_search_justified=False,
-        exhaustive=True,
+        corpus_wide_requested=True,
     )
 
     sanitized = chat._sanitize_retrieval_plan(normal_plan, "original question")
 
     assert sanitized.search_queries == ["Roof U-value", "Roof falls"]
     assert sanitized.third_search_justified is False
-    assert sanitized.exhaustive is True
+    assert sanitized.corpus_wide_requested is True
 
     capped_normal = chat._sanitize_retrieval_plan(
         chat._RetrievalPlan(search_queries=["U-values", "roof falls", "drainage"]),
@@ -64,7 +64,7 @@ def test_sanitize_retrieval_plan_falls_back_only_for_failed_or_unusable_plans():
     assert context_only.search_queries == []
 
 
-def test_synthesis_keeps_twelve_chunks_while_ui_keeps_six_public_citations():
+def test_synthesis_labels_twelve_chunks_while_ui_keeps_six_public_citations():
     citations = [
         {
             "chunkId": f"chunk-{index}",
@@ -79,7 +79,7 @@ def test_synthesis_keeps_twelve_chunks_while_ui_keeps_six_public_citations():
     ]
     plan = chat._RetrievalPlan(
         search_queries=["roof design"],
-        exhaustive=True,
+        corpus_wide_requested=True,
     )
 
     synthesis_payload = json.loads(
@@ -91,7 +91,7 @@ def test_synthesis_keeps_twelve_chunks_while_ui_keeps_six_public_citations():
             citations=citations,
         )
     )
-    display_citations = chat._dedupe_citations_for_display(citations)
+    display_citations = chat._citations_for_display(citations)
 
     assert synthesis_payload["user_question"] == "List every roof requirement"
     assert synthesis_payload["recent_history"] == [
@@ -100,6 +100,8 @@ def test_synthesis_keeps_twelve_chunks_while_ui_keeps_six_public_citations():
     assert synthesis_payload["task_context"] == {"status": "Design"}
     assert synthesis_payload["retrieval_plan"] == plan.model_dump()
     assert len(synthesis_payload["selected_evidence"]) == 12
+    assert synthesis_payload["selected_evidence"][0]["sourceId"] == "S1"
+    assert synthesis_payload["selected_evidence"][11]["sourceId"] == "S12"
     assert len(display_citations) == 6
     assert all("chunkId" not in citation for citation in display_citations)
     assert all("matchedQuery" not in citation for citation in display_citations)
@@ -115,7 +117,7 @@ def test_u_value_roof_fall_compound_question_batches_and_forces_synthesis(
     context = {"status": "Design Needed", "priority": "Low"}
     plan = chat._RetrievalPlan(
         search_queries=["roof U-values", "roof falls"],
-        exhaustive=False,
+        corpus_wide_requested=False,
     )
     evidence = [
         {
@@ -134,7 +136,12 @@ def test_u_value_roof_fall_compound_question_batches_and_forces_synthesis(
                 events.append("planning")
                 return FakeResponse(parsed=plan)
             events.append("synthesis")
-            return FakeResponse(text="The roof requires the retrieved design values.")
+            return FakeResponse(
+                parsed=chat._SynthesisResult(
+                    answer="The roof requires the retrieved design values. [S1]",
+                    cited_chunk_ids=["chunk-1"],
+                )
+            )
 
     class FakeClient:
         def __init__(self, *, api_key):
@@ -163,8 +170,8 @@ def test_u_value_roof_fall_compound_question_batches_and_forces_synthesis(
     )
 
     assert ok is True
-    assert answer == "The roof requires the retrieved design values."
-    assert citations == evidence
+    assert answer == "The roof requires the retrieved design values. [S1]"
+    assert citations == [{**evidence[0], "sourceId": "S1"}]
     assert events == ["context", "planning", "retrieval", "synthesis"]
     assert len(generated) == 2
     assert generated[0]["config"].temperature == 0.1
@@ -206,7 +213,11 @@ def test_run_bounded_retrieval_skips_search_for_context_only_question(monkeypatc
             generated_calls.append(config)
             if config.response_schema is chat._RetrievalPlan:
                 return FakeResponse(parsed=chat._RetrievalPlan(search_queries=[]))
-            return FakeResponse(text="The task status is Design Needed.")
+            return FakeResponse(
+                parsed=chat._SynthesisResult(
+                    answer="The task status is Design Needed."
+                )
+            )
 
     class FakeClient:
         def __init__(self, *, api_key):
@@ -251,7 +262,12 @@ def test_run_bounded_retrieval_uses_original_question_when_planning_fails(
             assert synthesis_payload["retrieval_plan"]["search_queries"] == [
                 "Summarize the roof design"
             ]
-            return FakeResponse(text="The available roof evidence is summarized.")
+            return FakeResponse(
+                parsed=chat._SynthesisResult(
+                    answer="The available roof evidence is summarized. [S1]",
+                    cited_chunk_ids=["chunk-1"],
+                )
+            )
 
     class FakeClient:
         def __init__(self, *, api_key):
@@ -278,8 +294,10 @@ def test_run_bounded_retrieval_uses_original_question_when_planning_fails(
     )
 
     assert ok is True
-    assert answer == "The available roof evidence is summarized."
-    assert citations == [{"chunkId": "chunk-1", "snippet": "Roof evidence"}]
+    assert answer == "The available roof evidence is summarized. [S1]"
+    assert citations == [
+        {"chunkId": "chunk-1", "snippet": "Roof evidence", "sourceId": "S1"}
+    ]
     assert search_calls == [["Summarize the roof design"]]
     assert generation_count == 2
 
@@ -297,7 +315,12 @@ def test_run_bounded_retrieval_synthesizes_when_batch_retrieval_fails(monkeypatc
                 )
             assert json.loads(contents)["selected_evidence"] == []
             return FakeResponse(
-                text="Document evidence was unavailable; the task context is limited."
+                parsed=chat._SynthesisResult(
+                    answer=(
+                        "Document evidence was unavailable; the task context is "
+                        "limited."
+                    )
+                )
             )
 
     class FakeClient:
@@ -325,21 +348,23 @@ def test_run_bounded_retrieval_synthesizes_when_batch_retrieval_fails(monkeypatc
     assert generation_count == 2
 
 
-def test_synthesis_requires_non_exhaustive_qualification():
+def test_synthesis_requires_project_wide_coverage_qualification():
     generated = []
 
     class FakeModels:
         def generate_content(self, *, model, contents, config):
             generated.append({"contents": contents, "config": config})
-            return FakeResponse(text="A bounded answer.")
+            return FakeResponse(
+                parsed=chat._SynthesisResult(answer="A bounded answer.")
+            )
 
     client = SimpleNamespace(models=FakeModels())
     plan = chat._RetrievalPlan(
         search_queries=["all roof requirements"],
-        exhaustive=True,
+        corpus_wide_requested=True,
     )
 
-    answer = chat._synthesize_answer(
+    answer, citations = chat._synthesize_answer(
         client,
         prompt="List every roof requirement",
         history=None,
@@ -350,16 +375,20 @@ def test_synthesis_requires_non_exhaustive_qualification():
 
     assert answer == (
         "A bounded answer.\n\n"
-        "This answer is non-exhaustive because retrieval was bounded."
+        "This is a partial project-wide review based on the available project "
+        "evidence; other relevant records may not be represented."
     )
-    assert "explicitly state that the answer is non-exhaustive" in str(
+    assert citations == []
+    assert "only when retrieval_plan.corpus_wide_requested is true" in str(
         generated[0]["config"].system_instruction
     )
-    assert json.loads(generated[0]["contents"])["retrieval_plan"]["exhaustive"] is True
-    assert "non-exhaustive" in chat._fallback_answer_from_sources(
+    assert json.loads(generated[0]["contents"])["retrieval_plan"][
+        "corpus_wide_requested"
+    ] is True
+    assert "partial project-wide review" in chat._fallback_answer_from_sources(
         None,
         [],
-        exhaustive=True,
+        corpus_wide_requested=True,
     )
 
 
@@ -389,18 +418,14 @@ def test_chat_complete_returns_json_answer_and_citations(monkeypatch):
             "This is the final project summary.",
             [
                 {
+                    "sourceId": "S1",
                     "filename": "source.msg",
                     "fileId": "file-1",
                     "section": "email:body:chunk:1",
                     "snippet": "first body chunk",
                 },
                 {
-                    "filename": "source.msg",
-                    "fileId": "file-1",
-                    "section": "email:body:chunk:2",
-                    "snippet": "second body chunk",
-                },
-                {
+                    "sourceId": "S3",
                     "filename": "monday_columns.txt",
                     "fileId": "file-2",
                     "section": "monday:columns",
@@ -424,12 +449,14 @@ def test_chat_complete_returns_json_answer_and_citations(monkeypatch):
     assert response.content == "This is the final project summary."
     assert response.citations == [
         {
+            "sourceId": "S1",
             "filename": "source.msg",
             "fileId": "file-1",
             "section": "email:body",
             "snippet": "first body chunk",
         },
         {
+            "sourceId": "S3",
             "filename": "monday_columns.txt",
             "fileId": "file-2",
             "section": "monday:columns",
@@ -437,3 +464,36 @@ def test_chat_complete_returns_json_answer_and_citations(monkeypatch):
     ]
     assert response.ok is True
     assert calls == {"access": 1, "commits": 1}
+
+
+def test_cited_evidence_rejects_unknown_and_duplicate_chunk_ids():
+    evidence = [
+        {"chunkId": "chunk-1", "snippet": "First"},
+        {"chunkId": "chunk-2", "snippet": "Second"},
+    ]
+
+    selected = chat._select_cited_evidence(
+        evidence,
+        ["chunk-2", "unknown", "chunk-2"],
+    )
+
+    assert selected == [
+        {"chunkId": "chunk-2", "snippet": "Second", "sourceId": "S2"}
+    ]
+
+
+def test_email_disclaimer_is_removed_from_model_and_display_snippets():
+    citation = {
+        "chunkId": "chunk-1",
+        "filename": "project.msg",
+        "section": "email:body",
+        "snippet": (
+            "Site postcode: HP1 2AB.\n\nDisclaimer\n\n"
+            "The information contained in this communication is confidential."
+        ),
+    }
+
+    assert chat._clean_evidence_snippet(citation) == "Site postcode: HP1 2AB."
+    assert chat._citations_for_display([citation])[0]["snippet"] == (
+        "Site postcode: HP1 2AB."
+    )

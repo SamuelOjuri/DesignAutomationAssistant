@@ -7,7 +7,7 @@ Replace the eight-turn tool loop with a deterministic pipeline: one structured p
 1. Add an internal Pydantic retrieval plan in chat.py containing:
    - Planned search queries.
    - Whether a third search is justified.
-   - Whether the request is exhaustive.
+   - Whether the user explicitly requests project-wide coverage.
 
 2. Enforce server-side limits:
    - Two searches for normal questions.
@@ -26,7 +26,7 @@ Replace the eight-turn tool loop with a deterministic pipeline: one structured p
    - Fetches the latest snapshot once.
    - Embeds all planned queries in one Gemini request.
    - Runs the existing pgvector query for each embedding.
-   - Preserves `search_task_docs()` as a single-query wrapper.
+   - Serves as the single chat retrieval entry point.
 
 6. Include `chunkId` and matched-query metadata in internal results.
 
@@ -36,7 +36,7 @@ Replace the eight-turn tool loop with a deterministic pipeline: one structured p
    - Ensure each query contributes evidence.
    - Enforce total and per-file limits.
 
-8. Keep the twelve selected chunks for synthesis while retaining the existing smaller, deduplicated citation list for the UI.
+8. Keep twelve selected chunks for synthesis, then return only the validated chunk IDs cited by the final answer to the UI.
 
 **Phase 3: Deterministic Orchestration**
 
@@ -46,7 +46,7 @@ Replace the eight-turn tool loop with a deterministic pipeline: one structured p
    - Zero searches for context-only questions.
    - One or two distinct searches normally.
    - Three only for independent subquestions.
-   - An exhaustive flag for inventories, audits, chronologies, contradiction checks, or absence proofs.
+   - A project-wide coverage flag for explicit inventories, audits, chronologies, project-wide contradiction searches, or absence proofs.
 
 11. Replace `_run_with_tools()` with a bounded orchestration function:
    - Load context.
@@ -63,18 +63,18 @@ Replace the eight-turn tool loop with a deterministic pipeline: one structured p
    - Task context.
    - Planned searches.
    - Selected evidence.
-   - Exhaustive-query classification.
+   - Project-wide coverage classification.
 
-14. Require synthesis to identify missing evidence and explicitly qualify broad answers as non-exhaustive.
+14. Require synthesis to identify missing evidence, cite supporting chunk IDs, and qualify only explicit project-wide requests.
 
 **Phase 4: Tests and Logging**
 
-15. Update test_chat_tool_loop.py to cover:
+15. Update test_chat_bounded_retrieval.py to cover:
    - Two-query and three-query limits.
    - Query normalization and deduplication.
    - Planner failure fallback.
    - Context-only questions with no search.
-   - Exhaustive-query qualification.
+   - Project-wide coverage qualification.
    - Forced synthesis and API-call counts.
    - The U-value/roof-fall compound example.
 
@@ -88,7 +88,7 @@ Replace the eight-turn tool loop with a deterministic pipeline: one structured p
 
 1. Run focused tests:
 
-   `& "venv/Scripts/python.exe" -m pytest test_chat_tool_loop.py test_monday_first_auth.py -q`
+   `& "venv/Scripts/python.exe" -m pytest backend/tests/test_chat_bounded_retrieval.py backend/tests/test_monday_first_auth.py -q`
 
 2. Run syntax validation:
 
@@ -98,12 +98,12 @@ Replace the eight-turn tool loop with a deterministic pipeline: one structured p
 
    `& "venv/Scripts/python.exe" -m pytest -q`
 
-4. Smoke-test context-only, compound, duplicate-intent, and exhaustive questions through the Netlify URL. Confirm:
+4. Smoke-test context-only, compound, duplicate-intent, and project-wide questions through the Netlify URL. Confirm:
    - At most two generation calls.
    - At most one batched embedding call.
    - No tool-loop exhaustion warning.
    - No browser `504`.
    - Grounded citations.
-   - A non-exhaustive caveat for broad requests.
+   - A user-facing coverage note only for explicit project-wide requests.
 
-This release deliberately excludes full-corpus audits, chronology generation, contradiction analysis, hybrid lexical retrieval, and migration to Gemini’s Interactions API. No database migration or frontend contract change is required.
+This release deliberately excludes full-corpus audits, chronology generation, contradiction analysis, hybrid lexical retrieval, and migration to Gemini’s Interactions API. No database migration is required.

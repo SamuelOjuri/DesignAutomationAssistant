@@ -193,60 +193,7 @@ def test_select_diverse_evidence_cannot_exceed_configured_caps():
     )
 
 
-def test_search_task_docs_wrapper_preserves_public_citation_shape(monkeypatch):
-    batch_calls = []
+def test_search_task_docs_batch_returns_empty_without_queries():
+    assert retrieval.search_task_docs_batch(None, "acct:board:item", []) == []
 
-    def fake_batch(db, external_task_key, queries, k, **kwargs):
-        batch_calls.append(
-            {
-                "queries": queries,
-                "k": k,
-                **kwargs,
-            }
-        )
-        return [
-            {
-                "chunkId": "chunk-1",
-                "filename": "source.pdf",
-                "page": 2,
-                "section": "roof",
-                "snippet": "Roof details",
-                "score": 0.1,
-                "fileId": "file-1",
-                "mondayAssetId": "asset-1",
-                "matchedQuery": "roof",
-                "matchedQueryIndex": 0,
-                "matchedQueries": ["roof"],
-                "matchedQueryIndexes": [0],
-                "selectedByQuery": "roof",
-                "selectedByQueryIndex": 0,
-            }
-        ]
 
-    monkeypatch.setattr(retrieval, "search_task_docs_batch", fake_batch)
-
-    results = retrieval.search_task_docs(
-        db="db",
-        external_task_key="acct:board:item",
-        query="roof",
-        k=20,
-    )
-
-    assert batch_calls == [
-        {
-            "queries": ["roof"],
-            "k": 8,
-            "max_evidence_chunks": 8,
-        }
-    ]
-    assert results == [
-        {
-            "filename": "source.pdf",
-            "page": 2,
-            "section": "roof",
-            "snippet": "Roof details",
-            "score": 0.1,
-            "fileId": "file-1",
-            "mondayAssetId": "asset-1",
-        }
-    ]

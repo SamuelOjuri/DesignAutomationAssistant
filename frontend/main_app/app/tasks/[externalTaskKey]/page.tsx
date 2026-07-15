@@ -9,6 +9,7 @@ import rehypeSanitize from "rehype-sanitize";
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+  citations?: Citation[];
 };
 
 // --- Extended types for summary, sources, citations, etc. ---
@@ -72,6 +73,7 @@ type TaskSourcesResponse = {
 
 // Extended Citation type
 type Citation = {
+  sourceId?: string | null;
   filename?: string | null;
   page?: number | null;
   section?: string | null;
@@ -196,7 +198,6 @@ export default function TaskPage() {
   const externalTaskKey = params.externalTaskKey as string;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [citations, setCitations] = useState<Citation[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
@@ -306,15 +307,19 @@ export default function TaskPage() {
     [baseUrl, externalTaskKey, signedUrls]
   );
 
-  const appendAssistantChunk = useCallback((chunk: string) => {
+  const appendAssistantChunk = useCallback((chunk: string, citations: Citation[] = []) => {
     setMessages((prev) => {
       if (prev.length === 0 || prev[prev.length - 1].role !== "assistant") {
-        return [...prev, { role: "assistant", content: chunk }];
+        return [...prev, { role: "assistant", content: chunk, citations }];
       }
       const updated = [...prev];
       updated[updated.length - 1] = {
         ...updated[updated.length - 1],
         content: updated[updated.length - 1].content + chunk,
+        citations:
+          citations.length > 0
+            ? citations
+            : updated[updated.length - 1].citations,
       };
       return updated;
     });
@@ -395,7 +400,6 @@ export default function TaskPage() {
     if (!input.trim() || isStreaming || !externalTaskKey) return;
     const prompt = input.trim();
     setInput("");
-    setCitations([]);
 
     setMessages((prev) => [...prev, { role: "user", content: prompt }]);
 
@@ -435,13 +439,12 @@ export default function TaskPage() {
 
       const data = (await response.json()) as ChatCompleteResponse;
       if (data.content) {
-        appendAssistantChunk(data.content);
+        appendAssistantChunk(data.content, data.citations || []);
       } else {
         appendAssistantChunk(
           "I found relevant sources, but no final answer was returned. Please try again."
         );
       }
-      setCitations(data.citations || []);
     } catch (e: any) {
       if (e?.name !== "AbortError") {
         appendAssistantChunk(`Error: ${String(e)}`);
@@ -764,42 +767,42 @@ export default function TaskPage() {
             ) : (
               <div className="whitespace-pre-wrap">{m.content}</div>
             )}
+            {m.role === "assistant" && (m.citations?.length ?? 0) > 0 && (
+              <div className="mt-4 border-t border-border pt-4">
+                <div className="text-sm font-semibold text-foreground">Sources</div>
+                <ul className="mt-2 divide-y divide-border text-sm">
+                  {m.citations?.map((citation, citationIndex) => (
+                    <li
+                      key={`${citation.sourceId ?? "source"}-${citationIndex}`}
+                      className="py-3 text-muted-foreground"
+                    >
+                      <div className="font-medium text-foreground">
+                        {citation.sourceId ? `[${citation.sourceId}] ` : ""}
+                        {citation.filename || "Untitled"}
+                      </div>
+                      <div>
+                        {citation.page != null ? `Page ${citation.page}` : "Page N/A"}
+                        {citation.section ? ` • ${citation.section}` : ""}
+                      </div>
+                      {citation.snippet && <Markdown>{citation.snippet}</Markdown>}
+                      {citation.fileId ? (
+                        <div className="mt-2">
+                          <button
+                            onClick={() => openSignedUrl(citation.fileId as string)}
+                            className="inline-flex items-center justify-center rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary"
+                          >
+                            View source
+                          </button>
+                        </div>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         ))}
       </div>
-
-      {citations.length > 0 && (
-        <div className="mt-6 rounded-lg border border-border bg-card p-5 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="h-2 w-2 rounded-full bg-primary" />
-            <div className="text-sm font-semibold text-foreground">Citations</div>
-          </div>
-          <ul className="mt-3 space-y-3 text-sm">
-            {citations.map((c, idx) => (
-              <li key={idx} className="rounded-md border border-border bg-background p-3 text-muted-foreground">
-                <div className="font-medium text-foreground">
-                  {c.filename || "Untitled"}
-                </div>
-                <div>
-                  {c.page != null ? `Page ${c.page}` : "Page N/A"}
-                  {c.section ? ` • ${c.section}` : ""}
-                </div>
-                {c.snippet && <Markdown>{c.snippet}</Markdown>}
-                {c.fileId ? (
-                  <div className="mt-2">
-                    <button
-                      onClick={() => openSignedUrl(c.fileId as string)}
-                      className="inline-flex items-center justify-center rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary"
-                    >
-                      View source
-                    </button>
-                  </div>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <div className="mt-8 flex gap-2">
         <textarea

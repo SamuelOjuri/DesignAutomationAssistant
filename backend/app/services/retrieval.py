@@ -15,17 +15,6 @@ from ..models import TaskSnapshot, TaskFile, TaskChunk
 logger = logging.getLogger(__name__)
 
 
-_INTERNAL_RESULT_FIELDS = {
-    "chunkId",
-    "matchedQuery",
-    "matchedQueryIndex",
-    "matchedQueries",
-    "matchedQueryIndexes",
-    "selectedByQuery",
-    "selectedByQueryIndex",
-}
-
-
 def _normalize(vec: List[float]) -> List[float]:
     norm = math.sqrt(sum(v * v for v in vec))
     return [v / norm for v in vec] if norm else vec
@@ -291,32 +280,3 @@ def search_task_docs_batch(
         ],
     )
     return selected
-
-
-def _public_citation(result: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        key: value
-        for key, value in result.items()
-        if key not in _INTERNAL_RESULT_FIELDS
-    }
-
-
-def search_task_docs(
-    db: Session,
-    external_task_key: str,
-    query: str,
-    k: int = 8,
-) -> List[Dict[str, Any]]:
-    """Retrieve top-K citations for one query against the latest snapshot."""
-    if not query or k <= 0:
-        return []
-
-    candidate_limit = min(k, settings.chat_retrieval_candidates_per_query)
-    results = search_task_docs_batch(
-        db,
-        external_task_key,
-        [query],
-        k=candidate_limit,
-        max_evidence_chunks=candidate_limit,
-    )
-    return [_public_citation(result) for result in results]
