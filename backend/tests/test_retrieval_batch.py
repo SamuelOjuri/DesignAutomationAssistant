@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 
 from backend.app.services import retrieval
@@ -23,7 +24,9 @@ def _candidate(
 
 def test_search_task_docs_batch_embeds_queries_once_and_reuses_latest_snapshot(
     monkeypatch,
+    caplog,
 ):
+    caplog.set_level(logging.DEBUG, logger=retrieval.__name__)
     snapshot_calls = []
     embed_calls = []
     search_calls = []
@@ -100,6 +103,28 @@ def test_search_task_docs_batch_embeds_queries_once_and_reuses_latest_snapshot(
     ]
     assert [call["k"] for call in search_calls] == [8, 8]
     assert [result["chunkId"] for result in results] == ["chunk-0", "chunk-1"]
+
+    info_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == retrieval.__name__ and record.levelno == logging.INFO
+    ]
+    debug_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == retrieval.__name__ and record.levelno == logging.DEBUG
+    ]
+    assert any(
+        message.startswith("retrieval: candidates=2 queries=2 duration_ms=")
+        for message in info_messages
+    )
+    assert any(
+        message.startswith("retrieval: selected=2 duration_ms=")
+        for message in info_messages
+    )
+    assert all("first query" not in message for message in info_messages)
+    assert any("first query" in message for message in debug_messages)
+    assert any("chunk-0" in message for message in debug_messages)
 
 
 def test_select_diverse_evidence_deduplicates_by_best_score_and_round_robins():

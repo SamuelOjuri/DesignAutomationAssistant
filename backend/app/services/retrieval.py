@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import logging
+from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 from google import genai
@@ -9,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import TaskSnapshot, TaskFile, TaskChunk
+
+logger = logging.getLogger(__name__)
 
 
 _INTERNAL_RESULT_FIELDS = {
@@ -217,8 +221,14 @@ def search_task_docs_batch(
     if not normalized_queries or k <= 0:
         return []
 
+    retrieval_started = perf_counter()
     snapshot = _latest_snapshot(db, external_task_key)
     if snapshot is None:
+        logger.info(
+            "retrieval: candidates=0 queries=%s duration_ms=%.1f no_snapshot=true",
+            len(normalized_queries),
+            (perf_counter() - retrieval_started) * 1000,
+        )
         return []
 
     candidate_limit = min(k, settings.chat_retrieval_candidates_per_query)
@@ -249,11 +259,38 @@ def search_task_docs_batch(
             )
         )
 
-    return select_diverse_evidence(
+    logger.info(
+        "retrieval: candidates=%s queries=%s duration_ms=%.1f",
+        len(candidates),
+        len(normalized_queries),
+        (perf_counter() - retrieval_started) * 1000,
+    )
+    logger.debug("retrieval: queries=%r", normalized_queries)
+
+    selection_started = perf_counter()
+    selected = select_diverse_evidence(
         candidates,
         max_evidence_chunks=max_evidence_chunks,
         max_chunks_per_file=max_chunks_per_file,
     )
+    logger.info(
+        "retrieval: selected=%s duration_ms=%.1f",
+        len(selected),
+        (perf_counter() - selection_started) * 1000,
+    )
+    logger.debug(
+        "retrieval: selected_chunks=%s",
+        [
+            {
+                "chunkId": result.get("chunkId"),
+                "fileId": result.get("fileId"),
+                "score": result.get("score"),
+                "selectedByQueryIndex": result.get("selectedByQueryIndex"),
+            }
+            for result in selected
+        ],
+    )
+    return selected
 
 
 def _public_citation(result: Dict[str, Any]) -> Dict[str, Any]:

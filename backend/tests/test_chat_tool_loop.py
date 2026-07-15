@@ -1,4 +1,5 @@
 import json
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -104,9 +105,11 @@ def test_synthesis_keeps_twelve_chunks_while_ui_keeps_six_public_citations():
     assert all("matchedQuery" not in citation for citation in display_citations)
 
 
-def test_run_bounded_retrieval_preloads_context_batches_and_forces_synthesis(
+def test_u_value_roof_fall_compound_question_batches_and_forces_synthesis(
     monkeypatch,
+    caplog,
 ):
+    caplog.set_level(logging.DEBUG, logger=chat.__name__)
     events = []
     generated = []
     context = {"status": "Design Needed", "priority": "Low"}
@@ -174,6 +177,25 @@ def test_run_bounded_retrieval_preloads_context_batches_and_forces_synthesis(
     assert synthesis_payload["task_context"] == context
     assert synthesis_payload["retrieval_plan"] == plan.model_dump()
     assert synthesis_payload["selected_evidence"][0]["chunkId"] == "chunk-1"
+
+    info_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == chat.__name__ and record.levelno == logging.INFO
+    ]
+    debug_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == chat.__name__ and record.levelno == logging.DEBUG
+    ]
+    for phase in ("planning", "retrieval", "synthesis", "total"):
+        assert any(
+            message.startswith(f"chat: {phase} duration_ms=")
+            for message in info_messages
+        )
+    assert all("roof U-values" not in message for message in info_messages)
+    assert any("roof U-values" in message for message in debug_messages)
+    assert any("roof.pdf" in message for message in debug_messages)
 
 
 def test_run_bounded_retrieval_skips_search_for_context_only_question(monkeypatch):
@@ -326,7 +348,10 @@ def test_synthesis_requires_non_exhaustive_qualification():
         citations=[],
     )
 
-    assert answer == "A bounded answer."
+    assert answer == (
+        "A bounded answer.\n\n"
+        "This answer is non-exhaustive because retrieval was bounded."
+    )
     assert "explicitly state that the answer is non-exhaustive" in str(
         generated[0]["config"].system_instruction
     )

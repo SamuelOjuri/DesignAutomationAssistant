@@ -1,5 +1,6 @@
 import json
 import logging
+from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
@@ -323,10 +324,16 @@ def _synthesize_answer(
         ),
         config=synthesis_config,
     )
-    return _response_text(response)
+    answer = _response_text(response)
+    if plan.exhaustive and answer and "non-exhaustive" not in answer.casefold():
+        answer = (
+            f"{answer}\n\nThis answer is non-exhaustive because retrieval was "
+            "bounded."
+        )
+    return answer
 
 
-def _run_bounded_retrieval(
+def _execute_bounded_retrieval(
     db: Session,
     external_task_key: str,
     prompt: str,
@@ -335,6 +342,7 @@ def _run_bounded_retrieval(
     client = genai.Client(api_key=settings.gemini_api_key)
     context = get_task_context(db, external_task_key)
 
+    planning_started = perf_counter()
     try:
         proposed_plan = _plan_retrieval(
             client,
@@ -348,6 +356,11 @@ def _run_bounded_retrieval(
             type(exc).__name__,
         )
         proposed_plan = None
+    finally:
+        logger.info(
+            "chat: planning duration_ms=%.1f",
+            (perf_counter() - planning_started) * 1000,
+        )
 
     plan = _sanitize_retrieval_plan(proposed_plan, prompt)
     logger.info(
@@ -359,6 +372,7 @@ def _run_bounded_retrieval(
 
     citations: List[Dict[str, Any]] = []
     if plan.search_queries:
+        retrieval_started = perf_counter()
         try:
             citations = search_task_docs_batch(
                 db,
@@ -372,20 +386,32 @@ def _run_bounded_retrieval(
                 "evidence (%s)",
                 type(exc).__name__,
             )
+        finally:
+            logger.info(
+                "chat: retrieval duration_ms=%.1f",
+                (perf_counter() - retrieval_started) * 1000,
+            )
     logger.info("chat: selected evidence chunks=%s", len(citations))
     logger.debug(
         "chat: selected evidence=%s",
         _citation_debug_payload(citations),
     )
 
-    answer = _synthesize_answer(
-        client,
-        prompt=prompt,
-        history=history,
-        context=context,
-        plan=plan,
-        citations=citations,
-    )
+    synthesis_started = perf_counter()
+    try:
+        answer = _synthesize_answer(
+            client,
+            prompt=prompt,
+            history=history,
+            context=context,
+            plan=plan,
+            citations=citations,
+        )
+    finally:
+        logger.info(
+            "chat: synthesis duration_ms=%.1f",
+            (perf_counter() - synthesis_started) * 1000,
+        )
     if answer:
         logger.info("chat: final synthesis (%s chars)", len(answer))
         return answer, citations, True
@@ -401,6 +427,27 @@ def _run_bounded_retrieval(
         exhaustive=plan.exhaustive,
     )
     return fallback, citations, False
+
+
+def _run_bounded_retrieval(
+    db: Session,
+    external_task_key: str,
+    prompt: str,
+    history: Optional[List[ChatMessage]],
+) -> tuple[str, List[Dict[str, Any]], bool]:
+    total_started = perf_counter()
+    try:
+        return _execute_bounded_retrieval(
+            db=db,
+            external_task_key=external_task_key,
+            prompt=prompt,
+            history=history,
+        )
+    finally:
+        logger.info(
+            "chat: total duration_ms=%.1f",
+            (perf_counter() - total_started) * 1000,
+        )
 
 
 @router.post("/chat/complete", response_model=ChatCompleteResponse)
