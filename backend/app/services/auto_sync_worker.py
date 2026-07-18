@@ -9,6 +9,7 @@ import time
 from typing import Any, Callable, Optional
 
 from sqlalchemy import and_, or_
+from sqlalchemy.exc import DBAPIError, DisconnectionError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -54,6 +55,35 @@ def _with_row_locks(db: Session, query):
 def _retry_delay(attempt_count: int) -> timedelta:
     seconds = min(3600, 60 * (2 ** max(attempt_count - 1, 0)))
     return timedelta(seconds=seconds)
+
+
+def _is_transient_worker_database_error(exc: BaseException) -> bool:
+    return isinstance(exc, (OperationalError, DisconnectionError)) or (
+        isinstance(exc, DBAPIError) and bool(getattr(exc, "connection_invalidated", False))
+    )
+
+
+def _invalidate_session_safely(db: Session) -> None:
+    try:
+        db.invalidate()
+    except SQLAlchemyError:
+        logger.exception("Failed to invalidate auto-sync worker database session")
+
+
+def _rollback_session_safely(db: Session) -> None:
+    try:
+        db.rollback()
+    except SQLAlchemyError:
+        logger.exception("Failed to roll back auto-sync worker database session")
+        _invalidate_session_safely(db)
+
+
+def _close_session_safely(db: Session) -> None:
+    try:
+        db.close()
+    except SQLAlchemyError:
+        logger.exception("Failed to close auto-sync worker database session")
+        _invalidate_session_safely(db)
 
 
 def _task_for_job(db: Session, job: AutoSyncJob, *, for_update: bool = False) -> Optional[Task]:
@@ -432,8 +462,26 @@ def _run_once_from_new_session(args: argparse.Namespace, worker_id: str) -> Work
             limit=args.limit,
             lease_timeout_seconds=args.lease_timeout_seconds,
         )
+    except (DBAPIError, DisconnectionError):
+        _rollback_session_safely(db)
+        raise
     finally:
-        db.close()
+        _close_session_safely(db)
+
+
+def _run_worker_batch(args: argparse.Namespace, worker_id: str) -> Optional[WorkerRunResult]:
+    try:
+        return _run_once_from_new_session(args, worker_id)
+    except (DBAPIError, DisconnectionError) as exc:
+        if not _is_transient_worker_database_error(exc):
+            raise
+        logger.exception(
+            "Auto-sync worker database connection failed; retrying after %.1fs",
+            args.db_error_backoff_seconds,
+        )
+        if not args.once:
+            time.sleep(args.db_error_backoff_seconds)
+        return None
 
 
 def main() -> int:
@@ -442,6 +490,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=1, help="Maximum jobs to claim per batch")
     parser.add_argument("--poll-seconds", type=float, default=10.0, help="Delay between batches in loop mode")
     parser.add_argument("--lease-timeout-seconds", type=int, default=3600, help="Running job lease timeout")
+    parser.add_argument("--db-error-backoff-seconds", type=float, default=30.0, help="Delay after transient DB connection errors")
     parser.add_argument("--worker-id", default=None, help="Stable worker id for lock ownership")
     parser.add_argument("--ignore-disabled", action="store_true", help="Run even when AUTO_SYNC_WORKER_ENABLED=false")
     args = parser.parse_args()
@@ -452,7 +501,11 @@ def main() -> int:
 
     worker_id = args.worker_id or default_worker_id()
     while True:
-        result = _run_once_from_new_session(args, worker_id)
+        result = _run_worker_batch(args, worker_id)
+        if result is None:
+            if args.once:
+                return 1
+            continue
         logger.info("Auto-sync worker batch: %s", result)
         if args.once:
             return 0

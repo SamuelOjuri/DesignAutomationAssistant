@@ -20,6 +20,7 @@ from ..db import SessionLocal
 from .email_extraction import process_email_content, extract_email_sections, process_email_content_to_temp, cleanup_temp_files
 from .pdf_extraction import process_pdf_batch
 from .image_extraction import process_image_with_gemini
+from .llm_interface import gemini_embed_content_with_retry
 from .storage_ingest import ingest_derived_attachment_bytes, attachment_kind_for_filename
 from ..models import Task, TaskSnapshot, TaskFile, TaskChunk
 from ..monday_client import fetch_item_with_assets
@@ -243,7 +244,8 @@ def run_sync_pipeline(
         
         try:
             contents = [c["chunk_text"] for c in embed_buffer]
-            result = embed_client.models.embed_content(
+            result = gemini_embed_content_with_retry(
+                embed_client,
                 model="gemini-embedding-001",
                 contents=contents,
                 config=types.EmbedContentConfig(
@@ -269,12 +271,12 @@ def run_sync_pipeline(
             del embeddings
             
         except Exception as e:
-            logger.error(f"[EMBED] Failed to embed batch: {e}")
-            # We clear the buffer anyway to avoid getting stuck
-            
-        embed_buffer.clear()
-        gc.collect()  # Force GC after embedding
-        _log_memory("After embedding batch")
+            logger.exception(f"[EMBED] Failed to embed batch: {e}")
+            raise
+        finally:
+            embed_buffer.clear()
+            gc.collect()  # Force GC after embedding
+            _log_memory("After embedding batch")
 
     def _sanitize_text(text: str | None) -> str:
         if not text:
@@ -715,6 +717,7 @@ def run_sync_pipeline(
                     except OSError:
                         pass
 
+            cleanup_temp_files(attachments, inline_images)
             logger.info(f"[EMAIL] Completed processing email: {asset.get('name')}")
             _log_memory("After complete email processing")
             continue

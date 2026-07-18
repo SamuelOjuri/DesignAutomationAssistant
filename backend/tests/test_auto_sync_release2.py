@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -7,16 +8,18 @@ import pytest
 import requests
 from fastapi import HTTPException
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from tenacity import stop_after_attempt, wait_none
 
 from backend.app import monday_client
 from backend.app.db import Base
 from backend.app.models import AutoSyncJob, Task
+from backend.app.services import auto_sync_worker
 from backend.app.services.auto_sync import coalesce_auto_sync_job
 from backend.app.services.auto_sync_backfill import active_backfill_once
 from backend.app.services.auto_sync_policy import AutoSyncPolicy
-from backend.app.services.auto_sync_worker import claim_due_jobs, execute_claimed_job, run_due_jobs_once
+from backend.app.services.auto_sync_worker import WorkerRunResult, claim_due_jobs, execute_claimed_job, run_due_jobs_once
 
 
 @dataclass
@@ -273,6 +276,56 @@ def test_worker_retries_failed_job_without_losing_durable_state(db_session):
     assert job.locked_at is None
     assert task.sync_status == "failed"
     assert task.last_sync_result == "failed"
+
+
+def test_worker_batch_continues_after_transient_database_error(monkeypatch):
+    sleep_calls = []
+
+    def failing_run_once(args, worker_id):
+        raise OperationalError(
+            "SELECT 1",
+            {},
+            RuntimeError("connection refused"),
+            connection_invalidated=True,
+        )
+
+    monkeypatch.setattr(auto_sync_worker, "_run_once_from_new_session", failing_run_once)
+    monkeypatch.setattr(auto_sync_worker.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    args = argparse.Namespace(
+        once=False,
+        db_error_backoff_seconds=12.5,
+        limit=1,
+        lease_timeout_seconds=3600,
+    )
+
+    assert auto_sync_worker._run_worker_batch(args, "worker-1") is None
+    assert sleep_calls == [12.5]
+
+
+def test_run_once_ignores_database_error_during_session_close(monkeypatch):
+    class ClosingSession:
+        invalidated = False
+
+        def close(self):
+            raise OperationalError(
+                "ROLLBACK",
+                {},
+                RuntimeError("connection aborted"),
+                connection_invalidated=True,
+            )
+
+        def invalidate(self):
+            self.invalidated = True
+
+    session = ClosingSession()
+    monkeypatch.setattr(auto_sync_worker, "SessionLocal", lambda: session)
+    monkeypatch.setattr(auto_sync_worker, "run_due_jobs_once", lambda *args, **kwargs: WorkerRunResult())
+
+    args = argparse.Namespace(limit=1, lease_timeout_seconds=3600)
+
+    assert auto_sync_worker._run_once_from_new_session(args, "worker-1") == WorkerRunResult()
+    assert session.invalidated is True
 
 
 def test_worker_does_not_finalize_job_cancelled_during_pipeline(db_session):

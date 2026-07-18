@@ -35,3 +35,32 @@ def gemini_api_with_retry(model, contents, max_retries=5, initial_backoff=5):
             raise e
 
     raise Exception(f"Failed after {max_retries} retries due to rate limiting")
+
+
+def gemini_embed_content_with_retry(client, model, contents, config, max_retries=5, initial_backoff=5):
+    rate_limiter = get_rate_limiter()
+    retries = 0
+
+    while retries <= max_retries:
+        if not rate_limiter.wait_for_availability():
+            raise Exception("Could not acquire API rate limit slot within timeout")
+
+        try:
+            response = client.models.embed_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+            rate_limiter.release()
+            return response
+        except Exception as e:
+            rate_limiter.release()
+            if is_rate_limit_error(e) and retries < max_retries:
+                base_sleep = initial_backoff * (2 ** retries)
+                jitter = random.uniform(0, base_sleep * 0.1)
+                time.sleep(base_sleep + jitter)
+                retries += 1
+                continue
+            raise e
+
+    raise Exception(f"Failed after {max_retries} retries due to rate limiting")
