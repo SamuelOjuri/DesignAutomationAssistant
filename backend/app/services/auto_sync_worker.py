@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
 import socket
+import threading
 import time
 from typing import Any, Callable, Optional
 
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import SessionLocal
-from ..models import AutoSyncJob, Task
+from ..models import AutoSyncJob, Task, TaskSnapshot
 from .auto_sync import get_monday_ingestion_access_token, utc_now
 
 logger = logging.getLogger(__name__)
@@ -70,12 +71,14 @@ def _invalidate_session_safely(db: Session) -> None:
         logger.exception("Failed to invalidate auto-sync worker database session")
 
 
-def _rollback_session_safely(db: Session) -> None:
+def _rollback_session_safely(db: Session) -> bool:
     try:
         db.rollback()
+        return True
     except SQLAlchemyError:
         logger.exception("Failed to roll back auto-sync worker database session")
         _invalidate_session_safely(db)
+        return False
 
 
 def _close_session_safely(db: Session) -> None:
@@ -277,6 +280,60 @@ def heartbeat_job(
     return True
 
 
+def _heartbeat_job_until_stopped(
+    job_id: object,
+    *,
+    worker_id: str,
+    stop_event: threading.Event,
+    interval_seconds: float,
+) -> None:
+    while not stop_event.wait(interval_seconds):
+        heartbeat_db = SessionLocal()
+        try:
+            if not heartbeat_job(heartbeat_db, job_id, worker_id=worker_id):
+                return
+        except SQLAlchemyError:
+            _rollback_session_safely(heartbeat_db)
+            logger.exception("Unable to update heartbeat for auto-sync job %s", job_id)
+        finally:
+            _close_session_safely(heartbeat_db)
+
+
+def _start_job_heartbeat(
+    db: Session,
+    job_id: object,
+    *,
+    worker_id: str,
+    interval_seconds: float,
+) -> tuple[Optional[threading.Event], Optional[threading.Thread]]:
+    if not _supports_skip_locked(db) or interval_seconds <= 0:
+        return None, None
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=_heartbeat_job_until_stopped,
+        kwargs={
+            "job_id": job_id,
+            "worker_id": worker_id,
+            "stop_event": stop_event,
+            "interval_seconds": interval_seconds,
+        },
+        name=f"auto-sync-heartbeat-{job_id}",
+        daemon=True,
+    )
+    thread.start()
+    return stop_event, thread
+
+
+def _stop_job_heartbeat(
+    stop_event: Optional[threading.Event],
+    thread: Optional[threading.Thread],
+) -> None:
+    if stop_event is None or thread is None:
+        return
+    stop_event.set()
+    thread.join(timeout=5)
+
+
 def _finish_job(
     job: AutoSyncJob,
     *,
@@ -294,6 +351,80 @@ def _finish_job(
     job.updated_at = now
 
 
+def _record_claimed_job_failure(
+    db: Session,
+    job_id: object,
+    *,
+    worker_id: str,
+    error: str,
+    failed_at: datetime,
+) -> str:
+    job, task = _lock_claimed_job_and_task(
+        db,
+        job_id,
+        worker_id=worker_id,
+    )
+    if job is None:
+        db.rollback()
+        return "missing"
+    if job.status != "running" or job.locked_by != worker_id:
+        db.rollback()
+        return "not_claimed"
+
+    job.locked_at = None
+    job.locked_by = None
+    job.heartbeat_at = None
+    job.last_error = error
+    job.updated_at = failed_at
+    _mark_task_failed(task, error=error, now=failed_at)
+    if task is not None:
+        db.query(TaskSnapshot).filter(
+            TaskSnapshot.external_task_key == task.external_task_key,
+            TaskSnapshot.ingestion_status == "building",
+        ).update(
+            {
+                TaskSnapshot.ingestion_status: "failed",
+                TaskSnapshot.ingestion_error: error,
+                TaskSnapshot.completed_at: None,
+            },
+            synchronize_session=False,
+        )
+    if job.attempt_count < job.max_attempts:
+        job.status = "retry_wait"
+        job.next_retry_at = failed_at + _retry_delay(job.attempt_count)
+        job.scheduled_for = job.next_retry_at
+        db.commit()
+        return "retry_wait"
+
+    job.status = "failed"
+    job.completed_at = failed_at
+    db.commit()
+    return "failed"
+
+
+def _record_claimed_job_failure_in_new_session(
+    job_id: object,
+    *,
+    worker_id: str,
+    error: str,
+    failed_at: datetime,
+) -> str:
+    recovery_db = SessionLocal()
+    try:
+        return _record_claimed_job_failure(
+            recovery_db,
+            job_id,
+            worker_id=worker_id,
+            error=error,
+            failed_at=failed_at,
+        )
+    except SQLAlchemyError:
+        _rollback_session_safely(recovery_db)
+        raise
+    finally:
+        _close_session_safely(recovery_db)
+
+
 def execute_claimed_job(
     db: Session,
     job_id: object,
@@ -303,6 +434,7 @@ def execute_claimed_job(
     pipeline_runner: PipelineRunner = _run_sync_pipeline,
     force: bool = False,
     now: Optional[datetime] = None,
+    heartbeat_interval_seconds: float = 60.0,
 ) -> str:
     now = now or utc_now()
     job = db.get(AutoSyncJob, job_id)
@@ -361,9 +493,18 @@ def execute_claimed_job(
         return "failed"
 
     job_id_for_retry = job.id
+    external_task_key = task.external_task_key
+    db.commit()
+    heartbeat_stop, heartbeat_thread = _start_job_heartbeat(
+        db,
+        job_id_for_retry,
+        worker_id=worker_id,
+        interval_seconds=heartbeat_interval_seconds,
+    )
     try:
         token = access_token or get_monday_ingestion_access_token()
-        result = pipeline_runner(db, task.external_task_key, token, force)
+        result = pipeline_runner(db, external_task_key, token, force)
+        _stop_job_heartbeat(heartbeat_stop, heartbeat_thread)
         finished_at = utc_now()
         job, task = _lock_claimed_job_and_task(db, job_id, worker_id=worker_id)
         if job is None:
@@ -383,39 +524,38 @@ def execute_claimed_job(
         db.commit()
         return "completed"
     except Exception as exc:
-        db.rollback()
+        _stop_job_heartbeat(heartbeat_stop, heartbeat_thread)
         failed_at = utc_now()
-        job, task = _lock_claimed_job_and_task(
-            db,
-            job_id_for_retry,
-            worker_id=worker_id,
-        )
-        if job is None:
-            db.rollback()
-            return "missing"
-        if job.status != "running" or job.locked_by != worker_id:
-            db.rollback()
-            return "not_claimed"
         error = str(exc)[:1000]
-        job.locked_at = None
-        job.locked_by = None
-        job.heartbeat_at = None
-        job.last_error = error
-        job.updated_at = failed_at
-        _mark_task_failed(task, error=error, now=failed_at)
-        if job.attempt_count < job.max_attempts:
-            job.status = "retry_wait"
-            job.next_retry_at = failed_at + _retry_delay(job.attempt_count)
-            job.scheduled_for = job.next_retry_at
-            db.commit()
-            logger.exception("Auto-sync job %s failed; retry scheduled", job_id)
-            return "retry_wait"
+        if not _rollback_session_safely(db):
+            status = _record_claimed_job_failure_in_new_session(
+                job_id_for_retry,
+                worker_id=worker_id,
+                error=error,
+                failed_at=failed_at,
+            )
+        else:
+            status = _record_claimed_job_failure(
+                db,
+                job_id_for_retry,
+                worker_id=worker_id,
+                error=error,
+                failed_at=failed_at,
+            )
 
-        job.status = "failed"
-        job.completed_at = failed_at
-        db.commit()
-        logger.exception("Auto-sync job %s failed permanently", job_id)
-        return "failed"
+        if status == "retry_wait":
+            logger.error(
+                "Auto-sync job %s failed; retry scheduled",
+                job_id,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+        elif status == "failed":
+            logger.error(
+                "Auto-sync job %s failed permanently",
+                job_id,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+        return status
 
 
 def run_due_jobs_once(
@@ -439,6 +579,10 @@ def run_due_jobs_once(
             worker_id=worker_id,
             access_token=access_token,
             pipeline_runner=pipeline_runner,
+            heartbeat_interval_seconds=min(
+                60.0,
+                max(1.0, lease_timeout_seconds / 3),
+            ),
         )
         if status in counts:
             counts[status] += 1

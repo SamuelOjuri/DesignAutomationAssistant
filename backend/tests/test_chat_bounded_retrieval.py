@@ -151,7 +151,7 @@ def test_u_value_roof_fall_compound_question_batches_and_forces_synthesis(
         def __init__(self, *, api_key):
             self.models = FakeModels()
 
-    monkeypatch.setattr(chat.genai, "Client", FakeClient)
+    monkeypatch.setattr(chat, "create_gemini_client", lambda: FakeClient(api_key="test"))
 
     def fake_get_task_context(db, external_task_key):
         events.append("context")
@@ -235,7 +235,7 @@ def test_run_bounded_retrieval_skips_search_for_context_only_question(monkeypatc
         def __init__(self, *, api_key):
             self.models = FakeModels()
 
-    monkeypatch.setattr(chat.genai, "Client", FakeClient)
+    monkeypatch.setattr(chat, "create_gemini_client", lambda: FakeClient(api_key="test"))
     monkeypatch.setattr(
         chat, "get_task_context", lambda db, external_task_key: {"status": "Design Needed"}
     )
@@ -285,7 +285,7 @@ def test_run_bounded_retrieval_uses_original_question_when_planning_fails(
         def __init__(self, *, api_key):
             self.models = FakeModels()
 
-    monkeypatch.setattr(chat.genai, "Client", FakeClient)
+    monkeypatch.setattr(chat, "create_gemini_client", lambda: FakeClient(api_key="test"))
     monkeypatch.setattr(chat, "get_task_context", lambda db, external_task_key: None)
 
     def fake_search_task_docs_batch(db, external_task_key, queries, k):
@@ -339,7 +339,7 @@ def test_run_bounded_retrieval_synthesizes_when_batch_retrieval_fails(monkeypatc
         def __init__(self, *, api_key):
             self.models = FakeModels()
 
-    monkeypatch.setattr(chat.genai, "Client", FakeClient)
+    monkeypatch.setattr(chat, "create_gemini_client", lambda: FakeClient(api_key="test"))
     monkeypatch.setattr(chat, "get_task_context", lambda db, key: {"status": "Design"})
     monkeypatch.setattr(
         chat,
@@ -386,7 +386,7 @@ def test_synthesis_api_failure_returns_grounded_fallback(monkeypatch, caplog):
         def __init__(self, *, api_key):
             self.models = FakeModels()
 
-    monkeypatch.setattr(chat.genai, "Client", FakeClient)
+    monkeypatch.setattr(chat, "create_gemini_client", lambda: FakeClient(api_key="test"))
     monkeypatch.setattr(chat, "get_task_context", lambda db, key: None)
     monkeypatch.setattr(
         chat,

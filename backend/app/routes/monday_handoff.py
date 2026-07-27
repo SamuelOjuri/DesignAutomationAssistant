@@ -43,6 +43,7 @@ def _task_has_fresh_completed_snapshot(
         .filter_by(
             external_task_key=task.external_task_key,
             snapshot_version=current_source_revision,
+            ingestion_status="complete",
         )
         .first()
         is not None

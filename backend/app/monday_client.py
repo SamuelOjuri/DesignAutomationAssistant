@@ -399,7 +399,15 @@ def download_asset(url: str, access_token: Optional[str] = None) -> requests.Res
         headers["Authorization"] = access_token
     resp = requests.get(url, headers=headers, stream=True, timeout=60)
     if resp.status_code == 401:
+        resp.close()
         raise HTTPException(status_code=403, detail="monday asset access denied")
+    if resp.status_code in TRANSIENT_MONDAY_STATUS_CODES:
+        resp.close()
+        raise TransientMondayAPIError(
+            resp.status_code,
+            detail=f"monday asset download failed ({resp.status_code})",
+        )
     if not resp.ok:
+        resp.close()
         raise HTTPException(status_code=502, detail=f"monday asset download failed ({resp.status_code})")
     return resp

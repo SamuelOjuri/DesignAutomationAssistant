@@ -6,8 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from google import genai
-from google.genai import types
+from google.genai import Client, types
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..auth import CurrentUser, get_current_user, require_csrf_token
@@ -15,6 +14,7 @@ from ..config import settings
 from ..db import get_db
 from ..schemas import ChatRequest, ChatMessage, ChatCompleteResponse
 from ..services.auto_sync_purge import record_meaningful_access
+from ..services.llm_interface import create_gemini_client
 from ..services.retrieval import get_task_context, search_task_docs_batch
 from .tasks import require_task_access
 
@@ -154,7 +154,7 @@ def _history_payload(
 
 
 def _plan_retrieval(
-    client: genai.Client,
+    client: Client,
     *,
     prompt: str,
     history: Optional[List[ChatMessage]],
@@ -352,7 +352,7 @@ def _fallback_answer_from_sources(
 
 
 def _synthesize_answer(
-    client: genai.Client,
+    client: Client,
     *,
     prompt: str,
     history: Optional[List[ChatMessage]],
@@ -434,7 +434,7 @@ def _execute_bounded_retrieval(
     prompt: str,
     history: Optional[List[ChatMessage]],
 ) -> tuple[str, List[Dict[str, Any]], bool]:
-    client = genai.Client(api_key=settings.gemini_api_key)
+    client = create_gemini_client()
     context = get_task_context(db, external_task_key)
 
     planning_started = perf_counter()

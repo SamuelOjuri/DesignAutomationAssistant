@@ -10,6 +10,7 @@ from typing import Any, Dict
 from dataclasses import dataclass
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import requests
 import httpx
 
 from fastapi import HTTPException
@@ -19,7 +20,7 @@ from sqlalchemy.dialects.postgresql import insert
 from ..config import settings
 from ..models import Task, TaskFile, TaskSnapshot
 from ..supabase_client import supabase
-from ..monday_client import download_asset
+from ..monday_client import TransientMondayAPIError, download_asset
 
 @retry(
     stop=stop_after_attempt(5),
@@ -250,6 +251,20 @@ class DownloadedAsset:
     sha256: str
     size_bytes: int
 
+
+@retry(
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=1, min=1, max=15),
+    retry=retry_if_exception_type(
+        (
+            TransientMondayAPIError,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        )
+    ),
+    reraise=True,
+)
 def download_asset_to_temp(asset: Dict[str, Any], access_token: str) -> DownloadedAsset:
     # Changed url selection logic to prefer 'public_url' if present, otherwise use 'url'
     url = asset.get("public_url") or asset.get("url")
@@ -261,6 +276,8 @@ def download_asset_to_temp(asset: Dict[str, Any], access_token: str) -> Download
     resp = download_asset(url, access_token=use_token)
 
     content_type = resp.headers.get("content-type") or "application/octet-stream"
+    content_length = resp.headers.get("content-length")
+    expected_size = int(content_length) if content_length and content_length.isdigit() else None
     sha = hashlib.sha256()
     size = 0
 
@@ -273,6 +290,17 @@ def download_asset_to_temp(asset: Dict[str, Any], access_token: str) -> Download
             size += len(chunk)
             tmp.write(chunk)
         tmp.flush()
+        if expected_size is not None and size != expected_size:
+            raise requests.exceptions.ChunkedEncodingError(
+                f"monday asset download incomplete: expected {expected_size} bytes, received {size}"
+            )
+    except Exception:
+        tmp.close()
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise
     finally:
         resp.close()
         tmp.close()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import uuid
 
 import pytest
 import requests
@@ -13,8 +14,8 @@ from sqlalchemy.orm import sessionmaker
 from tenacity import stop_after_attempt, wait_none
 
 from backend.app import monday_client
-from backend.app.db import Base
-from backend.app.models import AutoSyncJob, Task
+from backend.app.db import Base, _engine_options
+from backend.app.models import AutoSyncJob, Task, TaskSnapshot
 from backend.app.services import auto_sync_worker
 from backend.app.services.auto_sync import coalesce_auto_sync_job
 from backend.app.services.auto_sync_backfill import active_backfill_once
@@ -49,6 +50,60 @@ def _task(item_id: str = "item-1") -> Task:
         auto_sync_enabled=True,
         auto_sync_state="active",
     )
+
+
+def test_postgres_engine_options_enable_tcp_keepalives():
+    connect_args = _engine_options("postgresql://example.invalid/app")["connect_args"]
+
+    assert connect_args == {
+        "connect_timeout": 10,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    }
+
+
+def test_heartbeat_loop_uses_fresh_short_lived_session(monkeypatch):
+    sessions = []
+    heartbeat_calls = []
+
+    class FakeSession:
+        def close(self):
+            pass
+
+    class FakeStopEvent:
+        def __init__(self):
+            self.wait_count = 0
+
+        def wait(self, interval_seconds):
+            assert interval_seconds == 15
+            self.wait_count += 1
+            return self.wait_count > 1
+
+    def session_factory():
+        session = FakeSession()
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(auto_sync_worker, "SessionLocal", session_factory)
+    monkeypatch.setattr(
+        auto_sync_worker,
+        "heartbeat_job",
+        lambda db, job_id, *, worker_id: heartbeat_calls.append(
+            (db, job_id, worker_id)
+        ) or True,
+    )
+
+    auto_sync_worker._heartbeat_job_until_stopped(
+        "job-1",
+        worker_id="worker-1",
+        stop_event=FakeStopEvent(),
+        interval_seconds=15,
+    )
+
+    assert len(sessions) == 1
+    assert heartbeat_calls == [(sessions[0], "job-1", "worker-1")]
 
 
 def test_source_revision_query_uses_account_fallback_not_board_account(monkeypatch):
@@ -207,6 +262,7 @@ def test_worker_runs_due_job_and_updates_task_state(db_session):
     calls = []
 
     def fake_pipeline(db, external_task_key, access_token, force):
+        assert not db.in_transaction()
         calls.append((external_task_key, access_token, force))
         return FakeSyncResult(status="done", snapshot_version="rev-2")
 
@@ -284,6 +340,14 @@ def test_worker_retries_failed_job_without_losing_durable_state(db_session):
         now=now,
     )
     job.max_attempts = 3
+    snapshot = TaskSnapshot(
+        id=uuid.uuid4(),
+        external_task_key=task.external_task_key,
+        snapshot_version="rev-3",
+        task_context_json={"partial": True},
+        ingestion_status="building",
+    )
+    db_session.add(snapshot)
     db_session.commit()
 
     def failing_pipeline(db, external_task_key, access_token, force):
@@ -298,6 +362,7 @@ def test_worker_retries_failed_job_without_losing_durable_state(db_session):
 
     db_session.refresh(task)
     db_session.refresh(job)
+    db_session.refresh(snapshot)
     assert result.claimed == 1
     assert result.retry_wait == 1
     assert job.status == "retry_wait"
@@ -306,6 +371,8 @@ def test_worker_retries_failed_job_without_losing_durable_state(db_session):
     assert job.locked_at is None
     assert task.sync_status == "failed"
     assert task.last_sync_result == "failed"
+    assert snapshot.ingestion_status == "failed"
+    assert snapshot.ingestion_error == "temporary monday throttling"
 
 
 def test_worker_batch_continues_after_transient_database_error(monkeypatch):
@@ -356,6 +423,67 @@ def test_run_once_ignores_database_error_during_session_close(monkeypatch):
 
     assert auto_sync_worker._run_once_from_new_session(args, "worker-1") == WorkerRunResult()
     assert session.invalidated is True
+
+
+def test_worker_records_retry_with_new_session_when_rollback_connection_is_dead(
+    db_session,
+    monkeypatch,
+):
+    now = datetime.now(timezone.utc)
+    task = _task("rollback-failure")
+    db_session.add(task)
+    db_session.flush()
+    job, _ = coalesce_auto_sync_job(
+        db_session,
+        task,
+        trigger_type="backfill",
+        desired_source_revision="rev-retry",
+        scheduled_for=now,
+        now=now,
+    )
+    db_session.commit()
+    claimed = claim_due_jobs(db_session, worker_id="worker-1", now=now)
+    job_id = job.id
+
+    recovery_session_factory = sessionmaker(
+        bind=db_session.bind,
+        autoflush=False,
+        autocommit=False,
+    )
+    monkeypatch.setattr(auto_sync_worker, "SessionLocal", recovery_session_factory)
+    original_rollback = db_session.rollback
+
+    def failed_rollback():
+        original_rollback()
+        raise OperationalError(
+            "ROLLBACK",
+            {},
+            RuntimeError("SSL connection closed"),
+            connection_invalidated=True,
+        )
+
+    monkeypatch.setattr(db_session, "rollback", failed_rollback)
+
+    def failing_pipeline(db, external_task_key, access_token, force):
+        raise RuntimeError("asset stream interrupted")
+
+    status = execute_claimed_job(
+        db_session,
+        claimed[0].id,
+        worker_id="worker-1",
+        access_token="service-token",
+        pipeline_runner=failing_pipeline,
+    )
+
+    verification_db = recovery_session_factory()
+    try:
+        recovered_job = verification_db.get(AutoSyncJob, job_id)
+        assert status == "retry_wait"
+        assert recovered_job.status == "retry_wait"
+        assert recovered_job.locked_by is None
+        assert recovered_job.last_error == "asset stream interrupted"
+    finally:
+        verification_db.close()
 
 
 def test_worker_does_not_finalize_job_cancelled_during_pipeline(db_session):

@@ -5,12 +5,12 @@ import logging
 from time import perf_counter
 from typing import Any, Dict, List, Optional
 
-from google import genai
 from google.genai import types
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import TaskSnapshot, TaskFile, TaskChunk
+from .llm_interface import create_gemini_client
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,10 @@ def _normalize(vec: List[float]) -> List[float]:
 def _latest_snapshot(db: Session, external_task_key: str) -> Optional[TaskSnapshot]:
     return (
         db.query(TaskSnapshot)
-        .filter_by(external_task_key=external_task_key)
+        .filter(
+            TaskSnapshot.external_task_key == external_task_key,
+            TaskSnapshot.ingestion_status == "complete",
+        )
         .order_by(TaskSnapshot.created_at.desc())
         .first()
     )
@@ -221,7 +224,7 @@ def search_task_docs_batch(
         return []
 
     candidate_limit = min(k, settings.chat_retrieval_candidates_per_query)
-    client = genai.Client(api_key=settings.gemini_api_key)
+    client = create_gemini_client()
     result = client.models.embed_content(
         model="gemini-embedding-001",
         contents=normalized_queries,

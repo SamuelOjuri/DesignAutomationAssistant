@@ -107,12 +107,22 @@ class Task(Base):
 
 class TaskSnapshot(Base):
     __tablename__ = "task_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "external_task_key",
+            "snapshot_version",
+            name="uq_task_snapshots_ext_version",
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     external_task_key = Column(String, ForeignKey("tasks.external_task_key"), nullable=False)
 
     snapshot_version = Column(String, nullable=False)
     task_context_json = Column(JSON, nullable=False)
+    ingestion_status = Column(String, nullable=False, server_default="complete", default="complete")
+    ingestion_error = Column(Text, nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

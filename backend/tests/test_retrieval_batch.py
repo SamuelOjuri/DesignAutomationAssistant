@@ -1,6 +1,13 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+import uuid
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from backend.app.db import Base
+from backend.app.models import Task, TaskSnapshot
 from backend.app.services import retrieval
 
 
@@ -20,6 +27,45 @@ def _candidate(
         "matchedQuery": f"query-{query_index}",
         "matchedQueryIndex": query_index,
     }
+
+
+def test_latest_snapshot_ignores_newer_incomplete_snapshot():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    try:
+        task = Task(
+            external_task_key="acct:board:item",
+            account_id="acct",
+            board_id="board",
+            item_id="item",
+        )
+        completed_at = datetime.now(timezone.utc)
+        complete_snapshot = TaskSnapshot(
+            id=uuid.uuid4(),
+            external_task_key=task.external_task_key,
+            snapshot_version="rev-complete",
+            task_context_json={"revision": "complete"},
+            ingestion_status="complete",
+            created_at=completed_at,
+        )
+        building_snapshot = TaskSnapshot(
+            id=uuid.uuid4(),
+            external_task_key=task.external_task_key,
+            snapshot_version="rev-building",
+            task_context_json={"revision": "building"},
+            ingestion_status="building",
+            created_at=completed_at + timedelta(seconds=1),
+        )
+        db.add_all([task, complete_snapshot, building_snapshot])
+        db.commit()
+
+        selected = retrieval._latest_snapshot(db, task.external_task_key)
+
+        assert selected.id == complete_snapshot.id
+    finally:
+        db.close()
+        engine.dispose()
 
 
 def test_search_task_docs_batch_embeds_queries_once_and_reuses_latest_snapshot(
@@ -75,7 +121,11 @@ def test_search_task_docs_batch_embeds_queries_once_and_reuses_latest_snapshot(
         return [_candidate(f"chunk-{query_index}", query_index, 0.1)]
 
     monkeypatch.setattr(retrieval, "_latest_snapshot", fake_latest_snapshot)
-    monkeypatch.setattr(retrieval.genai, "Client", FakeClient)
+    monkeypatch.setattr(
+        retrieval,
+        "create_gemini_client",
+        lambda: FakeClient(api_key="test"),
+    )
     monkeypatch.setattr(
         retrieval,
         "_search_snapshot_for_embedding",

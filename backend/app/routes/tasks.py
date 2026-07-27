@@ -126,7 +126,10 @@ def task_summary(
 
     snapshot = (
         db.query(TaskSnapshot)
-        .filter_by(external_task_key=task.external_task_key)
+        .filter(
+            TaskSnapshot.external_task_key == task.external_task_key,
+            TaskSnapshot.ingestion_status == "complete",
+        )
         .order_by(TaskSnapshot.created_at.desc())
         .first()
     )
@@ -155,7 +158,10 @@ def task_sources(
 
     snapshot = (
         db.query(TaskSnapshot)
-        .filter_by(external_task_key=task.external_task_key)
+        .filter(
+            TaskSnapshot.external_task_key == task.external_task_key,
+            TaskSnapshot.ingestion_status == "complete",
+        )
         .order_by(TaskSnapshot.created_at.desc())
         .first()
     )
@@ -205,10 +211,12 @@ def file_signed_url(
 
     file_record = (
         db.query(TaskFile)
+        .join(TaskSnapshot, TaskFile.snapshot_id == TaskSnapshot.id)
         .filter(
             TaskFile.id == file_uuid,
             TaskFile.external_task_key == task.external_task_key,
             TaskFile.deleted_at.is_(None),
+            TaskSnapshot.ingestion_status == "complete",
         )
         .one_or_none()
     )

@@ -1,29 +1,39 @@
 from __future__ import annotations
 
+import os
 import sys
 from types import ModuleType
 from types import SimpleNamespace
 import uuid
 
+import pytest
+import requests
+from tenacity import wait_none
+
 from backend.app.models import Task, TaskSnapshot
 
 sys.modules.setdefault("extract_msg", ModuleType("extract_msg"))
 
-from backend.app.services import sync_pipeline
+from backend.app.services import storage_ingest, sync_pipeline
 
 
 class FakeQuery:
+    def __init__(self, result=None):
+        self.result = result
+
     def filter_by(self, **kwargs):
         return self
 
     def first(self):
-        return None
+        return self.result
 
 
 class FakeDB:
-    def __init__(self, task: Task):
+    def __init__(self, task: Task, snapshot: TaskSnapshot | None = None):
         self.task = task
+        self.snapshot = snapshot
         self.committed = False
+        self.commit_count = 0
 
     def get(self, model, key):
         if model is Task and key == self.task.external_task_key:
@@ -31,17 +41,21 @@ class FakeDB:
         return None
 
     def query(self, model):
+        if model is TaskSnapshot:
+            return FakeQuery(self.snapshot)
         return FakeQuery()
 
     def add(self, obj):
         if isinstance(obj, TaskSnapshot):
             obj.id = uuid.uuid4()
+            self.snapshot = obj
 
     def flush(self):
         pass
 
     def commit(self):
         self.committed = True
+        self.commit_count += 1
 
 
 def test_email_pipeline_cleans_pdf_attachments_skipped_by_limit(monkeypatch, tmp_path):
@@ -66,6 +80,7 @@ def test_email_pipeline_cleans_pdf_attachments_skipped_by_limit(monkeypatch, tmp
         "updates": [],
         "column_values": [],
     }
+
     email_path = tmp_path / "project-email.msg"
     email_path.write_bytes(b"email")
     attachment_paths = []
@@ -99,3 +114,157 @@ def test_email_pipeline_cleans_pdf_attachments_skipped_by_limit(monkeypatch, tmp
 
     assert result.status == "done"
     assert all(not path.exists() for path in attachment_paths)
+
+
+def test_pipeline_returns_unchanged_only_for_complete_snapshot(monkeypatch):
+    task = Task(
+        external_task_key="acct:board:item-complete",
+        account_id="acct",
+        board_id="board",
+        item_id="item-complete",
+    )
+    item = {
+        "id": task.item_id,
+        "updated_at": "2026-07-27T10:00:00Z",
+        "assets": [],
+        "updates": [],
+        "column_values": [],
+    }
+    snapshot = TaskSnapshot(
+        id=uuid.uuid4(),
+        external_task_key=task.external_task_key,
+        snapshot_version=storage_ingest.compute_snapshot_version(item),
+        task_context_json=item,
+        ingestion_status="complete",
+    )
+    monkeypatch.setattr(sync_pipeline, "fetch_item_with_assets", lambda *args: item)
+
+    result = sync_pipeline.run_sync_pipeline(
+        FakeDB(task, snapshot),
+        task.external_task_key,
+        "token",
+    )
+
+    assert result.status == "unchanged"
+    assert snapshot.ingestion_status == "complete"
+
+
+def test_pipeline_resumes_failed_snapshot_and_marks_it_complete(monkeypatch):
+    task = Task(
+        external_task_key="acct:board:item-retry",
+        account_id="acct",
+        board_id="board",
+        item_id="item-retry",
+    )
+    item = {
+        "id": task.item_id,
+        "updated_at": "2026-07-27T11:00:00Z",
+        "assets": [],
+        "updates": [],
+        "column_values": [],
+    }
+    snapshot = TaskSnapshot(
+        id=uuid.uuid4(),
+        external_task_key=task.external_task_key,
+        snapshot_version=storage_ingest.compute_snapshot_version(item),
+        task_context_json={"partial": True},
+        ingestion_status="failed",
+        ingestion_error="503 UNAVAILABLE",
+    )
+    db = FakeDB(task, snapshot)
+
+    def fake_fetch_item(*args):
+        assert db.commit_count == 1
+        return item
+
+    monkeypatch.setattr(sync_pipeline, "fetch_item_with_assets", fake_fetch_item)
+
+    result = sync_pipeline.run_sync_pipeline(db, task.external_task_key, "token")
+
+    assert result.status == "done"
+    assert snapshot.ingestion_status == "complete"
+    assert snapshot.ingestion_error is None
+    assert snapshot.completed_at is not None
+    assert task.latest_snapshot_version == snapshot.snapshot_version
+    assert db.commit_count >= 2
+
+
+def test_pipeline_memory_abort_does_not_publish_partial_snapshot(monkeypatch):
+    task = Task(
+        external_task_key="acct:board:item-oom",
+        account_id="acct",
+        board_id="board",
+        item_id="item-oom",
+    )
+    item = {
+        "id": task.item_id,
+        "updated_at": "2026-07-27T12:00:00Z",
+        "assets": [{"id": "asset-1", "name": "drawing.pdf"}],
+        "updates": [],
+        "column_values": [],
+    }
+    db = FakeDB(task)
+    monkeypatch.setattr(sync_pipeline, "fetch_item_with_assets", lambda *args: item)
+    monkeypatch.setattr(
+        sync_pipeline.psutil,
+        "Process",
+        lambda: SimpleNamespace(
+            memory_info=lambda: SimpleNamespace(rss=4 * 1024 * 1024 * 1024)
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="critical memory pressure"):
+        sync_pipeline.run_sync_pipeline(db, task.external_task_key, "token")
+
+    assert db.snapshot.ingestion_status == "building"
+    assert task.latest_snapshot_version is None
+
+
+def test_asset_download_retries_interrupted_stream_and_removes_partial_file(monkeypatch):
+    temp_paths = []
+    original_named_temporary_file = storage_ingest.tempfile.NamedTemporaryFile
+
+    def tracking_named_temporary_file(*args, **kwargs):
+        temp_file = original_named_temporary_file(*args, **kwargs)
+        temp_paths.append(temp_file.name)
+        return temp_file
+
+    class FakeResponse:
+        def __init__(self, chunks, content_length):
+            self._chunks = chunks
+            self.headers = {
+                "content-type": "application/pdf",
+                "content-length": str(content_length),
+            }
+            self.closed = False
+
+        def iter_content(self, chunk_size):
+            yield from self._chunks
+
+        def close(self):
+            self.closed = True
+
+    def interrupted_chunks():
+        yield b"partial"
+        raise requests.exceptions.ChunkedEncodingError("stream interrupted")
+
+    responses = [
+        FakeResponse(interrupted_chunks(), 8),
+        FakeResponse([b"complete"], 8),
+    ]
+    monkeypatch.setattr(storage_ingest.tempfile, "NamedTemporaryFile", tracking_named_temporary_file)
+    monkeypatch.setattr(storage_ingest, "download_asset", lambda *args, **kwargs: responses.pop(0))
+
+    download_with_no_wait = storage_ingest.download_asset_to_temp.retry_with(wait=wait_none())
+    downloaded = download_with_no_wait(
+        {"id": "asset-1", "url": "https://example.invalid/file.pdf"},
+        "token",
+    )
+
+    try:
+        assert len(temp_paths) == 2
+        assert not os.path.exists(temp_paths[0])
+        assert os.path.exists(downloaded.temp_path)
+        assert open(downloaded.temp_path, "rb").read() == b"complete"
+    finally:
+        os.unlink(downloaded.temp_path)

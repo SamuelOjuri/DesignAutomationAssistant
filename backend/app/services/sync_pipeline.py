@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import csv
 from typing import Any, Dict, List
 import psutil  # Add this import for memory monitoring
@@ -12,24 +13,32 @@ import os
 import math
 import gc  # Add this import
 
-from google import genai
 from google.genai import types
 from ..config import settings
 from ..db import SessionLocal
 
 from .email_extraction import process_email_content, extract_email_sections, process_email_content_to_temp, cleanup_temp_files
-from .pdf_extraction import process_pdf_batch
-from .image_extraction import process_image_with_gemini
-from .llm_interface import gemini_embed_content_with_retry
-from .storage_ingest import ingest_derived_attachment_bytes, attachment_kind_for_filename
+from .pdf_extraction import process_pdf_batch as _process_pdf_batch
+from .image_extraction import process_image_with_gemini as _process_image_with_gemini
+from .llm_interface import create_gemini_client, gemini_embed_content_with_retry
+from .storage_ingest import (
+    ingest_derived_attachment_bytes as _ingest_derived_attachment_bytes,
+    attachment_kind_for_filename,
+)
 from ..models import Task, TaskSnapshot, TaskFile, TaskChunk
 from ..monday_client import fetch_item_with_assets
 from .storage_ingest import (
     compute_snapshot_version,
     extract_asset_kinds,
-    ingest_asset,
-    download_asset_to_temp,
+    ingest_asset as _ingest_asset,
+    download_asset_to_temp as _download_asset_to_temp,
 )
+
+download_asset_to_temp = _download_asset_to_temp
+ingest_asset = _ingest_asset
+ingest_derived_attachment_bytes = _ingest_derived_attachment_bytes
+process_pdf_batch = _process_pdf_batch
+process_image_with_gemini = _process_image_with_gemini
 
 import logging
 
@@ -136,7 +145,9 @@ def run_sync_pipeline(
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    item = fetch_item_with_assets(access_token, task.item_id)
+    task_item_id = task.item_id
+    db.commit()
+    item = fetch_item_with_assets(access_token, task_item_id)
     snapshot_version = compute_snapshot_version(item)
 
     snapshot = (
@@ -148,7 +159,7 @@ def run_sync_pipeline(
         .first()
     )
 
-    if snapshot is not None and not force:
+    if snapshot is not None and snapshot.ingestion_status == "complete" and not force:
         return SyncResult(status="unchanged", snapshot_version=snapshot_version)
 
     if snapshot is None:
@@ -156,9 +167,43 @@ def run_sync_pipeline(
             external_task_key=task.external_task_key,
             snapshot_version=snapshot_version,
             task_context_json=item,
+            ingestion_status="building",
         )
         db.add(snapshot)
         db.flush()
+    else:
+        snapshot.task_context_json = item
+        snapshot.ingestion_status = "building"
+        snapshot.ingestion_error = None
+        snapshot.completed_at = None
+
+    db.commit()
+
+    download_asset_operation = globals()["download_asset_to_temp"]
+    ingest_asset_operation = globals()["ingest_asset"]
+    ingest_derived_attachment_operation = globals()["ingest_derived_attachment_bytes"]
+    process_pdf_operation = globals()["process_pdf_batch"]
+    process_image_operation = globals()["process_image_with_gemini"]
+
+    def download_asset_to_temp(asset: Dict[str, Any], token: str):
+        db.commit()
+        return download_asset_operation(asset, token)
+
+    def ingest_asset(*args, **kwargs):
+        db.commit()
+        return ingest_asset_operation(*args, **kwargs)
+
+    def ingest_derived_attachment_bytes(*args, **kwargs):
+        db.commit()
+        return ingest_derived_attachment_operation(*args, **kwargs)
+
+    def process_pdf_batch(*args, **kwargs):
+        db.commit()
+        return process_pdf_operation(*args, **kwargs)
+
+    def process_image_with_gemini(*args, **kwargs):
+        db.commit()
+        return process_image_operation(*args, **kwargs)
 
     asset_jobs = _collect_asset_jobs(item)
     csv_params: List[Dict[str, Any]] = []
@@ -238,12 +283,13 @@ def run_sync_pipeline(
             embed_buffer.clear()
             return
         if embed_client is None:
-            embed_client = genai.Client(api_key=settings.gemini_api_key)
+            embed_client = create_gemini_client()
         logger.info(f"[EMBED] batch size={len(embed_buffer)}")
         _log_memory("Before embedding batch")
         
         try:
             contents = [c["chunk_text"] for c in embed_buffer]
+            db.commit()
             result = gemini_embed_content_with_retry(
                 embed_client,
                 model="gemini-embedding-001",
@@ -255,6 +301,7 @@ def run_sync_pipeline(
             )
             embeddings = [_normalize(list(e.values)) for e in result.embeddings]
             for record, vector in zip(embed_buffer, embeddings):
+                _ensure_chunks_cleared(record["file_id"])
                 db.add(
                     TaskChunk(
                         file_id=record["file_id"],
@@ -264,6 +311,7 @@ def run_sync_pipeline(
                         section=record.get("section"),
                     )
                 )
+            db.commit()
             
             # Explicit cleanup of large objects
             del result
@@ -300,7 +348,6 @@ def run_sync_pipeline(
         if section:
             section = _sanitize_text(section)
 
-        _ensure_chunks_cleared(file_id)
         embed_buffer.append(
             {
                 "file_id": file_id,
@@ -511,6 +558,7 @@ def run_sync_pipeline(
                 # Check memory before each PDF
                 if _should_abort():
                     logger.error(f"[OOM-ABORT] Stopping PDF processing at {idx}/{len(pdf_attachments)}")
+                    aborted = True
                     break
                 logger.info(f"[PDF {idx}/{len(pdf_attachments)}] Processing: {att['filename']}")
                 _log_memory(f"Before PDF {idx}")
@@ -606,6 +654,7 @@ def run_sync_pipeline(
                 # Check memory before each image
                 if _should_abort():
                     logger.error(f"[OOM-ABORT] Stopping image processing at {idx}/{len(image_attachments)}")
+                    aborted = True
                     break
                 logger.info(f"[IMAGE {idx}/{len(image_attachments)}] Processing: {att['filename']}")
                 _log_memory(f"Before image {idx}")
@@ -887,9 +936,10 @@ def run_sync_pipeline(
 
     # Log if we aborted early
     if aborted:
-        logger.warning("[OOM-ABORT] Pipeline aborted early due to memory pressure - partial snapshot will be committed")
+        logger.error("[OOM-ABORT] Pipeline aborted early due to memory pressure")
         gc.collect()
         _log_memory("After abort cleanup")
+        raise RuntimeError("Sync aborted due to critical memory pressure")
 
     # ---- Add column text docs for RAG ----
     def _build_column_text(item: Dict[str, Any]) -> str:
@@ -948,6 +998,9 @@ def run_sync_pipeline(
     task_context["csv_params"] = csv_params
     task_context["extracted_docs_summary"] = doc_stats
     snapshot.task_context_json = task_context
+    snapshot.ingestion_status = "complete"
+    snapshot.ingestion_error = None
+    snapshot.completed_at = datetime.now(timezone.utc)
 
     task.latest_snapshot_version = snapshot_version
     db.commit()
@@ -982,6 +1035,17 @@ def run_sync_pipeline_background(
         try:
             task = db.get(Task, external_task_key)
             if task:
+                db.query(TaskSnapshot).filter(
+                    TaskSnapshot.external_task_key == external_task_key,
+                    TaskSnapshot.ingestion_status == "building",
+                ).update(
+                    {
+                        TaskSnapshot.ingestion_status: "failed",
+                        TaskSnapshot.ingestion_error: str(e)[:1000],
+                        TaskSnapshot.completed_at: None,
+                    },
+                    synchronize_session=False,
+                )
                 task.sync_status = "failed"
                 task.sync_completed_at = datetime.now(timezone.utc)
                 task.sync_error = str(e)[:500]  # Truncate error message
