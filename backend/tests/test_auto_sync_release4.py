@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
@@ -358,3 +358,69 @@ def test_failed_deadlock_event_can_be_redelivered(client, db_session, monkeypatc
     assert event.attempt_count == 2
     assert db_session.query(MondayWebhookEvent).count() == 1
     assert db_session.query(AutoSyncJob).count() == 1
+
+
+def test_failed_monday_request_event_can_be_redelivered(client, db_session, monkeypatch):
+    monkeypatch.setattr(monday_webhooks, "get_monday_ingestion_access_token", lambda: "service-token")
+    monkeypatch.setattr(monday_webhooks, "compute_desired_source_revision", lambda item: "rev-recovered")
+
+    calls = {"count": 0}
+
+    def fetch_item(token, item_id):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise monday_webhooks.TransientMondayAPIError(
+                detail="monday API request failed: read timed out",
+            )
+        return _monday_item(item_id=item_id)
+
+    monkeypatch.setattr(monday_webhooks, "fetch_current_source_revision_inputs", fetch_item)
+    payload = _webhook_payload(trigger_uuid="monday-timeout-redelivery")
+
+    first_response = client.post("/api/monday/webhooks", json=payload, headers=_auth_headers())
+
+    event = db_session.query(MondayWebhookEvent).one()
+    assert first_response.status_code == 503
+    assert first_response.headers["retry-after"] == "1"
+    assert event.status == "failed"
+    assert event.processing_started_at is None
+    assert event.attempt_count == 1
+    assert db_session.query(AutoSyncJob).count() == 0
+
+
+    second_response = client.post("/api/monday/webhooks", json=payload, headers=_auth_headers())
+
+    db_session.refresh(event)
+    assert second_response.status_code == 200
+    assert second_response.json()["status"] == "queued"
+    assert calls["count"] == 2
+    assert event.status == "queued"
+    assert event.attempt_count == 2
+    assert db_session.query(MondayWebhookEvent).count() == 1
+    assert db_session.query(AutoSyncJob).count() == 1
+
+
+def test_permanent_monday_error_is_acknowledged_as_failed(client, db_session, monkeypatch):
+    monkeypatch.setattr(monday_webhooks, "get_monday_ingestion_access_token", lambda: "service-token")
+    monkeypatch.setattr(
+        monday_webhooks,
+        "fetch_current_source_revision_inputs",
+        lambda token, item_id: (_ for _ in ()).throw(
+            HTTPException(status_code=502, detail="monday GraphQL error")
+        ),
+    )
+
+    response = client.post(
+        "/api/monday/webhooks",
+        json=_webhook_payload(trigger_uuid="permanent-monday-error"),
+        headers=_auth_headers(),
+    )
+
+    event = db_session.query(MondayWebhookEvent).one()
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert "retry-after" not in response.headers
+    assert event.status == "failed"
+    assert event.processing_started_at is None
+    assert event.attempt_count == 1
+    assert db_session.query(AutoSyncJob).count() == 0

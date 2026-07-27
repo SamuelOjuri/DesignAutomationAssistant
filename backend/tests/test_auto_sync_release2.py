@@ -151,11 +151,41 @@ def test_monday_graphql_request_reports_transient_failure_after_retries(monkeypa
         ),
     )
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(monday_client.TransientMondayAPIError) as exc_info:
         monday_client.monday_graphql_request("token", "query { ok }")
 
+    assert isinstance(exc_info.value, HTTPException)
     assert exc_info.value.status_code == 502
     assert exc_info.value.detail == "monday API error (502)"
+    assert exc_info.value.upstream_status_code == 502
+    assert len(calls) == 2
+
+
+def test_monday_graphql_request_reports_timeout_after_retries(monkeypatch):
+    calls = []
+
+    def fake_post(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise requests.exceptions.ReadTimeout("read timed out")
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(
+        monday_client,
+        "_post_monday_graphql",
+        monday_client._post_monday_graphql.retry_with(
+            stop=stop_after_attempt(2),
+            wait=wait_none(),
+        ),
+    )
+
+    with pytest.raises(monday_client.TransientMondayAPIError) as exc_info:
+        monday_client.monday_graphql_request("token", "query { ok }")
+
+    assert isinstance(exc_info.value, HTTPException)
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == "monday API request failed: read timed out"
+    assert exc_info.value.upstream_status_code is None
+    assert isinstance(exc_info.value.__cause__, requests.exceptions.ReadTimeout)
     assert len(calls) == 2
 
 

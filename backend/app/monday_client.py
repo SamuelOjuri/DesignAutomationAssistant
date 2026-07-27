@@ -13,10 +13,17 @@ MONDAY_TOKEN_URL = "https://auth.monday.com/oauth2/token"
 TRANSIENT_MONDAY_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
-class TransientMondayAPIError(Exception):
-    def __init__(self, status_code: int):
-        self.status_code = status_code
-        super().__init__(f"monday API error ({status_code})")
+class TransientMondayAPIError(HTTPException):
+    def __init__(
+        self,
+        upstream_status_code: Optional[int] = None,
+        *,
+        detail: Optional[str] = None,
+    ):
+        self.upstream_status_code = upstream_status_code
+        if detail is None:
+            detail = f"monday API error ({upstream_status_code})"
+        super().__init__(status_code=502, detail=detail)
 
 
 def _is_transient_monday_error(exc: BaseException) -> bool:
@@ -76,8 +83,12 @@ def monday_graphql_request(
             variables,
             timeout=timeout,
         )
-    except TransientMondayAPIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+    except TransientMondayAPIError:
+        raise
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+        raise TransientMondayAPIError(
+            detail=f"monday API request failed: {exc}",
+        ) from exc
     except requests.exceptions.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"monday API request failed: {exc}")
 

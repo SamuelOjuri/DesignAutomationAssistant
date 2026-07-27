@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..models import MondayWebhookEvent
-from ..monday_client import fetch_current_source_revision_inputs
+from ..monday_client import TransientMondayAPIError, fetch_current_source_revision_inputs
 from ..services.auto_sync import (
     QueueResult,
     apply_auto_sync_policy_for_item,
@@ -378,7 +378,7 @@ def monday_webhook(
         if event is not None:
             _mark_event(db, event, status="failed", error=str(exc))
         logger.exception("Failed to process monday webhook event %s", normalized.idempotency_key)
-        if is_retryable_auto_sync_error(exc):
+        if isinstance(exc, TransientMondayAPIError) or is_retryable_auto_sync_error(exc):
             raise HTTPException(
                 status_code=503,
                 detail="Webhook processing temporarily unavailable",
