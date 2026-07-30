@@ -6,10 +6,17 @@ import io
 import tempfile
 import gc
 import mimetypes
+import logging
 from typing import Any, Dict
 from dataclasses import dataclass
 
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception,
+    retry_if_exception_type,
+)
 import requests
 import httpx
 
@@ -22,10 +29,45 @@ from ..models import Task, TaskFile, TaskSnapshot
 from ..supabase_client import supabase
 from ..monday_client import TransientMondayAPIError, download_asset
 
+logger = logging.getLogger(__name__)
+
+_RETRYABLE_STORAGE_STATUS_CODES = frozenset({408, 425, 429, 500, 502, 503, 504})
+_RETRYABLE_BAD_REQUEST_MARKERS = (
+    "aborted",
+    "interrupted",
+    "unexpected end of",
+)
+
+
+def _storage_error_detail(response: httpx.Response, limit: int = 2000) -> str:
+    try:
+        detail = json.dumps(response.json(), ensure_ascii=True)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        detail = response.text
+    return detail[:limit]
+
+
+def _is_retryable_storage_response(response: httpx.Response) -> bool:
+    if response.status_code in _RETRYABLE_STORAGE_STATUS_CODES:
+        return True
+    if response.status_code != 400:
+        return False
+    detail = _storage_error_detail(response).lower()
+    return any(marker in detail for marker in _RETRYABLE_BAD_REQUEST_MARKERS)
+
+
+def _is_retryable_storage_error(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.TransportError):
+        return True
+    return isinstance(exc, httpx.HTTPStatusError) and _is_retryable_storage_response(
+        exc.response
+    )
+
 @retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, min=4, max=60),
-    retry=retry_if_exception_type((httpx.ReadError, httpx.ConnectError, httpx.TimeoutException))
+    retry=retry_if_exception(_is_retryable_storage_error),
+    reraise=True,
 )
 def upload_with_retry(bucket: str, path: str, file_content: Any, content_type: str):
     """
@@ -43,11 +85,24 @@ def upload_with_retry(bucket: str, path: str, file_content: Any, content_type: s
     with httpx.Client(timeout=300.0) as client:
         # Check if file_content is bytes or a file-like object
         if hasattr(file_content, "read"):
+            if hasattr(file_content, "seek"):
+                file_content.seek(0)
             content = file_content.read()
         else:
             content = file_content
             
         response = client.post(url, content=content, headers=headers)
+        if response.is_error:
+            log_upload_failure = (
+                logger.warning if _is_retryable_storage_response(response) else logger.error
+            )
+            log_upload_failure(
+                "Supabase storage upload failed: status=%s bucket=%s path=%s response=%s",
+                response.status_code,
+                bucket,
+                path,
+                _storage_error_detail(response),
+            )
         response.raise_for_status()
 
 def sanitize_filename(name: str) -> str:

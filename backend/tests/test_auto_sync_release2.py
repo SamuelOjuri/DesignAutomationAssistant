@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import logging
 import uuid
 
 import pytest
@@ -326,7 +327,8 @@ def test_worker_skips_job_when_source_revision_is_fresh(db_session):
     assert task.last_indexed_source_revision == "rev-1"
 
 
-def test_worker_retries_failed_job_without_losing_durable_state(db_session):
+def test_worker_retries_failed_job_without_losing_durable_state(db_session, caplog):
+    caplog.set_level(logging.WARNING, logger=auto_sync_worker.__name__)
     now = datetime.now(timezone.utc)
     task = _task()
     db_session.add(task)
@@ -373,6 +375,14 @@ def test_worker_retries_failed_job_without_losing_durable_state(db_session):
     assert task.last_sync_result == "failed"
     assert snapshot.ingestion_status == "failed"
     assert snapshot.ingestion_error == "temporary monday throttling"
+    retry_logs = [
+        record
+        for record in caplog.records
+        if record.name == auto_sync_worker.__name__ and "retry scheduled" in record.message
+    ]
+    assert len(retry_logs) == 1
+    assert retry_logs[0].levelno == logging.WARNING
+    assert retry_logs[0].exc_info is None
 
 
 def test_worker_batch_continues_after_transient_database_error(monkeypatch):

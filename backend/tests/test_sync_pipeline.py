@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import io
 import os
 import sys
 from types import ModuleType
 from types import SimpleNamespace
 import uuid
+import logging
 
+import httpx
 import pytest
 import requests
 from tenacity import wait_none
@@ -56,6 +59,96 @@ class FakeDB:
     def commit(self):
         self.committed = True
         self.commit_count += 1
+
+
+def test_storage_upload_logs_supabase_error_response(monkeypatch, caplog):
+    request = httpx.Request("POST", "https://example.supabase.co/storage/v1/object/raw-monday/file.png")
+    response = httpx.Response(
+        400,
+        request=request,
+        json={"code": "InvalidMimeType", "message": "mime type image/png is not supported"},
+    )
+
+    class FakeClient:
+        def __init__(self, timeout):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            pass
+
+        def post(self, url, content, headers):
+            return response
+
+    monkeypatch.setattr(storage_ingest.httpx, "Client", FakeClient)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(httpx.HTTPStatusError):
+        storage_ingest.upload_with_retry(
+            "raw-monday",
+            "monday/account/board/item/snapshot/asset/file.png",
+            b"image",
+            "image/png",
+        )
+
+    assert "status=400" in caplog.text
+    assert '"code": "InvalidMimeType"' in caplog.text
+    assert '"message": "mime type image/png is not supported"' in caplog.text
+
+
+@pytest.mark.parametrize("status_code", [408, 425, 429, 500, 502, 503, 504])
+def test_storage_upload_classifies_transient_statuses_for_retry(status_code):
+    request = httpx.Request("POST", "https://example.supabase.co/storage/v1/object/raw-monday/file.png")
+    response = httpx.Response(status_code, request=request, text="temporary failure")
+
+    assert storage_ingest._is_retryable_storage_response(response) is True
+
+
+def test_storage_upload_retries_aborted_request_with_same_content(monkeypatch, caplog):
+    request = httpx.Request("POST", "https://example.supabase.co/storage/v1/object/raw-monday/file.png")
+    responses = [
+        httpx.Response(
+            400,
+            request=request,
+            json={"code": "InvalidRequest", "message": "request aborted"},
+        ),
+        httpx.Response(200, request=request),
+    ]
+    uploaded_contents = []
+
+    class FakeClient:
+        def __init__(self, timeout):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            pass
+
+        def post(self, url, content, headers):
+            uploaded_contents.append(content)
+            return responses.pop(0)
+
+    monkeypatch.setattr(storage_ingest.httpx, "Client", FakeClient)
+    upload_with_no_wait = storage_ingest.upload_with_retry.retry_with(wait=wait_none())
+
+    with caplog.at_level(logging.WARNING, logger=storage_ingest.__name__):
+        upload_with_no_wait(
+            "raw-monday",
+            "monday/account/board/item/snapshot/asset/file.png",
+            io.BytesIO(b"image-content"),
+            "image/png",
+        )
+
+    assert uploaded_contents == [b"image-content", b"image-content"]
+    assert "status=400" in caplog.text
+    assert not [
+        record
+        for record in caplog.records
+        if record.name == storage_ingest.__name__ and record.levelno >= logging.ERROR
+    ]
 
 
 def test_email_pipeline_cleans_pdf_attachments_skipped_by_limit(monkeypatch, tmp_path):

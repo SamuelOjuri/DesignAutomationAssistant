@@ -544,10 +544,10 @@ def execute_claimed_job(
             )
 
         if status == "retry_wait":
-            logger.error(
-                "Auto-sync job %s failed; retry scheduled",
+            logger.warning(
+                "Auto-sync job %s attempt failed; retry scheduled: %s",
                 job_id,
-                exc_info=(type(exc), exc, exc.__traceback__),
+                error,
             )
         elif status == "failed":
             logger.error(
