@@ -61,6 +61,50 @@ class FakeDB:
         self.commit_count += 1
 
 
+@pytest.mark.parametrize(
+    ("api_key", "expected_authorization"),
+    [
+        ("sb_secret_test-key", None),
+        ("eyJhbGciOiJIUzI1NiJ9.payload.signature", "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature"),
+    ],
+)
+def test_storage_upload_uses_key_compatible_auth_headers(
+    monkeypatch,
+    api_key,
+    expected_authorization,
+):
+    request = httpx.Request("POST", "https://example.supabase.co/storage/v1/object/raw-monday/file.pdf")
+    response = httpx.Response(200, request=request)
+    uploaded_headers = []
+
+    class FakeClient:
+        def __init__(self, timeout):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            pass
+
+        def post(self, url, content, headers):
+            uploaded_headers.append(headers)
+            return response
+
+    monkeypatch.setattr(storage_ingest.settings, "supabase_service_role_key", api_key)
+    monkeypatch.setattr(storage_ingest.httpx, "Client", FakeClient)
+
+    storage_ingest.upload_with_retry(
+        "raw-monday",
+        "monday/account/board/item/snapshot/asset/file.pdf",
+        b"pdf-content",
+        "application/pdf",
+    )
+
+    assert uploaded_headers[0]["apikey"] == api_key
+    assert uploaded_headers[0].get("Authorization") == expected_authorization
+
+
 def test_storage_upload_logs_supabase_error_response(monkeypatch, caplog):
     request = httpx.Request("POST", "https://example.supabase.co/storage/v1/object/raw-monday/file.png")
     response = httpx.Response(

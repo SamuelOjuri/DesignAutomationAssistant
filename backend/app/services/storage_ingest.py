@@ -74,12 +74,14 @@ def upload_with_retry(bucket: str, path: str, file_content: Any, content_type: s
     Uploads file directly using httpx to allow for custom timeouts.
     """
     url = f"{settings.supabase_url.rstrip('/')}/storage/v1/object/{bucket}/{path}"
+    api_key = settings.supabase_service_role_key
     headers = {
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
-        "apikey": settings.supabase_service_role_key,
+        "apikey": api_key,
         "Content-Type": content_type,
         "x-upsert": "true"
     }
+    if not api_key.startswith("sb_"):
+        headers["Authorization"] = f"Bearer {api_key}"
     
     # timeout=300.0 means 5 minutes for connect/read/write/pool
     with httpx.Client(timeout=300.0) as client:
