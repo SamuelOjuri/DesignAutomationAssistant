@@ -111,6 +111,11 @@ def test_storage_upload_logs_supabase_error_response(monkeypatch, caplog):
         400,
         request=request,
         json={"code": "InvalidMimeType", "message": "mime type image/png is not supported"},
+        headers={
+            "x-request-id": "storage-request-123",
+            "server": "edge-proxy",
+            "set-cookie": "private=value",
+        },
     )
 
     class FakeClient:
@@ -139,6 +144,10 @@ def test_storage_upload_logs_supabase_error_response(monkeypatch, caplog):
     assert "status=400" in caplog.text
     assert '"code": "InvalidMimeType"' in caplog.text
     assert '"message": "mime type image/png is not supported"' in caplog.text
+    assert "storage-request-123" in caplog.text
+    assert "edge-proxy" in caplog.text
+    assert "set-cookie" not in caplog.text
+    assert storage_ingest._is_retryable_storage_response(response) is False
 
 
 @pytest.mark.parametrize("status_code", [408, 425, 429, 500, 502, 503, 504])
@@ -193,6 +202,86 @@ def test_storage_upload_retries_aborted_request_with_same_content(monkeypatch, c
         for record in caplog.records
         if record.name == storage_ingest.__name__ and record.levelno >= logging.ERROR
     ]
+
+
+def test_storage_upload_retries_generic_html_bad_request(monkeypatch, caplog):
+    request = httpx.Request("POST", "https://example.supabase.co/storage/v1/object/raw-monday/file.msg")
+    responses = [
+        httpx.Response(
+            400,
+            request=request,
+            text="<html><head><title>400 Bad Request</title></head></html>",
+        ),
+        httpx.Response(200, request=request),
+    ]
+    uploaded_contents = []
+
+    class FakeClient:
+        def __init__(self, timeout):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            pass
+
+        def post(self, url, content, headers):
+            uploaded_contents.append(content)
+            return responses.pop(0)
+
+    monkeypatch.setattr(storage_ingest.httpx, "Client", FakeClient)
+    upload_with_no_wait = storage_ingest.upload_with_retry.retry_with(wait=wait_none())
+
+    with caplog.at_level(logging.WARNING, logger=storage_ingest.__name__):
+        upload_with_no_wait(
+            "raw-monday",
+            "monday/account/board/item/snapshot/asset/file.msg",
+            io.BytesIO(b"email-content"),
+            "application/vnd.ms-outlook",
+        )
+
+    assert uploaded_contents == [b"email-content", b"email-content"]
+    assert "status=400" in caplog.text
+    assert "<html><head><title>400 Bad Request</title></head></html>" in caplog.text
+
+
+def test_storage_upload_limits_generic_html_bad_request_retries(monkeypatch):
+    request = httpx.Request("POST", "https://example.supabase.co/storage/v1/object/raw-monday/file.msg")
+    response = httpx.Response(
+        400,
+        request=request,
+        text="<html><head><title>400 Bad Request</title></head></html>",
+    )
+    upload_attempts = 0
+
+    class FakeClient:
+        def __init__(self, timeout):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            pass
+
+        def post(self, url, content, headers):
+            nonlocal upload_attempts
+            upload_attempts += 1
+            return response
+
+    monkeypatch.setattr(storage_ingest.httpx, "Client", FakeClient)
+    upload_with_no_wait = storage_ingest.upload_with_retry.retry_with(wait=wait_none())
+
+    with pytest.raises(httpx.HTTPStatusError):
+        upload_with_no_wait(
+            "raw-monday",
+            "monday/account/board/item/snapshot/asset/file.msg",
+            b"email-content",
+            "application/vnd.ms-outlook",
+        )
+
+    assert upload_attempts == 3
 
 
 def test_email_pipeline_cleans_pdf_attachments_skipped_by_limit(monkeypatch, tmp_path):

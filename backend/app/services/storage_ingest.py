@@ -11,11 +11,13 @@ from typing import Any, Dict
 from dataclasses import dataclass
 
 from tenacity import (
+    RetryCallState,
     retry,
-    stop_after_attempt,
     wait_exponential,
+    wait_random_exponential,
     retry_if_exception,
     retry_if_exception_type,
+    stop_after_attempt,
 )
 import requests
 import httpx
@@ -32,10 +34,21 @@ from ..monday_client import TransientMondayAPIError, download_asset
 logger = logging.getLogger(__name__)
 
 _RETRYABLE_STORAGE_STATUS_CODES = frozenset({408, 425, 429, 500, 502, 503, 504})
+_MAX_STORAGE_UPLOAD_ATTEMPTS = 5
+_MAX_GENERIC_HTML_UPLOAD_ATTEMPTS = 3
 _RETRYABLE_BAD_REQUEST_MARKERS = (
     "aborted",
     "interrupted",
     "unexpected end of",
+)
+_STORAGE_RESPONSE_LOG_HEADERS = (
+    "content-type",
+    "x-request-id",
+    "x-correlation-id",
+    "sb-request-id",
+    "cf-ray",
+    "server",
+    "via",
 )
 
 
@@ -47,11 +60,29 @@ def _storage_error_detail(response: httpx.Response, limit: int = 2000) -> str:
     return detail[:limit]
 
 
+def _storage_response_log_metadata(response: httpx.Response) -> Dict[str, str]:
+    return {
+        header: response.headers[header][:500]
+        for header in _STORAGE_RESPONSE_LOG_HEADERS
+        if header in response.headers
+    }
+
+
+def _is_generic_html_storage_response(response: httpx.Response) -> bool:
+    content_type = response.headers.get("content-type", "").lower()
+    body_start = response.text.lstrip()[:200].lower()
+    return "text/html" in content_type or body_start.startswith(
+        ("<!doctype html", "<html")
+    )
+
+
 def _is_retryable_storage_response(response: httpx.Response) -> bool:
     if response.status_code in _RETRYABLE_STORAGE_STATUS_CODES:
         return True
     if response.status_code != 400:
         return False
+    if _is_generic_html_storage_response(response):
+        return True
     detail = _storage_error_detail(response).lower()
     return any(marker in detail for marker in _RETRYABLE_BAD_REQUEST_MARKERS)
 
@@ -63,9 +94,26 @@ def _is_retryable_storage_error(exc: BaseException) -> bool:
         exc.response
     )
 
+
+def _stop_storage_upload_retry(retry_state: RetryCallState) -> bool:
+    if retry_state.attempt_number >= _MAX_STORAGE_UPLOAD_ATTEMPTS:
+        return True
+    if retry_state.attempt_number < _MAX_GENERIC_HTML_UPLOAD_ATTEMPTS:
+        return False
+    outcome = retry_state.outcome
+    if outcome is None or not outcome.failed:
+        return False
+    exc = outcome.exception()
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response.status_code == 400
+        and _is_generic_html_storage_response(exc.response)
+    )
+
+
 @retry(
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1, min=4, max=60),
+    stop=_stop_storage_upload_retry,
+    wait=wait_random_exponential(multiplier=1, min=4, max=60),
     retry=retry_if_exception(_is_retryable_storage_error),
     reraise=True,
 )
@@ -99,10 +147,11 @@ def upload_with_retry(bucket: str, path: str, file_content: Any, content_type: s
                 logger.warning if _is_retryable_storage_response(response) else logger.error
             )
             log_upload_failure(
-                "Supabase storage upload failed: status=%s bucket=%s path=%s response=%s",
+                "Supabase storage upload failed: status=%s bucket=%s path=%s response_headers=%s response=%s",
                 response.status_code,
                 bucket,
                 path,
+                _storage_response_log_metadata(response),
                 _storage_error_detail(response),
             )
         response.raise_for_status()
