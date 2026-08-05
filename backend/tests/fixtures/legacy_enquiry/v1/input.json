@@ -1,0 +1,64 @@
+{
+  "fixtureVersion": 1,
+  "matching": {
+    "items": [
+      {
+        "column_values": [
+          {
+            "id": "text3__1",
+            "text": "100 New Kings Road"
+          },
+          {
+            "id": "date9__1",
+            "text": "2025-02-10"
+          }
+        ],
+        "id": "900001",
+        "name": "16771",
+        "state": "active"
+      },
+      {
+        "column_values": [
+          {
+            "id": "text3__1",
+            "text": "New Kings Road Apartments"
+          },
+          {
+            "id": "date9__1",
+            "text": "2024-11-18"
+          }
+        ],
+        "id": "900002",
+        "name": "20442",
+        "state": "active"
+      },
+      {
+        "column_values": [
+          {
+            "id": "text3__1",
+            "text": "100 New Kings Road SW6 4LX"
+          }
+        ],
+        "id": "900003",
+        "name": "archived-perfect-match",
+        "state": "archived"
+      }
+    ],
+    "projectName": "100 New Kings Road SW6 4LX",
+    "wordHitCounts": {
+      "Kings": 2,
+      "New": 12,
+      "Road": 8
+    }
+  },
+  "recordedResponses": {
+    "attachmentExtractionText": "Drawing title: Titley Close / Walton House\nProject postcode: WA4 6NL\nRoof build-up: TR27 tapered insulation over concrete deck.",
+    "parameterExtraction": "Email Subject: FW: Drawings Titley close/Walton House\nPost Code of Project Location: WA4 6NL\nDrawing Reference: Not found\nDrawing Title: Titley Close / Walton House\nRevision: Not found\nDate Received: 01 Jan 2000\nHour Received: 00:00\nCompany: Example Roofing Limited\nContact: Alex Example\nReason for Change: New Enquiry\nSurveyor: Not found\nTarget U-Value: 0.18\nTarget Min U-Value: Not provided\nFall of Tapered: 1:60\nTapered Insulation: TR27\nDecking: Concrete",
+    "projectTitle": "100 New Kings Road SW6 4LX"
+  },
+  "sourceEmail": {
+    "path": "data/FW_ Drawings Titley close_Walton House.msg",
+    "sha256": "cfbcb9993ed8ce6356f998f2130366ea78e1abec422e35183dbf01db531af214",
+    "sizeBytes": 8167424
+  }
+}

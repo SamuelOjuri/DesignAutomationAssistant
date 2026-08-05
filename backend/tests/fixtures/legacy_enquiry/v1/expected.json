@@ -1,0 +1,70 @@
+{
+  "extraction": {
+    "allTextSha256": "24c6ccbb8caf99d8014c694053de80b9d4e24044bb44dcb31e1711ff6997eac6",
+    "attachmentFilenames": [
+      "7017 - D000010A-1343 Walton House - SteppedThreshold & Small.pdf",
+      "7017 - D000010A-1341 Walton House - Stepped Threshold & Balc.pdf",
+      "7017 - D000010A-1342 Walton House - Level Threshold & Balcon.pdf"
+    ],
+    "emailHeader": "From: Dean Millward <Dean@Taperedplus.co.uk>\nTo: Sales <sales@Taperedplus.co.uk>\nSubject: FW: Drawings Titley close/Walton House\nDate: Fri, 30 Jan 2026 15:45:07 +0000\n",
+    "inlineImageFilenames": [],
+    "parameters": {
+      "Company": "Example Roofing Limited",
+      "Contact": "Alex Example",
+      "Date Received": "30 Jan 2026",
+      "Decking": "Concrete",
+      "Drawing Reference": "Not found",
+      "Drawing Title": "Titley Close / Walton House",
+      "Email Subject": "FW: Drawings Titley close/Walton House",
+      "Fall of Tapered": "1:60",
+      "Hour Received": "15:45",
+      "Post Code": "WA",
+      "Reason for Change": "New Enquiry",
+      "Revision": "Not found",
+      "Surveyor": "Not found",
+      "Tapered Insulation": "TissueFaced PIR",
+      "Target Min U-Value": "Not provided",
+      "Target U-Value": "0.18"
+    },
+    "projectName": "100 New Kings Road SW6 4LX"
+  },
+  "fixtureVersion": 1,
+  "legacyManifestDigest": "82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e",
+  "matching": {
+    "best_match": {
+      "created_date": "2025-02-10",
+      "id": "900001",
+      "name": "16771",
+      "similarity": 0.8181818181818182,
+      "state": "active",
+      "title": "100 New Kings Road"
+    },
+    "error": "",
+    "exists": true,
+    "matches": [
+      {
+        "created_date": "2025-02-10",
+        "id": "900001",
+        "name": "16771",
+        "similarity": 0.8181818181818182,
+        "state": "active",
+        "title": "100 New Kings Road"
+      },
+      {
+        "created_date": "2024-11-18",
+        "id": "900002",
+        "name": "20442",
+        "similarity": 0.6274509803921569,
+        "state": "active",
+        "title": "New Kings Road Apartments"
+      }
+    ],
+    "similarity_score": 0.8181818181818182,
+    "type": "existing"
+  },
+  "sourceEmail": {
+    "path": "data/FW_ Drawings Titley close_Walton House.msg",
+    "sha256": "cfbcb9993ed8ce6356f998f2130366ea78e1abec422e35183dbf01db531af214",
+    "sizeBytes": 8167424
+  }
+}

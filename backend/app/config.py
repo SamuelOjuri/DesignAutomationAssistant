@@ -1,6 +1,12 @@
-from typing import Optional
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, field_validator, model_validator
+import hashlib
+import json
+from datetime import datetime, timezone
+from typing import Annotated, Literal, Optional
+
+from pydantic import Field, ValidationInfo, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from .services.legacy_enquiry import LEGACY_MANIFEST_DIGEST
 
 class Settings(BaseSettings):
     # monday
@@ -61,6 +67,23 @@ class Settings(BaseSettings):
     monday_ingestion_access_token: Optional[str] = None
     monday_api_version: str = "2025-04"
 
+    # Design-processing worker
+    design_processing_mode: Literal["off", "shadow", "allowlist", "enabled"] = "off"
+    design_processing_worker_enabled: bool = False
+    design_processing_reconciliation_enabled: bool = False
+    design_processing_board_id: str = "1882196103"
+    design_processing_landing_group_id: str = "group_mkpbd6vy"
+    design_processing_project_board_id: str = "1825117125"
+    design_processing_extraction_model: str = "gemini-2.5-flash"
+    design_processing_artifact_bucket: str = "design-processing-artifacts"
+    design_processing_allowlist_item_ids: Annotated[list[str], NoDecode] = Field(
+        default_factory=list
+    )
+    design_processing_activation_timestamp: Optional[datetime] = None
+    design_processing_readiness_initial_interval_seconds: int = Field(default=30, ge=1)
+    design_processing_readiness_max_interval_seconds: int = Field(default=3600, ge=1)
+    design_processing_readiness_alert_threshold_seconds: int = Field(default=21600, ge=1)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -80,6 +103,97 @@ class Settings(BaseSettings):
             raise ValueError("app_session_cookie_samesite must be lax, strict, or none")
         return value
 
+    @field_validator("design_processing_mode", mode="before")
+    @classmethod
+    def _normalize_design_processing_mode(cls, v: str) -> str:
+        return str(v).strip().lower()
+
+    @field_validator(
+        "design_processing_board_id",
+        "design_processing_project_board_id",
+        mode="before",
+    )
+    @classmethod
+    def _validate_design_processing_board_id(
+        cls,
+        v: object,
+        info: ValidationInfo,
+    ) -> str:
+        value = str(v).strip()
+        if not value.isdecimal() or int(value) <= 0:
+            raise ValueError(f"{info.field_name} must be a positive decimal ID")
+        return value
+
+    @field_validator(
+        "design_processing_landing_group_id",
+        "design_processing_extraction_model",
+        "design_processing_artifact_bucket",
+        mode="before",
+    )
+    @classmethod
+    def _validate_nonempty_design_processing_value(
+        cls,
+        v: object,
+        info: ValidationInfo,
+    ) -> str:
+        value = str(v).strip()
+        if not value:
+            raise ValueError(f"{info.field_name} must not be empty")
+        if info.field_name == "design_processing_artifact_bucket" and "/" in value:
+            raise ValueError("design_processing_artifact_bucket must be a bucket name")
+        return value
+
+    @field_validator("design_processing_allowlist_item_ids", mode="before")
+    @classmethod
+    def _normalize_design_processing_allowlist(cls, v: object) -> list[str]:
+        if v is None or v == "":
+            return []
+        if isinstance(v, str):
+            raw_value = v.strip()
+            if not raw_value:
+                return []
+            if raw_value.startswith("["):
+                try:
+                    values = json.loads(raw_value)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        "design_processing_allowlist_item_ids must be CSV or a JSON array"
+                    ) from exc
+            else:
+                values = raw_value.split(",")
+        elif isinstance(v, (list, tuple, set)):
+            values = v
+        else:
+            values = [v]
+
+        if not isinstance(values, (list, tuple, set)):
+            raise ValueError(
+                "design_processing_allowlist_item_ids must be CSV or a JSON array"
+            )
+
+        normalized: list[str] = []
+        for item_id in values:
+            value = str(item_id).strip()
+            if not value.isdecimal() or int(value) <= 0:
+                raise ValueError(
+                    "design_processing_allowlist_item_ids must contain positive decimal IDs"
+                )
+            if value not in normalized:
+                normalized.append(value)
+        return normalized
+
+    @field_validator("design_processing_activation_timestamp")
+    @classmethod
+    def _normalize_design_processing_activation_timestamp(
+        cls,
+        v: Optional[datetime],
+    ) -> Optional[datetime]:
+        if v is None:
+            return None
+        if v.tzinfo is None or v.utcoffset() is None:
+            raise ValueError("design_processing_activation_timestamp must include a timezone")
+        return v.astimezone(timezone.utc)
+
     @model_validator(mode="after")
     def _validate_chat_retrieval_limits(self) -> "Settings":
         if self.chat_retrieval_max_compound_queries < self.chat_retrieval_max_queries:
@@ -93,6 +207,46 @@ class Settings(BaseSettings):
                 "chat_retrieval_max_evidence_chunks"
             )
         return self
+
+    @model_validator(mode="after")
+    def _validate_design_processing_settings(self) -> "Settings":
+        if (
+            self.design_processing_mode == "allowlist"
+            and not self.design_processing_allowlist_item_ids
+        ):
+            raise ValueError(
+                "design_processing_allowlist_item_ids must not be empty in allowlist mode"
+            )
+        if (
+            self.design_processing_readiness_max_interval_seconds
+            < self.design_processing_readiness_initial_interval_seconds
+        ):
+            raise ValueError(
+                "design_processing_readiness_max_interval_seconds must be greater than "
+                "or equal to design_processing_readiness_initial_interval_seconds"
+            )
+        if (
+            self.design_processing_readiness_alert_threshold_seconds
+            < self.design_processing_readiness_initial_interval_seconds
+        ):
+            raise ValueError(
+                "design_processing_readiness_alert_threshold_seconds must be greater than "
+                "or equal to design_processing_readiness_initial_interval_seconds"
+            )
+        return self
+
+    @property
+    def design_processing_pipeline_version(self) -> str:
+        return (
+            f"legacy-files-{LEGACY_MANIFEST_DIGEST}:"
+            f"model-{self.design_processing_extraction_model}"
+        )
+
+    @property
+    def design_processing_pipeline_digest(self) -> str:
+        return hashlib.sha256(
+            self.design_processing_pipeline_version.encode("utf-8")
+        ).hexdigest()
 
     @property
     def cors_origins(self) -> list[str]:
