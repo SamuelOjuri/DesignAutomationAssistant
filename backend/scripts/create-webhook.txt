@@ -37,3 +37,23 @@ mutation {
     board_id
   }
 }
+
+-- =============================
+
+mutation CreateNameChangeWebhook($boardId: ID!, $url: String!) {
+  create_webhook(
+    board_id: $boardId
+    url: $url
+    event: change_name
+  ) {
+    id
+    board_id
+    event
+    config
+  }
+}
+
+{
+  "boardId": "1882196103",
+  "url": "https://YOUR-BACKEND-DOMAIN/api/monday/webhooks?token=YOUR_SHARED_SECRET"
+}
