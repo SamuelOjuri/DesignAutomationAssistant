@@ -154,6 +154,27 @@ def refresh_current_target(
     active_job: Optional[DesignProcessingJob] = None,
 ) -> RefreshedDesignProcessingTarget:
     snapshot = gateway.fetch_target(item.item_id)
+    return apply_current_target_snapshot(
+        item,
+        snapshot,
+        pipeline_version=pipeline_version,
+        expected_board_id=expected_board_id,
+        expected_group_id=expected_group_id,
+        now=now,
+        active_job=active_job,
+    )
+
+
+def apply_current_target_snapshot(
+    item: DesignProcessingItem,
+    snapshot: DesignProcessingTargetSnapshot,
+    *,
+    pipeline_version: str,
+    expected_board_id: str,
+    expected_group_id: str,
+    now: datetime,
+    active_job: Optional[DesignProcessingJob] = None,
+) -> RefreshedDesignProcessingTarget:
     _assert_snapshot_item(snapshot, item)
     readiness = _target_readiness(
         snapshot,

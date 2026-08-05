@@ -273,7 +273,7 @@ query ($boardIds: [ID!], $groupIds: [String!], $limit: Int!) {
             title
             items_page(limit: $limit) {
                 cursor
-                items { id }
+                items { id created_at }
             }
         }
     }
@@ -284,19 +284,25 @@ NEXT_ITEMS_PAGE_QUERY = """
 query ($cursor: String!, $limit: Int!) {
     next_items_page(cursor: $cursor, limit: $limit) {
         cursor
-        items { id }
+        items { id created_at }
     }
 }
 """
 
 
-def list_item_ids_in_groups(
+@dataclass(frozen=True, slots=True)
+class MondayGroupItem:
+    item_id: str
+    created_at: Optional[str]
+
+
+def list_items_in_groups(
     access_token: str,
     board_id: str,
     group_ids: Sequence[str],
     *,
     limit: int = 500,
-) -> dict[str, list[str]]:
+) -> dict[str, list[MondayGroupItem]]:
     if not group_ids:
         return {}
 
@@ -314,11 +320,22 @@ def list_item_ids_in_groups(
     if not boards:
         raise HTTPException(status_code=404, detail="monday board not found")
 
-    result: dict[str, list[str]] = {}
+    result: dict[str, list[MondayGroupItem]] = {}
     for group in boards[0].get("groups") or []:
         group_id = str(group.get("id"))
         items_page = group.get("items_page") or {}
-        item_ids = [str(item.get("id")) for item in items_page.get("items") or [] if item.get("id")]
+        items = [
+            MondayGroupItem(
+                item_id=str(item.get("id")),
+                created_at=(
+                    item.get("created_at")
+                    if isinstance(item.get("created_at"), str)
+                    else None
+                ),
+            )
+            for item in items_page.get("items") or []
+            if item.get("id")
+        ]
         cursor = items_page.get("cursor")
 
         while cursor:
@@ -329,11 +346,40 @@ def list_item_ids_in_groups(
                 timeout=20,
             )
             next_page = next_payload.get("data", {}).get("next_items_page") or {}
-            item_ids.extend(str(item.get("id")) for item in next_page.get("items") or [] if item.get("id"))
+            items.extend(
+                MondayGroupItem(
+                    item_id=str(item.get("id")),
+                    created_at=(
+                        item.get("created_at")
+                        if isinstance(item.get("created_at"), str)
+                        else None
+                    ),
+                )
+                for item in next_page.get("items") or []
+                if item.get("id")
+            )
             cursor = next_page.get("cursor")
 
-        result[group_id] = item_ids
+        result[group_id] = items
     return result
+
+
+def list_item_ids_in_groups(
+    access_token: str,
+    board_id: str,
+    group_ids: Sequence[str],
+    *,
+    limit: int = 500,
+) -> dict[str, list[str]]:
+    return {
+        group_id: [item.item_id for item in items]
+        for group_id, items in list_items_in_groups(
+            access_token,
+            board_id,
+            group_ids,
+            limit=limit,
+        ).items()
+    }
 
 
 SOURCE_REVISION_INPUTS_QUERY = """
@@ -350,6 +396,8 @@ query ($itemIds: [ID!]) {
             file_extension
             file_size
             created_at
+            url
+            public_url
         }
         column_values {
             column { title }
@@ -368,6 +416,8 @@ query ($itemIds: [ID!]) {
                 file_extension
                 file_size
                 created_at
+                url
+                public_url
             }
         }
     }

@@ -13,7 +13,12 @@ from sqlalchemy.pool import StaticPool
 
 from backend.app.config import settings
 from backend.app.db import Base
-from backend.app.models import AutoSyncJob, MondayWebhookEvent, Task
+from backend.app.models import (
+    AutoSyncJob,
+    MondayWebhookDispatch,
+    MondayWebhookEvent,
+    Task,
+)
 from backend.app.routes import monday_webhooks
 from backend.app.services import auto_sync as auto_sync_service
 
@@ -46,6 +51,7 @@ def auto_sync_settings(monkeypatch):
     monkeypatch.setattr(settings, "auto_sync_completed_group_id", "group_mkpbb3tx")
     monkeypatch.setattr(settings, "auto_sync_retention_days", 30)
     monkeypatch.setattr(settings, "auto_sync_debounce_seconds", 90)
+    monkeypatch.setattr(settings, "design_processing_mode", "off")
 
 
 @pytest.fixture()
@@ -129,8 +135,14 @@ def test_webhook_accepts_shared_secret_query_token(client, db_session, monkeypat
     assert response.json()["status"] == "ignored"
     assert event.authenticated is True
     assert event.board_id == "other-board"
-    assert event.status == "ignored"
-    assert event.error == "board_not_managed"
+    assert event.status == "completed"
+    assert event.error is None
+    dispatches = {
+        dispatch.consumer: dispatch
+        for dispatch in db_session.query(MondayWebhookDispatch).all()
+    }
+    assert dispatches["auto_sync"].outcome == "ignored"
+    assert dispatches["design_processing"].outcome == "disabled"
 
 
 def test_webhook_rejects_invalid_shared_secret_before_persisting(client, db_session, monkeypatch):
@@ -222,7 +234,15 @@ def test_webhook_persists_event_and_coalesces_jobs(client, db_session, monkeypat
     assert jobs[0].desired_source_revision == "rev-1"
     assert len(events) == 1
     assert events[0].authenticated is True
-    assert events[0].status == "queued"
+    assert events[0].status == "completed"
+    dispatches = db_session.query(MondayWebhookDispatch).filter_by(
+        webhook_event_id=events[0].id
+    ).all()
+    assert {dispatch.consumer for dispatch in dispatches} == {
+        "auto_sync",
+        "design_processing",
+    }
+    assert all(dispatch.status == "succeeded" for dispatch in dispatches)
 
     duplicate_response = client.post("/api/monday/webhooks", json=_webhook_payload(), headers=headers)
     assert duplicate_response.status_code == 200
@@ -278,7 +298,7 @@ def test_webhook_uses_current_item_state_for_out_of_order_events(client, db_sess
 
     assert response.status_code == 200
     assert response.json()["status"] == "retained"
-    assert event.status == "retained"
+    assert event.status == "completed"
     assert db_session.query(AutoSyncJob).count() == 0
     assert task.auto_sync_state == "completed_retained"
     assert task.completed_at is not None
@@ -316,7 +336,7 @@ def test_webhook_retries_deadlock_and_commits_once(client, db_session, monkeypat
     assert response.status_code == 200
     assert response.json()["status"] == "queued"
     assert calls["count"] == 2
-    assert event.status == "queued"
+    assert event.status == "completed"
     assert event.attempt_count == 1
     assert db_session.query(AutoSyncJob).count() == 1
 
@@ -345,7 +365,7 @@ def test_failed_deadlock_event_can_be_redelivered(client, db_session, monkeypatc
     event = db_session.query(MondayWebhookEvent).one()
     assert first_response.status_code == 503
     assert first_response.headers["retry-after"] == "1"
-    assert event.status == "failed"
+    assert event.status == "partial_failed"
     assert event.attempt_count == 1
 
     monkeypatch.setattr(monday_webhooks, "apply_auto_sync_policy_for_item", real_apply)
@@ -354,7 +374,7 @@ def test_failed_deadlock_event_can_be_redelivered(client, db_session, monkeypatc
     db_session.refresh(event)
     assert second_response.status_code == 200
     assert second_response.json()["status"] == "queued"
-    assert event.status == "queued"
+    assert event.status == "completed"
     assert event.attempt_count == 2
     assert db_session.query(MondayWebhookEvent).count() == 1
     assert db_session.query(AutoSyncJob).count() == 1
@@ -382,10 +402,11 @@ def test_failed_monday_request_event_can_be_redelivered(client, db_session, monk
     event = db_session.query(MondayWebhookEvent).one()
     assert first_response.status_code == 503
     assert first_response.headers["retry-after"] == "1"
-    assert event.status == "failed"
+    assert event.status == "partial_failed"
     assert event.processing_started_at is None
     assert event.attempt_count == 1
     assert db_session.query(AutoSyncJob).count() == 0
+
 
 
     second_response = client.post("/api/monday/webhooks", json=payload, headers=_auth_headers())
@@ -394,7 +415,7 @@ def test_failed_monday_request_event_can_be_redelivered(client, db_session, monk
     assert second_response.status_code == 200
     assert second_response.json()["status"] == "queued"
     assert calls["count"] == 2
-    assert event.status == "queued"
+    assert event.status == "completed"
     assert event.attempt_count == 2
     assert db_session.query(MondayWebhookEvent).count() == 1
     assert db_session.query(AutoSyncJob).count() == 1
@@ -418,9 +439,9 @@ def test_permanent_monday_error_is_acknowledged_as_failed(client, db_session, mo
 
     event = db_session.query(MondayWebhookEvent).one()
     assert response.status_code == 200
-    assert response.json()["status"] == "failed"
+    assert response.json()["status"] == "partial_failed"
     assert "retry-after" not in response.headers
-    assert event.status == "failed"
+    assert event.status == "partial_failed"
     assert event.processing_started_at is None
     assert event.attempt_count == 1
     assert db_session.query(AutoSyncJob).count() == 0
