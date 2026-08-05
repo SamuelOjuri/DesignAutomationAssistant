@@ -8,6 +8,8 @@ from sqlalchemy import (
     Boolean,
     JSON,
     Index,
+    CheckConstraint,
+    ForeignKeyConstraint,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -273,6 +275,329 @@ class AutoSyncJob(Base):
     task = relationship("Task")
 
 
+DESIGN_PROCESSING_ITEM_STATES = (
+    "waiting_for_name",
+    "waiting_for_email",
+    "scheduled",
+    "processing",
+    "analyzed",
+    "publishing",
+    "ready_for_review",
+    "ineligible",
+    "failed",
+)
+DESIGN_PROCESSING_JOB_STATUSES = (
+    "scheduled",
+    "running",
+    "retry_wait",
+    "completed",
+    "failed",
+    "cancelled",
+)
+DESIGN_PROCESSING_ACTIVE_JOB_STATUSES = (
+    "scheduled",
+    "running",
+    "retry_wait",
+)
+DESIGN_PROCESSING_JOB_STAGES = (
+    "waiting_for_name",
+    "waiting_for_email",
+    "extracting",
+    "matching",
+    "rendering",
+    "writing_columns",
+    "uploading_ai_data",
+    "uploading_match_report",
+)
+DESIGN_PROCESSING_EXECUTION_KINDS = ("analysis", "publication")
+DESIGN_PROCESSING_ARTIFACT_KINDS = ("ai_data", "match_report")
+DESIGN_PROCESSING_ARTIFACT_STATUSES = (
+    "rendered",
+    "uploading",
+    "published",
+    "superseded",
+    "delete_pending",
+    "deleted",
+    "failed",
+)
+MONDAY_WEBHOOK_DISPATCH_CONSUMERS = ("auto_sync", "design_processing")
+MONDAY_WEBHOOK_DISPATCH_STATUSES = (
+    "pending",
+    "processing",
+    "succeeded",
+    "failed",
+)
+MONDAY_WEBHOOK_DISPATCH_OUTCOMES = (
+    "queued",
+    "coalesced",
+    "excluded",
+    "ignored",
+    "disabled",
+)
+
+
+def _sql_values(values: tuple[str, ...]) -> str:
+    return ", ".join(f"'{value}'" for value in values)
+
+
+class DesignProcessingItem(Base):
+    __tablename__ = "design_processing_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "board_id",
+            "item_id",
+            name="uq_design_processing_items_board_item",
+        ),
+        CheckConstraint(
+            "((latest_desired_input_revision IS NULL AND "
+            "latest_desired_pipeline_version IS NULL) OR "
+            "(latest_desired_input_revision IS NOT NULL AND "
+            "latest_desired_pipeline_version IS NOT NULL))",
+            name="ck_design_processing_items_desired_identity_pair",
+        ),
+        CheckConstraint(
+            "((latest_analyzed_input_revision IS NULL AND "
+            "latest_analyzed_pipeline_version IS NULL) OR "
+            "(latest_analyzed_input_revision IS NOT NULL AND "
+            "latest_analyzed_pipeline_version IS NOT NULL))",
+            name="ck_design_processing_items_analyzed_identity_pair",
+        ),
+        CheckConstraint(
+            "((latest_published_input_revision IS NULL AND "
+            "latest_published_pipeline_version IS NULL) OR "
+            "(latest_published_input_revision IS NOT NULL AND "
+            "latest_published_pipeline_version IS NOT NULL))",
+            name="ck_design_processing_items_published_identity_pair",
+        ),
+        CheckConstraint(
+            f"state IN ({_sql_values(DESIGN_PROCESSING_ITEM_STATES)})",
+            name="ck_design_processing_items_state",
+        ),
+    )
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+        default=uuid.uuid4,
+    )
+    board_id = Column(String, nullable=False)
+    item_id = Column(String, nullable=False)
+    latest_desired_input_revision = Column(String, nullable=True)
+    latest_desired_pipeline_version = Column(String, nullable=True)
+    latest_analyzed_input_revision = Column(String, nullable=True)
+    latest_analyzed_pipeline_version = Column(String, nullable=True)
+    latest_published_input_revision = Column(String, nullable=True)
+    latest_published_pipeline_version = Column(String, nullable=True)
+    state = Column(String, nullable=False)
+    extracted_parameters_json = Column(JSON, nullable=True)
+    match_result_json = Column(JSON, nullable=True)
+    warnings_json = Column(JSON, nullable=False, default=list, server_default="[]")
+    supersession_requested_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class DesignProcessingJob(Base):
+    __tablename__ = "design_processing_jobs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["board_id", "item_id"],
+            ["design_processing_items.board_id", "design_processing_items.item_id"],
+            name="fk_design_processing_jobs_item",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            f"status IN ({_sql_values(DESIGN_PROCESSING_JOB_STATUSES)})",
+            name="ck_design_processing_jobs_status",
+        ),
+        CheckConstraint(
+            "stage IS NULL OR "
+            f"stage IN ({_sql_values(DESIGN_PROCESSING_JOB_STAGES)})",
+            name="ck_design_processing_jobs_stage",
+        ),
+        CheckConstraint(
+            "((execution_kind IS NULL AND execution_input_revision IS NULL AND "
+            "execution_pipeline_version IS NULL) OR "
+            "(execution_kind IS NOT NULL AND execution_input_revision IS NOT NULL AND "
+            "execution_pipeline_version IS NOT NULL))",
+            name="ck_design_processing_jobs_execution_identity",
+        ),
+        CheckConstraint(
+            "execution_kind IS NULL OR "
+            f"execution_kind IN ({_sql_values(DESIGN_PROCESSING_EXECUTION_KINDS)})",
+            name="ck_design_processing_jobs_execution_kind",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0 AND readiness_check_count >= 0 AND max_attempts > 0",
+            name="ck_design_processing_jobs_attempt_counts",
+        ),
+    )
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+        default=uuid.uuid4,
+    )
+    board_id = Column(String, nullable=False)
+    item_id = Column(String, nullable=False)
+    trigger_type = Column(String, nullable=False)
+    execution_kind = Column(String, nullable=True)
+    execution_input_revision = Column(String, nullable=True)
+    execution_pipeline_version = Column(String, nullable=True)
+    status = Column(String, nullable=False)
+    stage = Column(String, nullable=True)
+    scheduled_for = Column(DateTime(timezone=True), nullable=False)
+    attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
+    readiness_check_count = Column(Integer, nullable=False, default=0, server_default="0")
+    max_attempts = Column(Integer, nullable=False, default=3, server_default="3")
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+    locked_at = Column(DateTime(timezone=True), nullable=True)
+    locked_by = Column(String, nullable=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    superseded_by_revision = Column(String, nullable=True)
+    last_error = Column(Text, nullable=True)
+    result_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    item = relationship("DesignProcessingItem")
+
+
+class DesignProcessingArtifact(Base):
+    __tablename__ = "design_processing_artifacts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["board_id", "item_id"],
+            ["design_processing_items.board_id", "design_processing_items.item_id"],
+            name="fk_design_processing_artifacts_item",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "board_id",
+            "item_id",
+            "column_id",
+            "artifact_kind",
+            "input_revision",
+            "pipeline_version",
+            name="uq_design_processing_artifacts_identity",
+        ),
+        CheckConstraint(
+            f"artifact_kind IN ({_sql_values(DESIGN_PROCESSING_ARTIFACT_KINDS)})",
+            name="ck_design_processing_artifacts_kind",
+        ),
+        CheckConstraint(
+            f"status IN ({_sql_values(DESIGN_PROCESSING_ARTIFACT_STATUSES)})",
+            name="ck_design_processing_artifacts_status",
+        ),
+        CheckConstraint(
+            "size_bytes >= 0",
+            name="ck_design_processing_artifacts_size",
+        ),
+    )
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+        default=uuid.uuid4,
+    )
+    board_id = Column(String, nullable=False)
+    item_id = Column(String, nullable=False)
+    column_id = Column(String, nullable=False)
+    artifact_kind = Column(String, nullable=False)
+    input_revision = Column(String, nullable=False)
+    pipeline_version = Column(String, nullable=False)
+    deterministic_filename = Column(String, nullable=False)
+    storage_bucket = Column(String, nullable=False)
+    storage_object_key = Column(String, nullable=False)
+    content_sha256 = Column(String, nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    monday_asset_id = Column(String, nullable=True)
+    status = Column(String, nullable=False)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    item = relationship("DesignProcessingItem")
+
+
+class MondayWebhookDispatch(Base):
+    __tablename__ = "monday_webhook_dispatches"
+    __table_args__ = (
+        UniqueConstraint(
+            "webhook_event_id",
+            "consumer",
+            name="uq_monday_webhook_dispatches_event_consumer",
+        ),
+        CheckConstraint(
+            f"consumer IN ({_sql_values(MONDAY_WEBHOOK_DISPATCH_CONSUMERS)})",
+            name="ck_monday_webhook_dispatches_consumer",
+        ),
+        CheckConstraint(
+            f"status IN ({_sql_values(MONDAY_WEBHOOK_DISPATCH_STATUSES)})",
+            name="ck_monday_webhook_dispatches_status",
+        ),
+        CheckConstraint(
+            "outcome IS NULL OR "
+            f"outcome IN ({_sql_values(MONDAY_WEBHOOK_DISPATCH_OUTCOMES)})",
+            name="ck_monday_webhook_dispatches_outcome",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_monday_webhook_dispatches_attempt_count",
+        ),
+    )
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+        default=uuid.uuid4,
+    )
+    webhook_event_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("monday_webhook_events.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    consumer = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="pending", server_default="pending")
+    outcome = Column(String, nullable=True)
+    job_id = Column(UUID(as_uuid=True), nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
+    processing_started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    error = Column(Text, nullable=True)
+    result_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    webhook_event = relationship("MondayWebhookEvent")
+
+
 # Indexes
 Index("ix_app_sessions_app_user_id", AppSession.app_user_id)
 Index("ix_app_sessions_expires_at", AppSession.expires_at)
@@ -298,4 +623,46 @@ Index(
     AutoSyncJob.item_id,
     unique=True,
     postgresql_where=AutoSyncJob.status.in_(("pending", "scheduled", "running", "retry_wait")),
+)
+Index("ix_design_processing_items_state", DesignProcessingItem.state)
+Index(
+    "ix_design_processing_jobs_status_scheduled_for",
+    DesignProcessingJob.status,
+    DesignProcessingJob.scheduled_for,
+)
+Index(
+    "ix_design_processing_jobs_board_item",
+    DesignProcessingJob.board_id,
+    DesignProcessingJob.item_id,
+)
+Index(
+    "ix_design_processing_jobs_status_heartbeat",
+    DesignProcessingJob.status,
+    DesignProcessingJob.heartbeat_at,
+)
+Index(
+    "uq_design_processing_jobs_active_item",
+    DesignProcessingJob.board_id,
+    DesignProcessingJob.item_id,
+    unique=True,
+    postgresql_where=DesignProcessingJob.status.in_(DESIGN_PROCESSING_ACTIVE_JOB_STATUSES),
+    sqlite_where=DesignProcessingJob.status.in_(DESIGN_PROCESSING_ACTIVE_JOB_STATUSES),
+)
+Index(
+    "ix_design_processing_artifacts_board_item",
+    DesignProcessingArtifact.board_id,
+    DesignProcessingArtifact.item_id,
+)
+Index(
+    "ix_design_processing_artifacts_status",
+    DesignProcessingArtifact.status,
+)
+Index(
+    "ix_monday_webhook_dispatches_status_started",
+    MondayWebhookDispatch.status,
+    MondayWebhookDispatch.processing_started_at,
+)
+Index(
+    "ix_monday_webhook_dispatches_webhook_event",
+    MondayWebhookDispatch.webhook_event_id,
 )
