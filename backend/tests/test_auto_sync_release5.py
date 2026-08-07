@@ -5,10 +5,12 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.db import Base
 from backend.app.models import Task, TaskChunk, TaskFile, TaskSnapshot
+from backend.app.services import storage_ingest
 from backend.app.services.auto_sync_policy import AutoSyncPolicy
 from backend.app.services.auto_sync_purge import (
     mark_expired_task_restoring,
@@ -178,6 +180,102 @@ def test_purge_keeps_retryable_file_references_when_storage_delete_fails(db_sess
     assert "storage unavailable" in second_file.delete_error
     assert db_session.query(TaskSnapshot).count() == 1
     assert db_session.query(TaskFile).count() == 2
+
+
+def test_purge_skips_storage_delete_for_unsupported_file(db_session):
+    task = _completed_task()
+    db_session.add(task)
+    stored_file = _add_snapshot_file_and_chunk(db_session, task, object_path="stored.pdf")
+    unsupported_file = TaskFile(
+        id=uuid.uuid4(),
+        external_task_key=task.external_task_key,
+        snapshot_id=stored_file.snapshot_id,
+        kind="attachment",
+        monday_asset_id="asset-oversized",
+        original_filename="oversized.zip",
+        size_bytes=97_270_429,
+        bucket="raw-monday",
+        object_path="oversized.zip",
+        storage_status="unsupported",
+        storage_error_code="object_too_large",
+        storage_error_detail="File exceeds the configured storage limit",
+    )
+    db_session.add(unsupported_file)
+    db_session.commit()
+    removed_objects: list[tuple[str, str]] = []
+
+    result = purge_expired_tasks_once(
+        db_session,
+        dry_run=False,
+        policy=_policy(),
+        remove_storage_object=lambda bucket, path: removed_objects.append((bucket, path)),
+        ignore_disabled=True,
+    )
+
+    assert result.purged == 1
+    assert result.items[0].files_deleted == 1
+    assert result.items[0].task_files_deleted == 2
+    assert removed_objects == [("raw-monday", "stored.pdf")]
+    assert db_session.query(TaskFile).count() == 0
+
+
+def test_task_file_upsert_replaces_unsupported_state_after_success(db_session, monkeypatch):
+    task = _completed_task()
+    snapshot = TaskSnapshot(
+        id=uuid.uuid4(),
+        external_task_key=task.external_task_key,
+        snapshot_version="rev-1",
+        task_context_json={"id": task.item_id},
+    )
+    db_session.add_all([task, snapshot])
+    db_session.commit()
+    monkeypatch.setattr(storage_ingest, "insert", sqlite_insert)
+    db_session.connection().connection.create_function(
+        "gen_random_uuid",
+        0,
+        lambda: uuid.uuid4().hex,
+    )
+
+    unsupported = storage_ingest.upsert_task_file(
+        db_session,
+        external_task_key=task.external_task_key,
+        snapshot_id=snapshot.id,
+        kind="attachment",
+        monday_asset_id="asset-1",
+        original_filename="large.zip",
+        mime_type="application/zip",
+        size_bytes=97_270_429,
+        bucket="raw-monday",
+        object_path="intended/large.zip",
+        sha256=None,
+        storage_status="unsupported",
+        storage_error_code="object_too_large",
+        storage_error_detail="File exceeds the configured storage limit",
+    )
+    db_session.commit()
+
+    stored = storage_ingest.upsert_task_file(
+        db_session,
+        external_task_key=task.external_task_key,
+        snapshot_id=snapshot.id,
+        kind="attachment",
+        monday_asset_id="asset-1",
+        original_filename="large.zip",
+        mime_type="application/zip",
+        size_bytes=97_270_429,
+        bucket="raw-monday",
+        object_path="uploaded/large.zip",
+        sha256="asset-sha",
+    )
+    db_session.commit()
+    db_session.refresh(stored)
+
+    assert stored.id == unsupported.id
+    assert stored.storage_status == "stored"
+    assert stored.storage_error_code is None
+    assert stored.storage_error_detail is None
+    assert stored.object_path == "uploaded/large.zip"
+    assert stored.sha256 == "asset-sha"
 
 
 def test_retention_hold_prevents_due_purge(db_session):

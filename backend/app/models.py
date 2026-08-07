@@ -155,6 +155,9 @@ class TaskFile(Base):
     bucket = Column(String, nullable=False)
     object_path = Column(String, nullable=False)
     sha256 = Column(String, nullable=True)
+    storage_status = Column(String, nullable=False, server_default="stored", default="stored")
+    storage_error_code = Column(String, nullable=True)
+    storage_error_detail = Column(Text, nullable=True)
 
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     delete_error = Column(Text, nullable=True)

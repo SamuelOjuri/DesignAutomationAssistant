@@ -189,6 +189,10 @@ def task_sources(
                 mimeType=file.mime_type,
                 sizeBytes=file.size_bytes,
                 mondayAssetId=file.monday_asset_id,
+                storageStatus=file.storage_status,
+                storageErrorCode=file.storage_error_code,
+                storageErrorDetail=file.storage_error_detail,
+                downloadAvailable=file.storage_status == "stored",
                 createdAt=file.created_at,
             )
             for file in files
@@ -222,6 +226,15 @@ def file_signed_url(
     )
     if file_record is None:
         raise HTTPException(status_code=404, detail="File not found")
+    if file_record.storage_status != "stored":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "File is not available for download",
+                "storageStatus": file_record.storage_status,
+                "storageErrorCode": file_record.storage_error_code,
+            },
+        )
 
     expires_in = 3600
     signed = supabase.storage.from_(file_record.bucket).create_signed_url(

@@ -150,6 +150,152 @@ def test_storage_upload_logs_supabase_error_response(monkeypatch, caplog):
     assert storage_ingest._is_retryable_storage_response(response) is False
 
 
+def _ingest_test_records(monkeypatch):
+    captured = []
+    result = SimpleNamespace(id="file-record")
+
+    def fake_upsert(db, **values):
+        captured.append(values)
+        return result
+
+    monkeypatch.setattr(storage_ingest, "upsert_task_file", fake_upsert)
+    return captured, result
+
+
+def _ingest_test_task_and_snapshot():
+    task = Task(
+        external_task_key="acct:board:item",
+        account_id="acct",
+        board_id="board",
+        item_id="item",
+    )
+    snapshot = TaskSnapshot(
+        id=uuid.uuid4(),
+        external_task_key=task.external_task_key,
+        snapshot_version="snapshot",
+        task_context_json={},
+    )
+    return task, snapshot
+
+
+def test_ingest_asset_records_reported_oversize_without_download_or_upload(monkeypatch):
+    task, snapshot = _ingest_test_task_and_snapshot()
+    captured, expected = _ingest_test_records(monkeypatch)
+    monkeypatch.setattr(storage_ingest.settings, "supabase_storage_max_object_bytes", 100)
+    monkeypatch.setattr(
+        storage_ingest,
+        "download_asset_to_temp",
+        lambda *args, **kwargs: pytest.fail("oversized metadata should prevent download"),
+    )
+    monkeypatch.setattr(
+        storage_ingest,
+        "upload_with_retry",
+        lambda *args, **kwargs: pytest.fail("oversized metadata should prevent upload"),
+    )
+
+    result = storage_ingest.ingest_asset(
+        object(),
+        task,
+        snapshot,
+        {"id": "asset-1", "name": "large.zip", "file_size": 101},
+        "attachment",
+        "token",
+    )
+
+    assert result is expected
+    assert captured[0]["size_bytes"] == 101
+    assert captured[0]["storage_status"] == "unsupported"
+    assert captured[0]["storage_error_code"] == "object_too_large"
+
+
+def test_ingest_asset_records_actual_oversize_and_removes_download(monkeypatch, tmp_path):
+    task, snapshot = _ingest_test_task_and_snapshot()
+    captured, expected = _ingest_test_records(monkeypatch)
+    temp_path = tmp_path / "large.zip"
+    temp_path.write_bytes(b"oversized-content")
+    downloaded = storage_ingest.DownloadedAsset(
+        temp_path=str(temp_path),
+        content_type="application/zip",
+        sha256="asset-sha",
+        size_bytes=101,
+    )
+    monkeypatch.setattr(storage_ingest.settings, "supabase_storage_max_object_bytes", 100)
+    monkeypatch.setattr(
+        storage_ingest,
+        "upload_with_retry",
+        lambda *args, **kwargs: pytest.fail("actual oversize should prevent upload"),
+    )
+
+    result = storage_ingest.ingest_asset(
+        object(),
+        task,
+        snapshot,
+        {"id": "asset-1", "name": "large.zip", "file_size": 10},
+        "attachment",
+        "token",
+        downloaded=downloaded,
+    )
+
+    assert result is expected
+    assert captured[0]["size_bytes"] == 101
+    assert captured[0]["sha256"] == "asset-sha"
+    assert captured[0]["storage_status"] == "unsupported"
+    assert not temp_path.exists()
+
+
+def test_ingest_asset_converts_supabase_entity_too_large_to_unsupported(monkeypatch, tmp_path):
+    task, snapshot = _ingest_test_task_and_snapshot()
+    captured, expected = _ingest_test_records(monkeypatch)
+    temp_path = tmp_path / "large.zip"
+    temp_path.write_bytes(b"content")
+    downloaded = storage_ingest.DownloadedAsset(
+        temp_path=str(temp_path),
+        content_type="application/zip",
+        sha256="asset-sha",
+        size_bytes=7,
+    )
+    request = httpx.Request("POST", "https://example.supabase.co/storage/v1/object/raw-monday/file.zip")
+    response = httpx.Response(
+        400,
+        request=request,
+        json={
+            "statusCode": "413",
+            "error": "Payload too large",
+            "message": "The object exceeded the maximum allowed size",
+            "code": "EntityTooLarge",
+        },
+    )
+    upload_attempts = 0
+
+    def reject_upload(*args, **kwargs):
+        nonlocal upload_attempts
+        upload_attempts += 1
+        raise httpx.HTTPStatusError("too large", request=request, response=response)
+
+    monkeypatch.setattr(storage_ingest.settings, "supabase_storage_max_object_bytes", 100)
+    monkeypatch.setattr(storage_ingest, "upload_with_retry", reject_upload)
+
+    assert storage_ingest._is_storage_object_too_large_response(response) is True
+    assert storage_ingest._is_retryable_storage_response(response) is False
+
+    result = storage_ingest.ingest_asset(
+        object(),
+        task,
+        snapshot,
+        {"id": "asset-1", "name": "large.zip", "file_size": 7},
+        "attachment",
+        "token",
+        downloaded=downloaded,
+    )
+
+    assert result is expected
+    assert upload_attempts == 1
+    assert captured[0]["storage_status"] == "unsupported"
+    assert captured[0]["storage_error_code"] == "object_too_large"
+    assert "EntityTooLarge" in captured[0]["storage_error_detail"]
+    assert not temp_path.exists()
+
+
 @pytest.mark.parametrize("status_code", [408, 425, 429, 500, 502, 503, 504])
 def test_storage_upload_classifies_transient_statuses_for_retry(status_code):
     request = httpx.Request("POST", "https://example.supabase.co/storage/v1/object/raw-monday/file.png")
@@ -413,6 +559,64 @@ def test_pipeline_resumes_failed_snapshot_and_marks_it_complete(monkeypatch):
     assert snapshot.completed_at is not None
     assert task.latest_snapshot_version == snapshot.snapshot_version
     assert db.commit_count >= 2
+
+
+def test_pipeline_completes_snapshot_with_unsupported_oversized_asset(monkeypatch):
+    task = Task(
+        external_task_key="acct:board:item-oversized",
+        account_id="acct",
+        board_id="board",
+        item_id="item-oversized",
+    )
+    item = {
+        "id": task.item_id,
+        "updated_at": "2026-08-07T18:00:00Z",
+        "assets": [
+            {
+                "id": "asset-oversized",
+                "name": "large.zip",
+                "file_size": 101,
+            }
+        ],
+        "updates": [],
+        "column_values": [
+            {
+                "type": "file",
+                "value": '{"files":[{"assetId":"asset-oversized"}]}',
+                "column": {"title": "Email"},
+            }
+        ],
+    }
+    db = FakeDB(task)
+    captured = []
+
+    def fake_upsert(db, **values):
+        captured.append(values)
+        return SimpleNamespace(id=uuid.uuid4(), storage_status=values["storage_status"])
+
+    monkeypatch.setattr(sync_pipeline, "fetch_item_with_assets", lambda *args: item)
+    monkeypatch.setattr(storage_ingest.settings, "supabase_storage_max_object_bytes", 100)
+    monkeypatch.setattr(storage_ingest, "upsert_task_file", fake_upsert)
+    monkeypatch.setattr(
+        storage_ingest,
+        "download_asset_to_temp",
+        lambda *args, **kwargs: pytest.fail("oversized metadata should prevent download"),
+    )
+    monkeypatch.setattr(
+        storage_ingest,
+        "upload_with_retry",
+        lambda *args, **kwargs: pytest.fail("oversized metadata should prevent upload"),
+    )
+
+    result = sync_pipeline.run_sync_pipeline(db, task.external_task_key, "token")
+
+    assert result.status == "done"
+    assert db.snapshot.ingestion_status == "complete"
+    assert db.snapshot.ingestion_error is None
+    assert db.snapshot.completed_at is not None
+    assert task.latest_snapshot_version == result.snapshot_version
+    assert captured[0]["storage_status"] == "unsupported"
+    assert captured[0]["storage_error_code"] == "object_too_large"
 
 
 def test_pipeline_memory_abort_does_not_publish_partial_snapshot(monkeypatch):

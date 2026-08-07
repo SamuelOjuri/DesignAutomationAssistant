@@ -183,6 +183,10 @@ def _delete_storage_objects(
     failed_count = 0
 
     for file_record in files:
+        if file_record.storage_status != "stored":
+            file_record.deleted_at = now
+            file_record.delete_error = None
+            continue
         try:
             remove_storage_object(file_record.bucket, file_record.object_path)
         except Exception as storage_error:

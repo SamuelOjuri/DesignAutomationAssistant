@@ -51,6 +51,10 @@ class TaskSourceFile(BaseModel):
     mimeType: Optional[str] = None
     sizeBytes: Optional[int] = None
     mondayAssetId: Optional[str] = None
+    storageStatus: str
+    storageErrorCode: Optional[str] = None
+    storageErrorDetail: Optional[str] = None
+    downloadAvailable: bool
     createdAt: Optional[datetime] = None
 
 class TaskSourcesResponse(BaseModel):

@@ -63,6 +63,10 @@ type TaskSourceFile = {
   mimeType?: string | null;
   sizeBytes?: number | null;
   mondayAssetId?: string | null;
+  storageStatus: "stored" | "unsupported";
+  storageErrorCode?: string | null;
+  storageErrorDetail?: string | null;
+  downloadAvailable: boolean;
   createdAt?: string | null;
 };
 
@@ -724,12 +728,23 @@ export default function TaskPage() {
                         {file.kind} • {formatBytes(file.sizeBytes)} • {formatDate(file.createdAt)}
                       </div>
                     </div>
-                    <button
-                      onClick={() => openSignedUrl(file.id)}
-                      className="inline-flex items-center justify-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary"
-                    >
-                      View / Download
-                    </button>
+                    {file.downloadAvailable ? (
+                      <button
+                        onClick={() => openSignedUrl(file.id)}
+                        className="inline-flex items-center justify-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary"
+                      >
+                        View / Download
+                      </button>
+                    ) : (
+                      <div
+                        className="text-xs font-medium text-amber-700"
+                        title={file.storageErrorDetail ?? undefined}
+                      >
+                        {file.storageErrorCode === "object_too_large"
+                          ? "Too large to store"
+                          : "Unavailable"}
+                      </div>
+                    )}
                   </div>
                 </li>
               ))}

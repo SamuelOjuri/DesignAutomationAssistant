@@ -324,6 +324,35 @@ def test_cookie_session_resolves_handoff_and_authorizes_task_chat_and_signed_url
     assert signed_url_response.status_code == 200
     assert signed_url_response.json()["url"] == "https://signed.example/source.pdf"
 
+    file_record.storage_status = "unsupported"
+    file_record.storage_error_code = "object_too_large"
+    file_record.storage_error_detail = "File exceeds the configured storage limit"
+    db_session.commit()
+
+    sources_response = client.get("/api/tasks/acct:board-1:item-1/sources")
+    assert sources_response.status_code == 200
+    assert sources_response.json()["files"] == [
+        {
+            "id": str(file_record.id),
+            "kind": "attachment_pdf",
+            "originalFilename": "source.pdf",
+            "mimeType": None,
+            "sizeBytes": None,
+            "mondayAssetId": None,
+            "storageStatus": "unsupported",
+            "storageErrorCode": "object_too_large",
+            "storageErrorDetail": "File exceeds the configured storage limit",
+            "downloadAvailable": False,
+            "createdAt": file_record.created_at.isoformat().replace("+00:00", "Z"),
+        }
+    ]
+
+    unavailable_response = client.get(
+        f"/api/tasks/acct:board-1:item-1/files/{file_record.id}/signed-url"
+    )
+    assert unavailable_response.status_code == 409
+    assert unavailable_response.json()["detail"]["storageErrorCode"] == "object_too_large"
+
     monkeypatch.setattr(
         chat,
         "_run_bounded_retrieval",

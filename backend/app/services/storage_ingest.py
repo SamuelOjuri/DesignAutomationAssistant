@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_STORAGE_STATUS_CODES = frozenset({408, 425, 429, 500, 502, 503, 504})
 _MAX_STORAGE_UPLOAD_ATTEMPTS = 5
 _MAX_GENERIC_HTML_UPLOAD_ATTEMPTS = 3
+_STORAGE_STATUS_STORED = "stored"
+_STORAGE_STATUS_UNSUPPORTED = "unsupported"
+_STORAGE_ERROR_OBJECT_TOO_LARGE = "object_too_large"
 _RETRYABLE_BAD_REQUEST_MARKERS = (
     "aborted",
     "interrupted",
@@ -85,6 +88,16 @@ def _is_retryable_storage_response(response: httpx.Response) -> bool:
         return True
     detail = _storage_error_detail(response).lower()
     return any(marker in detail for marker in _RETRYABLE_BAD_REQUEST_MARKERS)
+
+
+def _is_storage_object_too_large_response(response: httpx.Response) -> bool:
+    if response.status_code not in {400, 413}:
+        return False
+    try:
+        detail = response.json()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    return isinstance(detail, dict) and detail.get("code") == "EntityTooLarge"
 
 
 def _is_retryable_storage_error(exc: BaseException) -> bool:
@@ -229,6 +242,9 @@ def upsert_task_file(
     bucket: str,
     object_path: str,
     sha256: str | None,
+    storage_status: str = _STORAGE_STATUS_STORED,
+    storage_error_code: str | None = None,
+    storage_error_detail: str | None = None,
 ) -> TaskFile:
     values = {
         "external_task_key": external_task_key,
@@ -241,6 +257,9 @@ def upsert_task_file(
         "bucket": bucket,
         "object_path": object_path,
         "sha256": sha256,
+        "storage_status": storage_status,
+        "storage_error_code": storage_error_code,
+        "storage_error_detail": storage_error_detail,
     }
 
     stmt = (
@@ -256,6 +275,9 @@ def upsert_task_file(
                 "bucket": bucket,
                 "object_path": object_path,
                 "sha256": sha256,
+                "storage_status": storage_status,
+                "storage_error_code": storage_error_code,
+                "storage_error_detail": storage_error_detail,
                 "deleted_at": None,
                 "delete_error": None,
             },
@@ -267,6 +289,62 @@ def upsert_task_file(
     record_id = result.scalar_one()
     return db.get(TaskFile, record_id)
 
+
+def _optional_asset_size(asset: Dict[str, Any]) -> int | None:
+    try:
+        size = int(asset.get("file_size"))
+    except (TypeError, ValueError):
+        return None
+    return size if size >= 0 else None
+
+
+def asset_exceeds_storage_limit(asset: Dict[str, Any]) -> bool:
+    size_bytes = _optional_asset_size(asset)
+    return (
+        size_bytes is not None
+        and size_bytes > settings.supabase_storage_max_object_bytes
+    )
+
+
+def _record_unsupported_oversized_asset(
+    db: Session,
+    task: Task,
+    snapshot: TaskSnapshot,
+    asset: Dict[str, Any],
+    *,
+    asset_id: str,
+    filename: str,
+    object_path: str,
+    kind: str,
+    size_bytes: int | None,
+    mime_type: str | None,
+    sha256: str | None,
+    detail: str,
+) -> TaskFile:
+    logger.warning(
+        "Skipping oversized storage object: asset_id=%s filename=%s size=%s limit=%s",
+        asset_id,
+        filename,
+        size_bytes,
+        settings.supabase_storage_max_object_bytes,
+    )
+    return upsert_task_file(
+        db,
+        external_task_key=task.external_task_key,
+        snapshot_id=str(snapshot.id),
+        kind=kind,
+        monday_asset_id=asset_id,
+        original_filename=asset.get("name") or filename,
+        mime_type=mime_type,
+        size_bytes=size_bytes,
+        bucket=settings.supabase_storage_bucket,
+        object_path=object_path,
+        sha256=sha256,
+        storage_status=_STORAGE_STATUS_UNSUPPORTED,
+        storage_error_code=_STORAGE_ERROR_OBJECT_TOO_LARGE,
+        storage_error_detail=detail[:1000],
+    )
+
 def ingest_asset(
     db: Session,
     task: Task,
@@ -276,7 +354,7 @@ def ingest_asset(
     access_token: str,
     downloaded: "DownloadedAsset | None" = None,
 ) -> TaskFile:
-    asset_id = str(asset.get("id"))
+    asset_id = str(asset.get("id") or "")
     if not asset_id:
         raise HTTPException(status_code=502, detail="Asset missing id")
 
@@ -290,17 +368,74 @@ def ingest_asset(
         filename,
     )
 
+    reported_size = _optional_asset_size(asset)
+    max_object_bytes = settings.supabase_storage_max_object_bytes
+    if downloaded is None and reported_size is not None and reported_size > max_object_bytes:
+        return _record_unsupported_oversized_asset(
+            db,
+            task,
+            snapshot,
+            asset,
+            asset_id=asset_id,
+            filename=filename,
+            object_path=object_path,
+            kind=kind,
+            size_bytes=reported_size,
+            mime_type=mimetypes.guess_type(filename)[0],
+            sha256=None,
+            detail=(
+                f"Monday reported asset size {reported_size} bytes exceeds the configured "
+                f"storage limit of {max_object_bytes} bytes"
+            ),
+        )
+
     if downloaded is None:
         downloaded = download_asset_to_temp(asset, access_token)
 
     try:
-        with open(downloaded.temp_path, "rb") as f:
-            upload_with_retry(
-                settings.supabase_storage_bucket,
-                object_path,
-                f,
-                downloaded.content_type,
+        if downloaded.size_bytes > max_object_bytes:
+            return _record_unsupported_oversized_asset(
+                db,
+                task,
+                snapshot,
+                asset,
+                asset_id=asset_id,
+                filename=filename,
+                object_path=object_path,
+                kind=kind,
+                size_bytes=downloaded.size_bytes,
+                mime_type=downloaded.content_type,
+                sha256=downloaded.sha256,
+                detail=(
+                    f"Downloaded asset size {downloaded.size_bytes} bytes exceeds the configured "
+                    f"storage limit of {max_object_bytes} bytes"
+                ),
             )
+        with open(downloaded.temp_path, "rb") as f:
+            try:
+                upload_with_retry(
+                    settings.supabase_storage_bucket,
+                    object_path,
+                    f,
+                    downloaded.content_type,
+                )
+            except httpx.HTTPStatusError as exc:
+                if not _is_storage_object_too_large_response(exc.response):
+                    raise
+                return _record_unsupported_oversized_asset(
+                    db,
+                    task,
+                    snapshot,
+                    asset,
+                    asset_id=asset_id,
+                    filename=filename,
+                    object_path=object_path,
+                    kind=kind,
+                    size_bytes=downloaded.size_bytes,
+                    mime_type=downloaded.content_type,
+                    sha256=downloaded.sha256,
+                    detail=f"Supabase rejected the object as too large: {_storage_error_detail(exc.response)}",
+                )
     finally:
         try:
             os.unlink(downloaded.temp_path)

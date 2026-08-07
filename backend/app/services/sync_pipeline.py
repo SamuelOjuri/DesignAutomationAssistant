@@ -28,6 +28,7 @@ from .storage_ingest import (
 from ..models import Task, TaskSnapshot, TaskFile, TaskChunk
 from ..monday_client import fetch_item_with_assets
 from .storage_ingest import (
+    asset_exceeds_storage_limit,
     compute_snapshot_version,
     extract_asset_kinds,
     ingest_asset as _ingest_asset,
@@ -413,6 +414,10 @@ def run_sync_pipeline(
             f"[ASSET] kind={kind} name={asset.get('name')} id={asset.get('id')}"
         )
         _log_memory("Before asset")
+
+        if asset_exceeds_storage_limit(asset):
+            ingest_asset(db, task, snapshot, asset, kind, access_token)
+            continue
 
         # CSV handling (download once, parse, ingest once)
         if _is_csv_asset(asset, kind):

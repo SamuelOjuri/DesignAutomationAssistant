@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_service_role_key: str
     supabase_storage_bucket: str = "raw-monday"
+    supabase_storage_max_object_bytes: int = Field(default=50_000_000, ge=1)
 
     # Gemini
     gemini_api_key: str
