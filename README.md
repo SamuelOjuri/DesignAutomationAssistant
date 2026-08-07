@@ -37,3 +37,37 @@ or a JSON array and is required when mode is `allowlist`. Activation timestamps
 must include a timezone. The initial pipeline version is derived from the full
 legacy manifest digest and the separately pinned `gemini-2.5-flash` extraction
 model.
+
+## Design Processing Operations
+
+Run auditable operator commands from the workspace root. `--operator-id`
+defaults to the current OS user and may be set explicitly before the command:
+
+```powershell
+& ".\venv\Scripts\python.exe" -m backend.app.services.design_processing_operations --operator-id "operator@example.com" enqueue-item --item-id 2657106977
+& ".\venv\Scripts\python.exe" -m backend.app.services.design_processing_operations reconcile-item --item-id 2657106977 --dry-run
+& ".\venv\Scripts\python.exe" -m backend.app.services.design_processing_operations retry-failed-job --job-id 00000000-0000-0000-0000-000000000000
+& ".\venv\Scripts\python.exe" -m backend.app.services.design_processing_operations retry-artifact-cleanup --item-id 2657106977 --limit 20
+& ".\venv\Scripts\python.exe" -m backend.app.services.design_processing_operations reconcile-mode-transition --dry-run --limit 100
+& ".\venv\Scripts\python.exe" -m backend.app.services.design_processing_operations metrics --lease-timeout-seconds 3600
+```
+
+Remove `--dry-run` only after reviewing reconciliation output. Broad
+mode-transition reconciliation requires
+`DESIGN_PROCESSING_ACTIVATION_TIMESTAMP`; item-scoped reconciliation does not.
+Commands are idempotent: enqueue and reconciliation coalesce into the existing
+active job, failed-job retry reactivates the same immutable execution, and
+cleanup only targets recorded `delete_pending` artifacts.
+
+Operational mode and allowlist policy are re-evaluated at worker checkpoints
+and before every Monday side effect. `off` prevents new claims, `shadow`
+permits analysis only, `allowlist` permits publication only for configured item
+IDs, and `enabled` permits all in-scope publication. Run mode-transition
+reconciliation after changing mode or allowlist configuration so already
+analyzed identities can receive publication-only work.
+
+Worker, webhook, reconciliation, cleanup, and operator events are logged as
+canonical JSON after the `design_processing_event=` prefix. The `metrics`
+command returns queue and item-state counts, readiness age/checks, attempt
+percentiles, lease health, supersessions, analyzed-not-published count,
+publication latency, artifact cleanup state, and webhook child outcomes.

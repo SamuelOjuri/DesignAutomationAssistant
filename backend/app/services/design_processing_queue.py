@@ -54,6 +54,24 @@ def publication_allowed_for_item(
     return False
 
 
+def execution_allowed_for_item(
+    *,
+    mode: DesignProcessingMode,
+    execution_kind: str,
+    item_id: str,
+    allowlist_item_ids: Iterable[str] = (),
+) -> bool:
+    if execution_kind == "analysis":
+        return mode != "off"
+    if execution_kind == "publication":
+        return publication_allowed_for_item(
+            mode=mode,
+            item_id=item_id,
+            allowlist_item_ids=allowlist_item_ids,
+        )
+    raise ValueError(f"unknown design-processing execution kind {execution_kind!r}")
+
+
 def readiness_backoff_seconds(
     readiness_check_count: int,
     *,

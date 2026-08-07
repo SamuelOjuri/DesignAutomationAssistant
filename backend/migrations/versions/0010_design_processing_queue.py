@@ -362,7 +362,11 @@ def upgrade():
         sa.Column(
             "webhook_event_id",
             postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("monday_webhook_events.id", ondelete="CASCADE"),
+            sa.ForeignKey(
+                "monday_webhook_events.id",
+                name="monday_webhook_dispatches_webhook_event_id_fkey",
+                ondelete="CASCADE",
+            ),
             nullable=False,
         ),
         sa.Column("consumer", sa.String(), nullable=False),

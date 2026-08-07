@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Optional, Protocol, Sequence
+from typing import Any, Literal, Mapping, Optional, Protocol, Sequence
 
 from .. import monday_client
 from ..models import DesignProcessingItem, DesignProcessingJob
@@ -59,6 +59,35 @@ class DesignProcessingReadGateway(Protocol):
         *,
         start_date: str = "2021-01-01",
     ) -> tuple[monday_client.MondayProjectBoardItem, ...]: ...
+
+    def fetch_design_owned_column_settings(
+        self,
+        board_id: str,
+    ) -> dict[str, str]: ...
+
+    def update_design_owned_columns(
+        self,
+        board_id: str,
+        item_id: str,
+        column_values: Mapping[str, Any],
+    ) -> None: ...
+
+    def upload_design_file(
+        self,
+        item_id: str,
+        column_id: str,
+        filename: str,
+        content: bytes,
+        content_type: str,
+    ) -> monday_client.MondayFileColumnAsset: ...
+
+    def delete_design_file(
+        self,
+        board_id: str,
+        item_id: str,
+        column_id: str,
+        asset_id: str,
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +156,60 @@ class MondayDesignProcessingReadGateway:
             self.access_token,
             self.project_board_id,
             start_date=start_date,
+        )
+
+    def fetch_design_owned_column_settings(
+        self,
+        board_id: str,
+    ) -> dict[str, str]:
+        return monday_client.fetch_design_owned_column_settings(
+            self.access_token,
+            board_id,
+        )
+
+    def update_design_owned_columns(
+        self,
+        board_id: str,
+        item_id: str,
+        column_values: Mapping[str, Any],
+    ) -> None:
+        monday_client.update_design_owned_columns(
+            self.access_token,
+            board_id,
+            item_id,
+            column_values,
+        )
+
+    def upload_design_file(
+        self,
+        item_id: str,
+        column_id: str,
+        filename: str,
+        content: bytes,
+        content_type: str,
+    ) -> monday_client.MondayFileColumnAsset:
+        return monday_client.upload_design_file(
+            self.access_token,
+            item_id,
+            column_id,
+            filename,
+            content,
+            content_type,
+        )
+
+    def delete_design_file(
+        self,
+        board_id: str,
+        item_id: str,
+        column_id: str,
+        asset_id: str,
+    ) -> None:
+        monday_client.delete_design_file(
+            self.access_token,
+            board_id,
+            item_id,
+            column_id,
+            asset_id,
         )
 
 

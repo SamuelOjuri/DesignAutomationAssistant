@@ -32,6 +32,7 @@ from ..services.design_processing_inputs import (
     DesignProcessingInputError,
     parse_design_processing_target,
 )
+from ..services.design_processing_observability import log_design_processing_event
 from ..services.design_processing_queue import queue_design_processing_snapshot
 
 router = APIRouter(prefix="/api/monday/webhooks", tags=["monday"])
@@ -430,6 +431,16 @@ def _mark_dispatch_failed(
     dispatch.result_json = {"retryable": retryable}
     dispatch.updated_at = now
     db.commit()
+    log_design_processing_event(
+        logger,
+        "webhook_child_failed",
+        level=logging.ERROR,
+        webhook_event_id=str(dispatch.webhook_event_id),
+        consumer=dispatch.consumer,
+        attempt_count=dispatch.attempt_count,
+        retryable=retryable,
+        error=str(error),
+    )
 
 
 def _auto_sync_outcome(result: QueueResult) -> str:
@@ -619,6 +630,19 @@ def _process_dispatch(
         process_attempt,
         operation_name=f"monday webhook {dispatch.consumer} dispatch {dispatch.id}",
     )
+    completed = db.get(MondayWebhookDispatch, dispatch.id)
+    if completed is not None:
+        log_design_processing_event(
+            logger,
+            "webhook_child_completed",
+            webhook_event_id=str(completed.webhook_event_id),
+            consumer=completed.consumer,
+            outcome=completed.outcome,
+            job_id=(
+                str(completed.job_id) if completed.job_id is not None else None
+            ),
+            attempt_count=completed.attempt_count,
+        )
 
 
 def _aggregate_parent_event(

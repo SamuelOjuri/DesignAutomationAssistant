@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
 import json
+from pathlib import PurePath
 from typing import Any, Mapping, Optional, Sequence
 
 import jwt
@@ -11,9 +12,13 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 from .config import settings
 
 MONDAY_API_URL = "https://api.monday.com/v2"
+MONDAY_FILE_API_URL = "https://api.monday.com/v2/file"
 MONDAY_OAUTH_URL = "https://auth.monday.com/oauth2/authorize"
 MONDAY_TOKEN_URL = "https://auth.monday.com/oauth2/token"
 TRANSIENT_MONDAY_STATUS_CODES = {429, 500, 502, 503, 504}
+DESIGN_PROCESSING_SCALAR_COLUMN_IDS = frozenset(
+    {"date_mkpb23av", "hour_mkpbb3j1", "dropdown_mkpbafca"}
+)
 
 
 class TransientMondayAPIError(HTTPException):
@@ -31,6 +36,45 @@ class TransientMondayAPIError(HTTPException):
 
 class MondayReadContractError(TransientMondayAPIError):
     pass
+
+
+class MondayWriteContractError(ValueError):
+    pass
+
+
+def _require_design_scalar_columns(column_values: Mapping[str, Any]) -> None:
+    unknown = set(column_values) - DESIGN_PROCESSING_SCALAR_COLUMN_IDS
+    if unknown:
+        raise MondayWriteContractError(
+            "design processing cannot write scalar columns: "
+            + ", ".join(sorted(unknown))
+        )
+    invalid = [
+        column_id
+        for column_id, value in column_values.items()
+        if value is None or value == ""
+    ]
+    if invalid:
+        raise MondayWriteContractError(
+            "design processing cannot clear scalar columns: "
+            + ", ".join(sorted(invalid))
+        )
+
+
+def _require_design_file_column(column_id: str) -> None:
+    if column_id not in DESIGN_PROCESSING_FILE_COLUMN_IDS:
+        raise MondayWriteContractError(
+            f"design processing cannot access file column {column_id!r}"
+        )
+
+
+def _require_decimal_identifier(value: str, *, field_name: str) -> str:
+    normalized = str(value).strip()
+    if not normalized.isdecimal() or int(normalized) <= 0:
+        raise MondayWriteContractError(
+            f"{field_name} must be a positive decimal ID"
+        )
+    return normalized
 
 
 def _is_transient_monday_error(exc: BaseException) -> bool:
@@ -110,6 +154,255 @@ def monday_graphql_request(
     if payload.get("errors"):
         raise HTTPException(status_code=502, detail="monday GraphQL error")
     return payload
+
+
+DESIGN_PROCESSING_COLUMN_UPDATE_MUTATION = """
+mutation ($boardId: ID!, $itemId: ID!, $columnValues: JSON!) {
+    change_multiple_column_values(
+        board_id: $boardId
+        item_id: $itemId
+        column_values: $columnValues
+    ) { id }
+}
+"""
+
+
+def update_design_owned_columns(
+    access_token: str,
+    board_id: str,
+    item_id: str,
+    column_values: Mapping[str, Any],
+) -> None:
+    values = dict(column_values)
+    _require_design_scalar_columns(values)
+    if not values:
+        return
+    normalized_board_id = _require_decimal_identifier(
+        board_id,
+        field_name="board_id",
+    )
+    normalized_item_id = _require_decimal_identifier(
+        item_id,
+        field_name="item_id",
+    )
+    payload = monday_graphql_request(
+        access_token,
+        DESIGN_PROCESSING_COLUMN_UPDATE_MUTATION,
+        {
+            "boardId": normalized_board_id,
+            "itemId": normalized_item_id,
+            "columnValues": json.dumps(
+                values,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        },
+        timeout=20,
+    )
+    changed = ((payload or {}).get("data") or {}).get(
+        "change_multiple_column_values"
+    )
+    if not isinstance(changed, Mapping) or str(changed.get("id")) != normalized_item_id:
+        raise TransientMondayAPIError(
+            detail="monday scalar-column update response is incomplete"
+        )
+
+
+def upload_design_file(
+    access_token: str,
+    item_id: str,
+    column_id: str,
+    filename: str,
+    content: bytes,
+    content_type: str,
+) -> "MondayFileColumnAsset":
+    _require_design_file_column(column_id)
+    normalized_item_id = _require_decimal_identifier(
+        item_id,
+        field_name="item_id",
+    )
+    if not filename or PurePath(filename).name != filename:
+        raise MondayWriteContractError("filename must be a basename")
+    if not content:
+        raise MondayWriteContractError("design artifact content must not be empty")
+
+    query = (
+        "mutation ($file: File!) { "
+        f"add_file_to_column(item_id: {normalized_item_id}, "
+        f'column_id: "{column_id}", file: $file) '
+        "{ id name file_size created_at } }"
+    )
+    response = requests.post(
+        MONDAY_FILE_API_URL,
+        data={"query": query},
+        files={"variables[file]": (filename, content, content_type)},
+        headers=monday_headers(access_token),
+        timeout=60,
+    )
+    if response.status_code in TRANSIENT_MONDAY_STATUS_CODES:
+        raise TransientMondayAPIError(response.status_code)
+    if not response.ok:
+        raise HTTPException(
+            status_code=502,
+            detail=f"monday file upload error ({response.status_code})",
+        )
+    payload = response.json()
+    if payload.get("errors"):
+        raise HTTPException(status_code=502, detail="monday file upload GraphQL error")
+    uploaded = ((payload.get("data") or {}).get("add_file_to_column") or {})
+    asset_id = uploaded.get("id")
+    uploaded_name = uploaded.get("name")
+    if not asset_id or uploaded_name != filename:
+        raise TransientMondayAPIError(
+            detail="monday file upload response is incomplete"
+        )
+    size = uploaded.get("file_size")
+    return MondayFileColumnAsset(
+        asset_id=str(asset_id),
+        filename=uploaded_name,
+        size_bytes=(int(size) if size is not None else None),
+        created_at=(
+            uploaded.get("created_at")
+            if isinstance(uploaded.get("created_at"), str)
+            else None
+        ),
+    )
+
+
+DESIGN_PROCESSING_UPDATE_ASSETS_MUTATION = """
+mutation (
+    $boardId: ID!
+    $itemId: ID!
+    $columnId: String!
+    $files: [FileInput!]!
+) {
+    update_assets_on_item(
+        board_id: $boardId
+        item_id: $itemId
+        column_id: $columnId
+        files: $files
+    ) { id }
+}
+"""
+
+
+def delete_design_file(
+    access_token: str,
+    board_id: str,
+    item_id: str,
+    column_id: str,
+    asset_id: str,
+) -> None:
+    _require_design_file_column(column_id)
+    normalized_board_id = _require_decimal_identifier(
+        board_id,
+        field_name="board_id",
+    )
+    normalized_item_id = _require_decimal_identifier(
+        item_id,
+        field_name="item_id",
+    )
+    normalized_asset_id = _require_decimal_identifier(
+        asset_id,
+        field_name="asset_id",
+    )
+    current_assets = inspect_design_processing_file_columns(
+        access_token,
+        normalized_item_id,
+    )[column_id]
+    matching = [
+        asset for asset in current_assets if asset.asset_id == normalized_asset_id
+    ]
+    if not matching:
+        return
+    if len(matching) != 1:
+        raise MondayWriteContractError(
+            f"monday returned duplicate asset {normalized_asset_id!r}"
+        )
+    retained_assets = [
+        asset for asset in current_assets if asset.asset_id != normalized_asset_id
+    ]
+    if not retained_assets:
+        raise MondayWriteContractError(
+            "design processing cannot remove the final file from a column"
+        )
+    files = [
+        {
+            "assetId": _require_decimal_identifier(
+                asset.asset_id,
+                field_name="retained asset_id",
+            ),
+            "fileType": "asset",
+            "name": asset.filename,
+        }
+        for asset in retained_assets
+    ]
+    payload = monday_graphql_request(
+        access_token,
+        DESIGN_PROCESSING_UPDATE_ASSETS_MUTATION,
+        {
+            "boardId": normalized_board_id,
+            "itemId": normalized_item_id,
+            "columnId": column_id,
+            "files": files,
+        },
+        timeout=20,
+    )
+    updated = ((payload or {}).get("data") or {}).get("update_assets_on_item")
+    if not isinstance(updated, Mapping) or str(updated.get("id")) != normalized_item_id:
+        raise TransientMondayAPIError(
+            detail="monday retained-asset update response is incomplete"
+        )
+
+
+DESIGN_PROCESSING_SCALAR_COLUMNS_QUERY = """
+query ($boardIds: [ID!]) {
+    boards(ids: $boardIds) {
+        id
+        columns(ids: ["date_mkpb23av", "hour_mkpbb3j1", "dropdown_mkpbafca"]) {
+            id
+            settings_str
+        }
+    }
+}
+"""
+
+
+def fetch_design_owned_column_settings(
+    access_token: str,
+    board_id: str,
+) -> dict[str, str]:
+    normalized_board_id = _require_decimal_identifier(
+        board_id,
+        field_name="board_id",
+    )
+    payload = monday_graphql_request(
+        access_token,
+        DESIGN_PROCESSING_SCALAR_COLUMNS_QUERY,
+        {"boardIds": [normalized_board_id]},
+        timeout=20,
+    )
+    boards = ((payload or {}).get("data") or {}).get("boards") or []
+    if len(boards) != 1:
+        raise MondayReadContractError(
+            detail="monday design-processing board columns are unavailable"
+        )
+    columns = boards[0].get("columns") or []
+    settings_by_id = {
+        str(column.get("id")): (
+            column.get("settings_str")
+            if isinstance(column.get("settings_str"), str)
+            else ""
+        )
+        for column in columns
+        if isinstance(column, Mapping)
+        and str(column.get("id")) in DESIGN_PROCESSING_SCALAR_COLUMN_IDS
+    }
+    if set(settings_by_id) != DESIGN_PROCESSING_SCALAR_COLUMN_IDS:
+        raise MondayReadContractError(
+            detail="monday design-processing scalar columns are incomplete"
+        )
+    return settings_by_id
 
 def verify_session_token(session_token: str) -> dict[str, Any]:
     try:

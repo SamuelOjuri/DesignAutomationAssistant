@@ -422,6 +422,7 @@ def cancel_job(
         "waiting_for_name",
         "waiting_for_email",
         "scheduled",
+        "analyzed",
         "ineligible",
     }:
         raise ValueError(f"invalid cancellation item state {item_state!r}")

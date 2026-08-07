@@ -422,6 +422,49 @@ def test_supersession_at_final_checkpoint_never_advances_analyzed_identity(
     assert all(artifact.status == "rendered" for artifact in artifacts)
 
 
+def test_policy_revoked_during_analysis_cancels_before_persisting_outputs(
+    db_session,
+    golden,
+):
+    golden_input, _ = golden
+    snapshot = _snapshot(golden_input)
+    _queue(db_session, snapshot)
+    gateway = FakeReadGateway(snapshot, golden_input)
+    policy_enabled = True
+
+    class RevokingClient(FakeLegacyClient):
+        def query_llm(self, context, query):
+            nonlocal policy_enabled
+            result = super().query_llm(context, query)
+            if self.query_count == 2:
+                policy_enabled = False
+            return result
+
+    source_path = WORKSPACE_ROOT / golden_input["sourceEmail"]["path"]
+    result = run_worker_once(
+        db_session,
+        worker_id="phase7-analysis-worker",
+        access_token="test-token",
+        gateway=gateway,
+        analysis_client=RevokingClient(golden_input),
+        artifact_storage=MemoryArtifactStorage(),
+        downloader=FixtureDownloader(source_path),
+        mode="shadow",
+        execution_policy=lambda kind, item_id: policy_enabled,
+        claim_limit=1,
+        recover_leases=False,
+        heartbeat_interval_seconds=0,
+    )
+
+    item = db_session.query(DesignProcessingItem).one()
+    job = db_session.query(DesignProcessingJob).one()
+    assert result.cancelled == 1
+    assert job.status == "cancelled"
+    assert item.latest_analyzed_input_revision is None
+    assert item.extracted_parameters_json is None
+    assert db_session.query(DesignProcessingArtifact).count() == 0
+
+
 def test_readiness_wait_does_not_consume_normal_attempt(db_session, golden):
     golden_input, _ = golden
     snapshot = _snapshot(golden_input, name="")

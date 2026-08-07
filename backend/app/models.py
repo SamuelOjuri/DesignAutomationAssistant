@@ -578,7 +578,11 @@ class MondayWebhookDispatch(Base):
     )
     webhook_event_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("monday_webhook_events.id", ondelete="CASCADE"),
+        ForeignKey(
+            "monday_webhook_events.id",
+            name="monday_webhook_dispatches_webhook_event_id_fkey",
+            ondelete="CASCADE",
+        ),
         nullable=False,
     )
     consumer = Column(String, nullable=False)

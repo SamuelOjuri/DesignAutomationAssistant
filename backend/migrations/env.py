@@ -16,7 +16,7 @@ db_url = os.getenv("DATABASE_URL")
 if not db_url:
     raise RuntimeError("DATABASE_URL is not set")
 
-config.set_main_option("sqlalchemy.url", db_url)
+config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
 
 # If you later define SQLAlchemy Base, import it here:
 # from backend.app.db import Base
@@ -43,6 +43,18 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
+    supplied_connection = config.attributes.get("connection")
+    if supplied_connection is not None:
+        context.configure(
+            connection=supplied_connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            version_table_schema=config.attributes.get("version_table_schema"),
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

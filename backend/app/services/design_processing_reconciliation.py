@@ -13,6 +13,7 @@ from ..config import settings
 from ..db import SessionLocal
 from ..monday_client import MondayGroupItem, list_items_in_groups
 from .auto_sync import get_monday_ingestion_access_token, utc_now
+from .design_processing_observability import log_design_processing_event
 from .design_processing_queue import queue_design_processing_snapshot
 from .design_processing_target import (
     DesignProcessingReadGateway,
@@ -222,7 +223,7 @@ def reconcile_landing_zone_once(
                 )
             )
 
-    return DesignProcessingReconciliationResult(
+    result = DesignProcessingReconciliationResult(
         dry_run=dry_run,
         board_id=board_id,
         mode=configured_mode,
@@ -234,6 +235,20 @@ def reconcile_landing_zone_once(
         errors=errors,
         items=tuple(results),
     )
+    log_design_processing_event(
+        logger,
+        "reconciliation_completed",
+        board_id=board_id,
+        mode=configured_mode,
+        dry_run=dry_run,
+        scanned=result.scanned,
+        queued=result.queued,
+        coalesced=result.coalesced,
+        skipped=result.skipped,
+        excluded=result.excluded,
+        errors=result.errors,
+    )
+    return result
 
 
 def main() -> int:

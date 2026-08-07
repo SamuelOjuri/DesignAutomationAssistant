@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 import logging
 import socket
 import threading
 import time
-from typing import Optional
+from typing import Iterable, Optional
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -20,11 +20,19 @@ from .design_processing_artifacts import (
     DesignArtifactStorage,
     SupabaseDesignArtifactStorage,
 )
-from .design_processing_pipeline import AssetDownloader, run_analysis_pipeline
+from .design_processing_observability import log_design_processing_event
+from .design_processing_pipeline import (
+    AssetDownloader,
+    ExecutionPolicy,
+    run_analysis_pipeline,
+    run_publication_pipeline,
+)
 from .design_processing_queue import (
     DesignProcessingMode,
     cancel_and_schedule_successor,
+    execution_allowed_for_item,
     next_readiness_check_at,
+    publication_allowed_for_item,
 )
 from .design_processing_state import (
     assign_next_execution,
@@ -54,11 +62,27 @@ class DesignProcessingWorkerResult:
     recovered: int = 0
     claimed: int = 0
     analyzed: int = 0
+    published: int = 0
     readiness_wait: int = 0
     redundant: int = 0
     retry_wait: int = 0
     failed: int = 0
     cancelled: int = 0
+
+
+def _log_worker_batch(
+    result: DesignProcessingWorkerResult,
+    *,
+    worker_id: str,
+    mode: DesignProcessingMode,
+) -> None:
+    log_design_processing_event(
+        logger,
+        "worker_batch",
+        worker_id=worker_id,
+        mode=mode,
+        **asdict(result),
+    )
 
 
 def default_worker_id() -> str:
@@ -146,6 +170,48 @@ def claim_due_analysis_jobs(
                 ),
             ),
             _analysis_or_readiness_filter(),
+        )
+        .order_by(
+            DesignProcessingJob.scheduled_for.asc(),
+            DesignProcessingJob.created_at.asc(),
+            DesignProcessingJob.id.asc(),
+        )
+        .limit(limit)
+    )
+    jobs = _with_job_locks(db, query).all()
+    for job in jobs:
+        claim_job(job, worker_id=worker_id, now=claimed_at)
+    if jobs:
+        db.commit()
+    return jobs
+
+
+def claim_due_design_processing_jobs(
+    db: Session,
+    *,
+    worker_id: str,
+    limit: int = 1,
+    now: Optional[datetime] = None,
+) -> list[DesignProcessingJob]:
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
+    claimed_at = now or utc_now()
+    query = (
+        db.query(DesignProcessingJob)
+        .filter(
+            or_(
+                and_(
+                    DesignProcessingJob.status == "scheduled",
+                    DesignProcessingJob.scheduled_for <= claimed_at,
+                ),
+                and_(
+                    DesignProcessingJob.status == "retry_wait",
+                    or_(
+                        DesignProcessingJob.next_retry_at.is_(None),
+                        DesignProcessingJob.next_retry_at <= claimed_at,
+                    ),
+                ),
+            ),
         )
         .order_by(
             DesignProcessingJob.scheduled_for.asc(),
@@ -263,6 +329,8 @@ def recover_expired_analysis_leases(
     *,
     lease_timeout_seconds: int = 3600,
     limit: int = 100,
+    mode: DesignProcessingMode = "enabled",
+    allowlist_item_ids: Iterable[str] = (),
     now: Optional[datetime] = None,
 ) -> int:
     if lease_timeout_seconds < 1:
@@ -283,7 +351,6 @@ def recover_expired_analysis_leases(
             _analysis_or_readiness_filter(),
             or_(
                 DesignProcessingJob.locked_at.is_(None),
-                DesignProcessingJob.locked_at <= cutoff,
                 DesignProcessingJob.heartbeat_at <= cutoff,
                 and_(
                     DesignProcessingJob.heartbeat_at.is_(None),
@@ -298,7 +365,120 @@ def recover_expired_analysis_leases(
     for job in jobs:
         item = _load_item_for_job(db, job, for_update=True)
         identity = execution_identity(job)
-        if identity is not None and identity != desired_identity(item):
+        execution_kind = job.execution_kind or "analysis"
+        execution_allowed = execution_allowed_for_item(
+            mode=mode,
+            execution_kind=execution_kind,
+            item_id=item.item_id,
+            allowlist_item_ids=allowlist_item_ids,
+        )
+        if not execution_allowed:
+            cancel_job(
+                item,
+                job,
+                reason="expired lease is disallowed by current operational policy",
+                now=recovered_at,
+                item_state=(
+                    "analyzed"
+                    if execution_kind == "publication"
+                    else item.state
+                    if item.state in {"waiting_for_name", "waiting_for_email"}
+                    else "scheduled"
+                ),
+            )
+        elif identity is not None and identity != desired_identity(item):
+            readiness_stage = (
+                item.state
+                if item.state in {"waiting_for_name", "waiting_for_email"}
+                else None
+            )
+            cancel_and_schedule_successor(
+                db,
+                item,
+                job,
+                trigger_type="expired_lease_superseded",
+                readiness_stage=readiness_stage,
+                now=recovered_at,
+            )
+        elif identity is None:
+            job.status = "scheduled"
+            job.scheduled_for = recovered_at
+            job.next_retry_at = None
+            job.locked_at = None
+            job.locked_by = None
+            job.heartbeat_at = None
+            job.last_error = "Worker lease expired during readiness validation"
+            job.updated_at = recovered_at
+        elif job.attempt_count >= job.max_attempts:
+            fail_job(item, job, error="Worker lease expired", now=recovered_at)
+        else:
+            schedule_execution_retry(
+                item,
+                job,
+                scheduled_for=recovered_at,
+                error="Worker lease expired",
+                now=recovered_at,
+            )
+    if jobs:
+        db.commit()
+    return len(jobs)
+
+
+def recover_expired_design_processing_leases(
+    db: Session,
+    *,
+    lease_timeout_seconds: int = 3600,
+    limit: int = 100,
+    mode: DesignProcessingMode = "enabled",
+    allowlist_item_ids: Iterable[str] = (),
+    now: Optional[datetime] = None,
+) -> int:
+    if lease_timeout_seconds < 1:
+        raise ValueError("lease_timeout_seconds must be positive")
+    recovered_at = now or utc_now()
+    cutoff = recovered_at - timedelta(seconds=lease_timeout_seconds)
+    query = (
+        db.query(DesignProcessingJob)
+        .filter(
+            DesignProcessingJob.status == "running",
+            or_(
+                DesignProcessingJob.locked_at.is_(None),
+                DesignProcessingJob.heartbeat_at <= cutoff,
+                and_(
+                    DesignProcessingJob.heartbeat_at.is_(None),
+                    DesignProcessingJob.locked_at <= cutoff,
+                ),
+            ),
+        )
+        .order_by(DesignProcessingJob.locked_at.asc())
+        .limit(limit)
+    )
+    jobs = _with_job_locks(db, query).all()
+    for job in jobs:
+        item = _load_item_for_job(db, job, for_update=True)
+        identity = execution_identity(job)
+        execution_kind = job.execution_kind or "analysis"
+        execution_allowed = execution_allowed_for_item(
+            mode=mode,
+            execution_kind=execution_kind,
+            item_id=item.item_id,
+            allowlist_item_ids=allowlist_item_ids,
+        )
+        if not execution_allowed:
+            cancel_job(
+                item,
+                job,
+                reason="expired lease is disallowed by current operational policy",
+                now=recovered_at,
+                item_state=(
+                    "analyzed"
+                    if execution_kind == "publication"
+                    else item.state
+                    if item.state in {"waiting_for_name", "waiting_for_email"}
+                    else "scheduled"
+                ),
+            )
+        elif identity is not None and identity != desired_identity(item):
             readiness_stage = (
                 item.state
                 if item.state in {"waiting_for_name", "waiting_for_email"}
@@ -343,6 +523,7 @@ def _cancel_or_replace_mismatched_job(
     worker_id: str,
     gateway: DesignProcessingReadGateway,
     mode: DesignProcessingMode,
+    execution_policy: Optional[ExecutionPolicy],
     now: datetime,
 ) -> str:
     job = _with_row_lock(
@@ -365,14 +546,27 @@ def _cancel_or_replace_mismatched_job(
         now=now,
         active_job=job,
     )
-    if mode == "off":
+    execution_kind = job.execution_kind or "analysis"
+    execution_allowed = (
+        execution_policy(execution_kind, item.item_id)
+        if execution_policy is not None
+        else execution_allowed_for_item(
+            mode=mode,
+            execution_kind=execution_kind,
+            item_id=item.item_id,
+            allowlist_item_ids=settings.design_processing_allowlist_item_ids,
+        )
+    )
+    if not execution_allowed:
         cancel_job(
             item,
             job,
-            reason="design processing was disabled during execution",
+            reason="current operational policy no longer permits this execution",
             now=now,
             item_state=(
-                refreshed.readiness
+                "analyzed"
+                if execution_kind == "publication" and refreshed.readiness == "ready"
+                else refreshed.readiness
                 if refreshed.readiness != "ready"
                 else "scheduled"
             ),
@@ -479,6 +673,7 @@ def execute_claimed_analysis_job(
     analysis_client: LegacyGeminiClient,
     artifact_storage: DesignArtifactStorage,
     mode: DesignProcessingMode,
+    execution_policy: Optional[ExecutionPolicy] = None,
     downloader: Optional[AssetDownloader] = None,
     now: Optional[datetime] = None,
     heartbeat_interval_seconds: float = 60.0,
@@ -490,8 +685,19 @@ def execute_claimed_analysis_job(
     if job.status != "running" or job.locked_by != worker_id:
         return "not_claimed"
     item = _load_item_for_job(db, job)
+    def policy_allows(execution_kind: str) -> bool:
+        if execution_policy is not None:
+            return execution_policy(execution_kind, item.item_id)
+        return execution_allowed_for_item(
+            mode=mode,
+            execution_kind=execution_kind,
+            item_id=item.item_id,
+            allowlist_item_ids=settings.design_processing_allowlist_item_ids,
+        )
 
-    if mode == "off":
+    publication_allowed = policy_allows("publication")
+
+    if not policy_allows("analysis"):
         cancel_job(
             item,
             job,
@@ -550,10 +756,19 @@ def execute_claimed_analysis_job(
                     execution_now,
                     job.created_at,
                 ) >= settings.design_processing_readiness_alert_threshold_seconds:
-                    logger.warning(
-                        "Design-processing item %s has waited %s readiness checks",
-                        item.item_id,
-                        job.readiness_check_count,
+                    log_design_processing_event(
+                        logger,
+                        "readiness_alert",
+                        level=logging.WARNING,
+                        board_id=item.board_id,
+                        item_id=item.item_id,
+                        job_id=str(job.id),
+                        stage=job.stage,
+                        readiness_check_count=job.readiness_check_count,
+                        readiness_age_seconds=_elapsed_seconds(
+                            execution_now,
+                            job.created_at,
+                        ),
                     )
                 db.commit()
                 return "readiness_wait"
@@ -561,21 +776,28 @@ def execute_claimed_analysis_job(
                 item,
                 job,
                 worker_id=worker_id,
-                publication_allowed=False,
+                publication_allowed=publication_allowed,
                 now=execution_now,
             )
             db.commit()
             if obligation is None:
                 return "redundant"
         else:
-            if job.execution_kind != "analysis":
-                db.rollback()
-                return "publication_pending"
-            resume_execution(
+            if job.execution_kind == "publication" and not publication_allowed:
+                cancel_job(
+                    item,
+                    job,
+                    reason="publication is not permitted by the current mode",
+                    now=execution_now,
+                    item_state="analyzed",
+                )
+                db.commit()
+                return "cancelled"
+            obligation = resume_execution(
                 item,
                 job,
                 worker_id=worker_id,
-                publication_allowed=False,
+                publication_allowed=publication_allowed,
                 now=execution_now,
             )
             db.commit()
@@ -587,6 +809,20 @@ def execute_claimed_analysis_job(
             interval_seconds=heartbeat_interval_seconds,
         )
         try:
+            if obligation == "publication":
+                return run_publication_pipeline(
+                    db,
+                    job_id,
+                    worker_id=worker_id,
+                    gateway=gateway,
+                    artifact_storage=artifact_storage,
+                    pipeline_version=settings.design_processing_pipeline_version,
+                    expected_board_id=str(settings.design_processing_board_id),
+                    expected_group_id=str(settings.design_processing_landing_group_id),
+                    mode=mode,
+                    allowlist_item_ids=settings.design_processing_allowlist_item_ids,
+                    execution_policy=execution_policy,
+                )
             return run_analysis_pipeline(
                 db,
                 job_id,
@@ -601,6 +837,7 @@ def execute_claimed_analysis_job(
                 expected_group_id=str(settings.design_processing_landing_group_id),
                 mode=mode,
                 allowlist_item_ids=settings.design_processing_allowlist_item_ids,
+                execution_policy=execution_policy,
                 downloader=downloader,
             )
         finally:
@@ -613,11 +850,12 @@ def execute_claimed_analysis_job(
             worker_id=worker_id,
             gateway=gateway,
             mode=mode,
+            execution_policy=execution_policy,
             now=utc_now(),
         )
     except Exception as exc:
         db.rollback()
-        logger.exception("Design-processing analysis job %s failed", job_id)
+        logger.exception("Design-processing job %s failed", job_id)
         return _record_execution_failure(
             db,
             job_id,
@@ -625,6 +863,14 @@ def execute_claimed_analysis_job(
             error=str(exc)[:2000],
             now=utc_now(),
         )
+
+
+def execute_claimed_design_processing_job(
+    db: Session,
+    job_id: object,
+    **kwargs,
+) -> str:
+    return execute_claimed_analysis_job(db, job_id, **kwargs)
 
 
 def run_worker_once(
@@ -637,14 +883,43 @@ def run_worker_once(
     artifact_storage: Optional[DesignArtifactStorage] = None,
     downloader: Optional[AssetDownloader] = None,
     mode: Optional[DesignProcessingMode] = None,
+    execution_policy: Optional[ExecutionPolicy] = None,
     claim_limit: int = 1,
     recover_leases: bool = True,
     lease_timeout_seconds: int = 3600,
     heartbeat_interval_seconds: float = 60.0,
 ) -> DesignProcessingWorkerResult:
     configured_mode: DesignProcessingMode = mode or settings.design_processing_mode
+    resolved_worker_id = worker_id or default_worker_id()
+    runtime_policy = execution_policy
+    if runtime_policy is None and mode is None:
+        runtime_policy = lambda execution_kind, item_id: execution_allowed_for_item(
+            mode=settings.design_processing_mode,
+            execution_kind=execution_kind,
+            item_id=item_id,
+            allowlist_item_ids=settings.design_processing_allowlist_item_ids,
+        )
+    recovered = (
+        recover_expired_design_processing_leases(
+            db,
+            lease_timeout_seconds=lease_timeout_seconds,
+            mode=configured_mode,
+            allowlist_item_ids=settings.design_processing_allowlist_item_ids,
+        )
+        if recover_leases
+        else 0
+    )
     if configured_mode == "off":
-        return DesignProcessingWorkerResult()
+        result = DesignProcessingWorkerResult(
+            recovered=recovered,
+            cancelled=recovered,
+        )
+        _log_worker_batch(
+            result,
+            worker_id=resolved_worker_id,
+            mode=configured_mode,
+        )
+        return result
     token = access_token or get_monday_ingestion_access_token()
     read_gateway = gateway or MondayDesignProcessingReadGateway(
         access_token=token,
@@ -654,23 +929,14 @@ def run_worker_once(
         settings.design_processing_extraction_model
     )
     storage = artifact_storage or SupabaseDesignArtifactStorage()
-    resolved_worker_id = worker_id or default_worker_id()
-    recovered = (
-        recover_expired_analysis_leases(
-            db,
-            lease_timeout_seconds=lease_timeout_seconds,
-        )
-        if recover_leases
-        else 0
-    )
-    jobs = claim_due_analysis_jobs(
+    jobs = claim_due_design_processing_jobs(
         db,
         worker_id=resolved_worker_id,
         limit=claim_limit,
     )
     outcomes: dict[str, int] = {}
     for job in jobs:
-        outcome = execute_claimed_analysis_job(
+        outcome = execute_claimed_design_processing_job(
             db,
             job.id,
             worker_id=resolved_worker_id,
@@ -679,25 +945,43 @@ def run_worker_once(
             analysis_client=client,
             artifact_storage=storage,
             mode=configured_mode,
+            execution_policy=runtime_policy,
             downloader=downloader,
             heartbeat_interval_seconds=heartbeat_interval_seconds,
         )
         outcomes[outcome] = outcomes.get(outcome, 0) + 1
-    return DesignProcessingWorkerResult(
+        log_design_processing_event(
+            logger,
+            "worker_job_outcome",
+            worker_id=resolved_worker_id,
+            board_id=job.board_id,
+            item_id=job.item_id,
+            job_id=str(job.id),
+            execution_kind=job.execution_kind,
+            outcome=outcome,
+        )
+    result = DesignProcessingWorkerResult(
         recovered=recovered,
         claimed=len(jobs),
         analyzed=outcomes.get("analyzed", 0),
+        published=outcomes.get("published", 0),
         readiness_wait=outcomes.get("readiness_wait", 0),
         redundant=outcomes.get("redundant", 0),
         retry_wait=outcomes.get("retry_wait", 0),
         failed=outcomes.get("failed", 0),
         cancelled=outcomes.get("cancelled", 0),
     )
+    _log_worker_batch(
+        result,
+        worker_id=resolved_worker_id,
+        mode=configured_mode,
+    )
+    return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run the durable design-processing analysis worker",
+        description="Run the durable design-processing worker",
     )
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--worker-id")

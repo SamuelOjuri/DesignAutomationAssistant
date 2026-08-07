@@ -3,13 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
-from typing import Mapping, Protocol
+from typing import Iterable, Mapping, Optional, Protocol
 import uuid
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from ..monday_client import MondayFileColumnAsset
 from ..models import DesignProcessingArtifact, DesignProcessingItem
 from .design_processing_state import (
     AI_DATA_COLUMN_ID,
@@ -22,6 +23,14 @@ from .storage_ingest import upload_with_retry
 
 
 class ArtifactIntegrityError(RuntimeError):
+    pass
+
+
+class ArtifactPublicationError(RuntimeError):
+    pass
+
+
+class AmbiguousArtifactAdoptionError(ArtifactPublicationError):
     pass
 
 
@@ -158,6 +167,139 @@ def verify_stored_artifact(
             f"stored {artifact.artifact_kind} artifact does not match its database hash"
         )
     return content
+
+
+def select_adoptable_monday_asset(
+    artifact: DesignProcessingArtifact,
+    assets: Iterable[MondayFileColumnAsset],
+) -> Optional[MondayFileColumnAsset]:
+    if artifact.status not in {"uploading", "failed", "published"}:
+        raise ArtifactPublicationError(
+            f"cannot adopt {artifact.artifact_kind} from {artifact.status!r} status"
+        )
+    exact_name = [
+        asset
+        for asset in assets
+        if asset.filename == artifact.deterministic_filename
+    ]
+    matching = [
+        asset
+        for asset in exact_name
+        if asset.size_bytes is None or asset.size_bytes == artifact.size_bytes
+    ]
+    if len(matching) > 1:
+        raise AmbiguousArtifactAdoptionError(
+            f"multiple Monday assets match {artifact.deterministic_filename!r}"
+        )
+    if exact_name and not matching:
+        raise ArtifactPublicationError(
+            f"Monday asset {artifact.deterministic_filename!r} has the wrong size"
+        )
+    return matching[0] if matching else None
+
+
+def prepare_artifact_upload(
+    artifact: DesignProcessingArtifact,
+    *,
+    now: datetime,
+) -> bool:
+    if artifact.status == "published" and artifact.monday_asset_id is not None:
+        return False
+    if artifact.status not in {"rendered", "uploading", "failed", "published"}:
+        raise ArtifactPublicationError(
+            f"cannot publish {artifact.artifact_kind} from {artifact.status!r} status"
+        )
+    artifact.status = "uploading"
+    artifact.last_error = None
+    artifact.updated_at = now
+    return True
+
+
+def record_artifact_published(
+    artifact: DesignProcessingArtifact,
+    *,
+    monday_asset_id: str,
+    now: datetime,
+) -> None:
+    normalized_asset_id = str(monday_asset_id).strip()
+    if not normalized_asset_id.isdecimal() or int(normalized_asset_id) <= 0:
+        raise ArtifactPublicationError("Monday asset ID must be a positive decimal ID")
+    if artifact.status not in {"uploading", "failed", "published"}:
+        raise ArtifactPublicationError(
+            f"cannot record {artifact.artifact_kind} from {artifact.status!r} status"
+        )
+    artifact.monday_asset_id = normalized_asset_id
+    artifact.status = "published"
+    artifact.last_error = None
+    artifact.updated_at = now
+
+
+def record_artifact_publication_error(
+    artifact: DesignProcessingArtifact,
+    *,
+    error: str,
+    now: datetime,
+) -> None:
+    if artifact.status == "published" and artifact.monday_asset_id is not None:
+        return
+    artifact.status = "failed"
+    artifact.last_error = error[:2000]
+    artifact.updated_at = now
+
+
+def mark_prior_artifacts_delete_pending(
+    db: Session,
+    item: DesignProcessingItem,
+    current_identity: ProcessingIdentity,
+    *,
+    now: datetime,
+) -> tuple[DesignProcessingArtifact, ...]:
+    prior = (
+        db.query(DesignProcessingArtifact)
+        .filter(
+            DesignProcessingArtifact.board_id == item.board_id,
+            DesignProcessingArtifact.item_id == item.item_id,
+            DesignProcessingArtifact.status == "published",
+            DesignProcessingArtifact.monday_asset_id.isnot(None),
+            ~(
+                (DesignProcessingArtifact.input_revision == current_identity.input_revision)
+                & (
+                    DesignProcessingArtifact.pipeline_version
+                    == current_identity.pipeline_version
+                )
+            ),
+        )
+        .all()
+    )
+    for artifact in prior:
+        artifact.status = "delete_pending"
+        artifact.last_error = None
+        artifact.updated_at = now
+    return tuple(prior)
+
+
+def record_artifact_deleted(
+    artifact: DesignProcessingArtifact,
+    *,
+    now: datetime,
+) -> None:
+    if artifact.status != "delete_pending" or artifact.monday_asset_id is None:
+        raise ArtifactPublicationError("artifact is not pending Monday deletion")
+    artifact.status = "deleted"
+    artifact.last_error = None
+    artifact.updated_at = now
+
+
+def record_artifact_cleanup_error(
+    artifact: DesignProcessingArtifact,
+    *,
+    error: str,
+    now: datetime,
+) -> None:
+    if artifact.status != "delete_pending":
+        raise ArtifactPublicationError("artifact is not pending Monday deletion")
+    artifact.last_error = error[:2000]
+    artifact.updated_at = now
 
 
 def find_verified_rendered_artifacts(
