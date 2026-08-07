@@ -1,0 +1,5 @@
+* text=auto
+
+# Legacy golden fixtures are byte-compared in tests.
+backend/tests/fixtures/legacy_enquiry/v1/expected.json text eol=lf
+backend/tests/fixtures/legacy_enquiry/v1/ai_data.csv -text
