@@ -548,7 +548,7 @@ def build_design_owned_column_values(
     else:
         warnings.append("Hour Received was not written because it is missing or invalid")
 
-    raw_zip = parameters.get("Zip Code")
+    raw_zip = parameters.get("Post Code")
     formatted_zip = (
         None
         if _is_missing_extracted_value(raw_zip)

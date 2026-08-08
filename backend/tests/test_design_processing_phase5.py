@@ -32,6 +32,7 @@ from backend.app.services.design_processing_queue import queue_design_processing
 from backend.app.services.design_processing_state import ProcessingIdentity
 from backend.app.services.legacy_enquiry.analysis import analyze_downloaded_email_assets
 from backend.app.services.legacy_enquiry.matching import match_projects
+from backend.app.services.match_report import MatchReport, render_match_report_pdf
 from backend.app.services.design_processing_worker import (
     claim_due_analysis_jobs,
     recover_expired_analysis_leases,
@@ -69,6 +70,22 @@ def golden():
         json.loads((FIXTURE_ROOT / "input.json").read_text(encoding="utf-8")),
         json.loads((FIXTURE_ROOT / "expected.json").read_text(encoding="utf-8")),
     )
+
+
+def test_match_report_cleans_leading_company_separator():
+    report = MatchReport.from_contract(
+        source_item_id="3146597919",
+        extracted_company=": Axter Ltd",
+        match_contract={
+            "extractedProjectTitle": "18-24 Herne Hill, Brixton",
+            "candidates": [],
+        },
+    )
+
+    assert report.extracted_company == "Axter Ltd"
+    pdf_content = render_match_report_pdf(report)
+    assert rb"account\): Axter)" in pdf_content
+    assert rb"account\): :" not in pdf_content
 
 
 def _snapshot(golden_input, *, name: str = "Human enquiry name", revision=None):

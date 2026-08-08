@@ -8,6 +8,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
+from .legacy_enquiry.formatting import clean_extracted_value
+
 
 @dataclass(frozen=True, slots=True)
 class MatchReportCandidate:
@@ -56,7 +58,9 @@ class MatchReport:
             extracted_project_title=str(
                 match_contract.get("extractedProjectTitle") or "Not found"
             ),
-            extracted_company=str(extracted_company or "Not found"),
+            extracted_company=str(
+                clean_extracted_value(extracted_company) or "Not found"
+            ),
             candidates=candidates,
         )
 

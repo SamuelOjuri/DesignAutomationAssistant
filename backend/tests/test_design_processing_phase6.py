@@ -443,7 +443,7 @@ def _seed_publication(db, *, prior_identity=None):
             "parameters": {
                 "Date Received": "07/08/2026",
                 "Hour Received": "10:30",
-                "Zip Code": "SW2 3AA",
+                "Post Code": "SW2 3AA",
             },
             "sources": {},
         },
@@ -553,7 +553,7 @@ def test_invalid_scalar_values_are_omitted_without_clearing():
         {
             "Date Received": "Not found",
             "Hour Received": "invalid",
-            "Zip Code": "UNMAPPED",
+            "Post Code": "UNMAPPED",
         },
         {
             "date_mkpb23av": "{}",
@@ -564,6 +564,29 @@ def test_invalid_scalar_values_are_omitted_without_clearing():
 
     assert values == {}
     assert len(warnings) == 3
+
+
+def test_not_provided_post_code_is_omitted_without_clearing():
+    values, warnings = build_design_owned_column_values(
+        {
+            "Date Received": "07 Feb 2025",
+            "Hour Received": "13:34",
+            "Post Code": "Not provided",
+        },
+        {
+            "date_mkpb23av": "{}",
+            "hour_mkpbb3j1": "{}",
+            "dropdown_mkpbafca": json.dumps(
+                {"labels": [{"id": 9, "name": "SW2 3AA"}]}
+            ),
+        },
+    )
+
+    assert values == {
+        "date_mkpb23av": {"date": "2025-02-07"},
+        "hour_mkpbb3j1": {"hour": 13, "minute": 34},
+    }
+    assert warnings == ("Zip Code was not written because it is missing or unmapped",)
 
 
 def test_publication_gates_each_side_effect_and_advances_atomically(db_session):
@@ -608,7 +631,7 @@ def test_pipeline_omits_invalid_values_and_persists_warnings(db_session):
         "parameters": {
             "Date Received": "Not found",
             "Hour Received": "invalid",
-            "Zip Code": "UNMAPPED",
+            "Post Code": "UNMAPPED",
         },
     }
     db_session.commit()
