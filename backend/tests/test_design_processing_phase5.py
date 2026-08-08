@@ -32,6 +32,10 @@ from backend.app.services.design_processing_queue import queue_design_processing
 from backend.app.services.design_processing_state import ProcessingIdentity
 from backend.app.services.legacy_enquiry.analysis import analyze_downloaded_email_assets
 from backend.app.services.legacy_enquiry.matching import match_projects
+from backend.app.services.legacy_enquiry.parameter_extraction import (
+    CANONICAL_PARAMETER_ORDER,
+    PARAMETER_EXTRACTION_PROMPT,
+)
 from backend.app.services.match_report import MatchReport, render_match_report_pdf
 from backend.app.services.design_processing_worker import (
     claim_due_analysis_jobs,
@@ -86,6 +90,12 @@ def test_match_report_cleans_leading_company_separator():
     pdf_content = render_match_report_pdf(report)
     assert rb"account\): Axter)" in pdf_content
     assert rb"account\): :" not in pdf_content
+
+
+def test_reason_for_change_remains_in_csv_schema_but_not_llm_prompt():
+    assert len(CANONICAL_PARAMETER_ORDER) == 16
+    assert "Reason for Change" in CANONICAL_PARAMETER_ORDER
+    assert "Reason for Change" not in PARAMETER_EXTRACTION_PROMPT
 
 
 def _snapshot(golden_input, *, name: str = "Human enquiry name", revision=None):
@@ -317,7 +327,10 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
     assert item.latest_analyzed_input_revision == item.latest_desired_input_revision
     assert item.latest_analyzed_pipeline_version == item.latest_desired_pipeline_version
     assert item.latest_published_input_revision is None
-    assert item.extracted_parameters_json["parameters"] == golden_expected["extraction"]["parameters"]
+    expected_parameters = dict(golden_expected["extraction"]["parameters"])
+    expected_parameters["Reason for Change"] = "Reviewer decision required"
+    assert item.extracted_parameters_json["parameters"] == expected_parameters
+    assert item.extracted_parameters_json["sources"]["Reason for Change"] == "Business Rule"
     assert item.match_result_json["legacyDiagnostics"] == golden_expected["matching"]
     assert job.status == "completed"
     assert job.attempt_count == 1
@@ -335,7 +348,13 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
         for (_, object_key), content in storage.objects.items()
         if object_key.endswith(".pdf")
     )
-    assert csv_content == (FIXTURE_ROOT / "ai_data.csv").read_bytes()
+    legacy_csv_content = (FIXTURE_ROOT / "ai_data.csv").read_bytes()
+    expected_csv_content = legacy_csv_content.replace(
+        b"Reason for Change,New Enquiry,Email Content",
+        b"Reason for Change,Reviewer decision required,Business Rule",
+    )
+    assert expected_csv_content != legacy_csv_content
+    assert csv_content == expected_csv_content
     assert b"Extracted Company \\(context only" in pdf_content
     assert b"Example Roofing Limited" in pdf_content
     assert b"Candidate TP Ref: 16771" in pdf_content

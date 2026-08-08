@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Callable, Optional
+from typing import Callable
 
 
 QueryLlm = Callable[[str, str], str]
@@ -35,7 +35,6 @@ PARAMETER_EXTRACTION_PROMPT = """Extract the following design parameters from th
             - Hour Received: (Local time the email was sent *to TaperedPlus*. Use 24-hour format, e.g. 14:23).
             - Company: (Identify the company *directly requesting* technical drawings or services *from TaperedPlus*. In a forwarded email, this is the company of the person *sending the email to TaperedPlus*, NOT the company of the original sender further down the chain. Look for the company directly communicating with TaperedPlus).
             - Contact: (Identify the contact person *directly requesting* the job or drawings *from TaperedPlus*. In a forwarded email, this is the person *sending the email to TaperedPlus*, NOT the original sender further down the chain. Look for the individual directly communicating with TaperedPlus).
-            - Reason for Change: ({reason_change_text})
             - Surveyor: (Name of the surveyor if provided).
             - Target U-Value: (The primary target U-Value requested for the main insulation area).
             - Target Min U-Value: (A secondary or minimum target U-Value if specified, often for specific areas like upstands).
@@ -106,22 +105,10 @@ def extract_parameters(
     all_text: str,
     *,
     query_llm: QueryLlm,
-    enquiry_type: Optional[str] = None,
 ) -> dict[str, str]:
-    if enquiry_type == "Amendment":
-        reason_change_text = "Amendment"
-    elif enquiry_type == "New Enquiry":
-        reason_change_text = "New Enquiry"
-    else:
-        reason_change_text = (
-            "Either 'Amendment' or 'New Enquiry' depending on the context of the email"
-        )
-
     response = query_llm(
         all_text,
-        PARAMETER_EXTRACTION_PROMPT.format(
-            reason_change_text=reason_change_text,
-        ),
+        PARAMETER_EXTRACTION_PROMPT,
     )
     parameters: dict[str, str] = {}
     for parameter in CANONICAL_PARAMETER_ORDER:
@@ -173,8 +160,6 @@ def extract_parameters(
         except (AttributeError, IndexError):
             pass
 
-    if enquiry_type:
-        parameters["Reason for Change"] = enquiry_type
     return parameters
 
 

@@ -104,9 +104,8 @@ def analyze_downloaded_email_assets(
     if not project_name:
         raise ValueError("project-name extraction returned no title")
     sources = {parameter: "Email Content" for parameter in parameters}
-    if not parameters.get("Reason for Change") or parameters["Reason for Change"] == "Not found":
-        parameters["Reason for Change"] = "New Enquiry"
-        sources["Reason for Change"] = "Business Rule"
+    parameters["Reason for Change"] = "Reviewer decision required"
+    sources["Reason for Change"] = "Business Rule"
 
     return LegacyAnalysisResult(
         parameters=parameters,

@@ -34,9 +34,10 @@ setup, add `--create-bucket` to provision the configured bucket as private.
 Configuration supports `off`, `shadow`, `allowlist`, and `enabled` modes.
 `DESIGN_PROCESSING_ALLOWLIST_ITEM_IDS` accepts comma-separated decimal item IDs
 or a JSON array and is required when mode is `allowlist`. Activation timestamps
-must include a timezone. The initial pipeline version is derived from the full
-legacy manifest digest and the separately pinned `gemini-2.5-flash` extraction
-model.
+must include a timezone. The pipeline version combines the full legacy manifest
+digest, the separately pinned `gemini-2.5-flash` extraction model, and a
+code-owned output revision that changes whenever rendered or extracted output
+semantics change.
 
 ## Design Processing Operations
 

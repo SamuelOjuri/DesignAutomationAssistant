@@ -238,7 +238,7 @@ For a publication execution:
 12. Run the gate again immediately before uploading or adopting Matched Projects, which remains the final Monday side effect.  
 13. Lock the item and job for a final desired-versus-execution comparison. In one transaction, verify both current artifacts have Monday asset IDs, mark AI Data and the match report `published`, advance the published identity, mark the job `completed`, and set the item to `ready_for_review` only when the readiness predicate above is true. Mark prior automation-owned artifacts `delete_pending`; delete them from Monday after commit as best-effort cleanup.
 
-The AI Data CSV should retain all 16 extracted parameters. Since no project is selected, it contains email-derived values only. Any default inserted by a business rule should have source `Business Rule`; it must not be represented as a human CRM decision.
+The AI Data CSV should retain all 16 parameter rows for schema compatibility. The worker must not infer New Enquiry or Amendment: `Reason for Change` is always `Reviewer decision required` with source `Business Rule`, and only the reviewer may record that decision in the human-owned New Enq / Amend column. Since no project is selected, every other parameter contains email-derived values only. Any default inserted by a business rule should have source `Business Rule`; it must not be represented as a human CRM decision.
 
 Implement one validation gate with two explicit modes. In readiness mode, `refresh_current_target()` re-fetches board, group, item `name`, Email-column membership, and joined asset metadata from Monday, recomputes the Email input revision, and updates the locked item’s latest desired identity; it does not require or assign execution identity. If the refreshed desired identity differs from published identity, it also moves the item out of `ready_for_review` in that transaction. In execution mode, `assert_current_execution_target()` performs the same Monday re-fetch and revision calculation, then locks the item and claimed job to verify board `1882196103`, Landing Zone group `group_mkpbd6vy`, a non-empty human name, at least one supported Email asset, current remote identity and stored desired identity both equal to immutable execution identity, the configured pipeline version equal to execution pipeline version, continued lease ownership, and that the current operational mode still permits the execution kind for this item. No other remote work may occur between a successful execution-mode gate and its guarded side effect.
 
@@ -341,7 +341,7 @@ Exit gate: every documented race and mode transition has an automated test; stal
 **Phase 8: Staged Rollout**
 
 - Deploy database/configuration and worker code with mode `off`; verify migrations, permissions, dashboards, and rollback procedure.  
-- Move to `shadow` for the activation-bounded corpus and compare parameter equality, candidate ordering, generated artifacts, and p50/p95 timings against the fixed legacy fixtures.  
+- Move to `shadow` for the activation-bounded corpus and compare parameter equality, except for the documented neutral `Reason for Change` policy override, candidate ordering, generated artifacts, and p50/p95 timings against the fixed legacy fixtures.  
 - Move to `allowlist` for selected real item IDs, verify the complete reviewer workflow and cleanup behavior, then expand gradually.  
 - Move to `enabled` only after the verification criteria below pass; retain the activation boundary until an explicit backfill is approved.
 
@@ -376,5 +376,5 @@ To meet or beat the legacy app:
 \- Persist each completed stage so retries do not repeat successful Gemini extraction.  
 \- Cache Monday board-column metadata briefly.  
 \- Run one memory-heavy job per worker initially, then increase concurrency from measured memory and API limits.  
-\- Compare parameter equality, candidate ordering, Monday payloads, and p50/p95 processing time against a fixed historical test corpus in shadow mode before enabling writes.
+\- Compare parameter equality, except for the documented neutral `Reason for Change` policy override, candidate ordering, Monday payloads, and p50/p95 processing time against a fixed historical test corpus in shadow mode before enabling writes.
 
