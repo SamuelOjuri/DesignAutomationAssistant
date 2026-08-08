@@ -680,7 +680,12 @@ class FakeReconciliationGateway:
         raise AssertionError("not used")
 
 
-def test_reconciliation_requires_activation_boundary_for_broad_scan(db_session):
+def test_reconciliation_requires_activation_boundary_for_broad_scan(
+    db_session,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "design_processing_activation_timestamp", None)
+
     with pytest.raises(ValueError, match="activation timestamp"):
         reconcile_landing_zone_once(
             db_session,

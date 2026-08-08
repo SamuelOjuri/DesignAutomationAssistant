@@ -8,6 +8,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from .services.legacy_enquiry import LEGACY_MANIFEST_DIGEST
 
+DESIGN_PROCESSING_PIPELINE_REVISION = "output-v2"
+
 class Settings(BaseSettings):
     # monday
     monday_client_id: str
@@ -240,7 +242,8 @@ class Settings(BaseSettings):
     def design_processing_pipeline_version(self) -> str:
         return (
             f"legacy-files-{LEGACY_MANIFEST_DIGEST}:"
-            f"model-{self.design_processing_extraction_model}"
+            f"model-{self.design_processing_extraction_model}:"
+            f"{DESIGN_PROCESSING_PIPELINE_REVISION}"
         )
 
     @property

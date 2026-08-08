@@ -73,7 +73,8 @@ def test_design_processing_defaults_pin_identity_and_remain_off():
     expected_version = (
         "legacy-files-"
         "82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:"
-        "model-gemini-2.5-flash"
+        "model-gemini-2.5-flash:"
+        "output-v2"
     )
     assert configured.design_processing_mode == "off"
     assert configured.design_processing_worker_enabled is False
