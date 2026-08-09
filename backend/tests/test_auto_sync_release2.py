@@ -117,6 +117,7 @@ def test_source_revision_query_uses_account_fallback_not_board_account(monkeypat
                 "items": [
                     {
                         "id": "1",
+                        "state": "active",
                         "name": "Test item",
                         "updated_at": "2026-07-01T12:00:00Z",
                         "board": {"id": "1882196103", "name": "Design queue"},
@@ -134,6 +135,7 @@ def test_source_revision_query_uses_account_fallback_not_board_account(monkeypat
     item = monday_client.fetch_current_source_revision_inputs("token", "1", account_id="acct")
 
     assert "account" not in calls[0]
+    assert "state" in calls[0]
     assert item["account_id"] == "acct"
 
 

@@ -679,6 +679,7 @@ SOURCE_REVISION_INPUTS_QUERY = """
 query ($itemIds: [ID!]) {
     items(ids: $itemIds) {
         id
+        state
         name
         updated_at
         board { id name }
