@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Sequence
@@ -7,6 +8,10 @@ from typing import Any, Callable, Literal, Sequence
 from google.genai import types
 
 from ..llm_interface import gemini_api_with_retry
+from .parameter_extraction import (
+    DesignParameterExtraction,
+    PARAMETER_EXTRACTION_PROMPT,
+)
 
 
 ThinkingLevel = Literal["minimal", "low", "medium", "high"]
@@ -43,6 +48,42 @@ class LegacyGeminiClient:
                 thinking_level=types.ThinkingLevel(self.thinking_level),
             ),
         )
+
+    @property
+    def parameter_extraction_config(self) -> types.GenerateContentConfig:
+        return types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(
+                thinking_level=types.ThinkingLevel(self.thinking_level),
+            ),
+            response_mime_type="application/json",
+            response_json_schema=DesignParameterExtraction.model_json_schema(),
+        )
+
+    def extract_design_parameters(self, context: str) -> DesignParameterExtraction:
+        prompt = f"""
+        Please analyze the following information extracted from emails, PDF documents, and images:
+
+        {context}
+
+        QUESTION: {PARAMETER_EXTRACTION_PROMPT}
+
+        Information may be found in any content source, including text from image descriptions.
+        """
+        response = self.generate_content(
+            self.model,
+            prompt,
+            self.parameter_extraction_config,
+        )
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, DesignParameterExtraction):
+            return parsed
+        if isinstance(parsed, Mapping):
+            return DesignParameterExtraction.model_validate(parsed)
+
+        response_text = getattr(response, "text", None)
+        if not isinstance(response_text, str) or not response_text.strip():
+            raise ValueError("parameter extraction returned no structured response")
+        return DesignParameterExtraction.model_validate_json(response_text)
 
     def query_llm(self, context: str, query: str) -> str:
         prompt = (

@@ -12,6 +12,7 @@ from .email_extraction import (
     process_email_content,
 )
 from .parameter_extraction import (
+    DesignParameterExtraction,
     QueryLlm,
     extract_parameters,
     extract_project_name_from_content,
@@ -19,6 +20,8 @@ from .parameter_extraction import (
 
 
 class LegacyAnalysisClient(AttachmentTextExtractor, Protocol):
+    def extract_design_parameters(self, context: str) -> DesignParameterExtraction: ...
+
     def query_llm(self, context: str, query: str) -> str: ...
 
 
@@ -94,8 +97,11 @@ def analyze_downloaded_email_assets(
             )
         )
 
+    parameters = extract_parameters(
+        all_text,
+        extracted_parameters=client.extract_design_parameters(all_text),
+    )
     query_llm: QueryLlm = client.query_llm
-    parameters = extract_parameters(all_text, query_llm=query_llm)
     project_name = extract_project_name_from_content(
         first_email_text,
         all_text,

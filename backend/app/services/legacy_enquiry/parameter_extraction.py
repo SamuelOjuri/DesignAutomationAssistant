@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Callable
 
+from pydantic import BaseModel, ConfigDict, Field
+
 
 QueryLlm = Callable[[str, str], str]
 
@@ -25,22 +27,99 @@ CANONICAL_PARAMETER_ORDER = (
     "Decking",
 )
 
-PARAMETER_EXTRACTION_PROMPT = """Extract the following design parameters from the documents for a TaperedPlus technical drawing request: 
-            - Email Subject: (The subject line of the email requesting the service from TaperedPlus).
-            - Post Code of Project Location: (Mostly found in the title block of the drawing attached to emails. Ignore the postcode of any company office address or sender/recipient address and use the post code of the project location only, otherwise state 'Not provided').
-            - Drawing Reference: (TaperedPlus Reference Number e.g. TP*****_**.** - *. Look for references associated with TaperedPlus specifically. If multiple exist, prioritize the latest one mentioned in the context of the request *to* TaperedPlus).
-            - Drawing Title (The Project Name, usually the project location).
-            - Revision (Suffix of the drawing reference e.g. **.** - A. If multiple exist, use the one associated with the Drawing Reference identified above).
-            - Date Received: (Date the email requesting the service *from TaperedPlus* was sent by the client. In a forwarded email chain, this is the date the email was *sent to TaperedPlus*, NOT the date of the original email further down the chain).
-            - Hour Received: (Local time the email was sent *to TaperedPlus*. Use 24-hour format, e.g. 14:23).
-            - Company: (Identify the company *directly requesting* technical drawings or services *from TaperedPlus*. In a forwarded email, this is the company of the person *sending the email to TaperedPlus*, NOT the company of the original sender further down the chain. Look for the company directly communicating with TaperedPlus).
-            - Contact: (Identify the contact person *directly requesting* the job or drawings *from TaperedPlus*. In a forwarded email, this is the person *sending the email to TaperedPlus*, NOT the original sender further down the chain. Look for the individual directly communicating with TaperedPlus).
-            - Surveyor: (Name of the surveyor if provided).
-            - Target U-Value: (The primary target U-Value requested for the main insulation area).
-            - Target Min U-Value: (A secondary or minimum target U-Value if specified, often for specific areas like upstands).
-            - Fall of Tapered: (The required fall or slope for the tapered insulation).
-            - Tapered Insulation: (The type or brand of tapered insulation product requested).
-            - Decking: (The type of roof decking material described)."""
+PARAMETER_EXTRACTION_PROMPT = (
+    "Extract the requested design parameters from the supplied email and document "
+    "content for a TaperedPlus technical drawing request. Return null when a value "
+    "is not provided by the source material."
+)
+
+
+class DesignParameterExtraction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email_subject: str | None = Field(
+        description="The subject line of the email requesting the service from TaperedPlus."
+    )
+    post_code: str | None = Field(
+        description=(
+            "The project-location postcode, usually from a drawing title block. Ignore "
+            "company, sender, and recipient addresses."
+        )
+    )
+    drawing_reference: str | None = Field(
+        description=(
+            "The TaperedPlus drawing reference. If several references exist, use the "
+            "latest one associated with the request to TaperedPlus."
+        )
+    )
+    drawing_title: str | None = Field(
+        description="The drawing project name, usually the project location."
+    )
+    revision: str | None = Field(
+        description="The revision associated with the selected drawing reference."
+    )
+    date_received: str | None = Field(
+        description=(
+            "The date the client sent the request to TaperedPlus. For forwarded chains, "
+            "do not use the date of an earlier message."
+        )
+    )
+    hour_received: str | None = Field(
+        description=(
+            "The local time the client sent the request to TaperedPlus, in 24-hour HH:MM "
+            "format."
+        )
+    )
+    company: str | None = Field(
+        description=(
+            "The company directly requesting drawings or services from TaperedPlus. For "
+            "a forwarded email, use the company of the person sending to TaperedPlus, "
+            "not an earlier sender."
+        )
+    )
+    contact: str | None = Field(
+        description=(
+            "The person directly requesting the job or drawings from TaperedPlus. For a "
+            "forwarded email, use the person sending to TaperedPlus, not an earlier sender."
+        )
+    )
+    surveyor: str | None = Field(description="The surveyor's name, when provided.")
+    target_u_value: str | None = Field(
+        description="The primary target U-value for the main insulation area."
+    )
+    target_min_u_value: str | None = Field(
+        description=(
+            "A secondary or minimum target U-value, often for an area such as upstands."
+        )
+    )
+    fall_of_tapered: str | None = Field(
+        description="The required fall or slope for the tapered insulation scheme."
+    )
+    tapered_insulation: str | None = Field(
+        description="The type or brand of tapered insulation product requested."
+    )
+    decking: str | None = Field(
+        description="The type of roof decking material described."
+    )
+
+    def as_canonical_parameters(self) -> dict[str, str | None]:
+        return {
+            "Email Subject": self.email_subject,
+            "Post Code": self.post_code,
+            "Drawing Reference": self.drawing_reference,
+            "Drawing Title": self.drawing_title,
+            "Revision": self.revision,
+            "Date Received": self.date_received,
+            "Hour Received": self.hour_received,
+            "Company": self.company,
+            "Contact": self.contact,
+            "Surveyor": self.surveyor,
+            "Target U-Value": self.target_u_value,
+            "Target Min U-Value": self.target_min_u_value,
+            "Fall of Tapered": self.fall_of_tapered,
+            "Tapered Insulation": self.tapered_insulation,
+            "Decking": self.decking,
+        }
 
 
 def map_tapered_insulation_value(value: str) -> str:
@@ -104,21 +183,11 @@ def map_tapered_insulation_value(value: str) -> str:
 def extract_parameters(
     all_text: str,
     *,
-    query_llm: QueryLlm,
+    extracted_parameters: DesignParameterExtraction,
 ) -> dict[str, str]:
-    response = query_llm(
-        all_text,
-        PARAMETER_EXTRACTION_PROMPT,
-    )
     parameters: dict[str, str] = {}
-    for parameter in CANONICAL_PARAMETER_ORDER:
-        match = re.search(
-            rf"{parameter}\s*:?\s*(.*?)(?:\n|$)",
-            response,
-            re.IGNORECASE,
-        )
-        value = match.group(1).strip() if match else "Not found"
-        value = re.sub(r"^\*+\s*", "", value)
+    for parameter, raw_value in extracted_parameters.as_canonical_parameters().items():
+        value = raw_value.strip() if raw_value and raw_value.strip() else "Not provided"
 
         if parameter == "Tapered Insulation":
             value = map_tapered_insulation_value(value)

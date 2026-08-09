@@ -47,7 +47,7 @@ Use exact legacy code logic for the following:
 
 Preserve these parts from the pinned local source snapshot:
 
-\- Parameter prompt, parsing, date/time override, postcode handling, and insulation mapping from parameter\_extraction.py  
+\- Parameter field semantics, date/time override, postcode handling, and insulation mapping from parameter\_extraction.py. Replace only the legacy line-oriented LLM response parser with Gemini JSON-schema structured output so field names cannot match prose inside another field. Require all schema fields, allow nullable string values, validate with Pydantic, and fail the analysis attempt on missing, malformed, or extra fields rather than falling back to text parsing.  
 \- Project-name extraction and the complete matching/ranking algorithm  
 \- Cleaning, date/hour/dropdown formatting, and AI Data CSV ordering from monday.py
 
@@ -194,7 +194,7 @@ Process multiple supported Email assets in that same deterministic order. After 
 
 Never include item `updated_at`, AI Data, Matched Projects, unsupported Email-column files, or unrelated item/update attachments in this revision. Otherwise, the worker’s own Monday writes would continually trigger new processing.
 
-Set the `pipeline_version` from the full legacy manifest digest, extraction model identifier, thinking level, and output revision: `legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.5-flash:thinking-medium:output-v3`. Persist the full value; shortened forms may be used only in logs and artifact filenames. Reprocessing is required when the Email revision changes or any component of `pipeline_version` changes. Gemini 3.x requests must use `thinking_level` rather than `thinking_budget` and must omit `temperature`, `top_p`, `top_k`, and `candidate_count`.
+Set the `pipeline_version` from the full legacy manifest digest, extraction model identifier, thinking level, and output revision: `legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.5-flash:thinking-medium:output-v4`. Persist the full value; shortened forms may be used only in logs and artifact filenames. Reprocessing is required when the Email revision changes or any component of `pipeline_version` changes. Gemini 3.x requests must use `thinking_level` rather than `thinking_budget` and must omit `temperature`, `top_p`, `top_k`, and `candidate_count`. Parameter extraction must additionally set `response_mime_type` to `application/json` and pass the Pydantic JSON schema through `response_json_schema`.
 
 Throughout this plan, “identity” means the full input revision and pipeline version pair. Never compare or advance an analyzed or published revision without comparing or advancing its pipeline version in the same transaction.
 
@@ -314,7 +314,7 @@ Exit gate: dual-dispatch failure isolation, retry of only unresolved children, e
 
 **Phase 5: Analysis Worker And Shadow Mode**
 
-- Port only the pinned legacy extraction and matching scope into `services/legacy_enquiry/`, preserving prompts, parsing, batching, ranking, and output ordering.  
+- Port only the pinned legacy extraction and matching scope into `services/legacy_enquiry/`, preserving field semantics, attachment prompts, batching, ranking, and output ordering while using the structured parameter response contract above.  
 - Implement claim, lease, heartbeat, readiness retry, normal retry, checkpoint, and expired-lease recovery using the existing auto-sync worker pattern.  
 - Implement analysis execution through persisted parameters, candidates, deterministic CSV/PDF rendering, private artifact storage, and analyzed-identity advancement.  
 - Enforce that analysis code has no Monday write dependency and that `shadow` mode can create only internal database/storage effects.

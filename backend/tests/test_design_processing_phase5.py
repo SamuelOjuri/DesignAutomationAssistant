@@ -33,11 +33,14 @@ from backend.app.services.design_processing_inputs import (
 from backend.app.services.design_processing_queue import queue_design_processing_snapshot
 from backend.app.services.design_processing_state import ProcessingIdentity
 from backend.app.services.legacy_enquiry.analysis import analyze_downloaded_email_assets
+from backend.app.services.legacy_enquiry.formatting import build_ai_data_csv_bytes
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.legacy_enquiry.matching import match_projects
 from backend.app.services.legacy_enquiry.parameter_extraction import (
     CANONICAL_PARAMETER_ORDER,
+    DesignParameterExtraction,
     PARAMETER_EXTRACTION_PROMPT,
+    extract_parameters,
 )
 from backend.app.services.match_report import MatchReport, render_match_report_pdf
 from backend.app.services.design_processing_worker import (
@@ -101,6 +104,47 @@ def test_legacy_gemini_client_uses_thinking_level_without_sampling_parameters():
     assert config.top_k is None
     assert config.candidate_count is None
     assert config.thinking_config.thinking_budget is None
+
+
+def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate():
+    payload = {
+        name: None for name in DesignParameterExtraction.model_fields
+    }
+    payload.update(
+        fall_of_tapered=(
+            "Not provided (The document states that a 1:80 fall for gutters will not "
+            "be achieved, but does not specify a target fall for the tapered insulation "
+            "scheme itself)."
+        ),
+        tapered_insulation=None,
+    )
+    captured = {}
+
+    def generate_content(model, contents, config):
+        captured.update(model=model, contents=contents, config=config)
+        return SimpleNamespace(text=json.dumps(payload), parsed=None)
+
+    client = LegacyGeminiClient(
+        "gemini-3.5-flash",
+        thinking_level="medium",
+        generate_content=generate_content,
+    )
+    extracted = client.extract_design_parameters("email and attachment content")
+    parameters = extract_parameters("", extracted_parameters=extracted)
+
+    assert parameters["Fall of Tapered"].endswith("scheme itself).")
+    assert parameters["Tapered Insulation"] == "Not provided"
+    csv_content = build_ai_data_csv_bytes(parameters).decode("utf-8")
+    assert "Tapered Insulation,Not provided" in csv_content
+    assert "Tapered Insulation,scheme itself)." not in csv_content
+    config = captured["config"]
+    assert config.response_mime_type == "application/json"
+    assert config.response_json_schema == DesignParameterExtraction.model_json_schema()
+    assert config.thinking_config.thinking_level == types.ThinkingLevel.MEDIUM
+    assert config.temperature is None
+    assert config.top_p is None
+    assert config.top_k is None
+    assert config.candidate_count is None
 
 
 def test_match_report_cleans_leading_company_separator():
@@ -231,6 +275,32 @@ class FakeLegacyClient:
     def process_image(self, image_content, filename, image_type="ATTACHMENT"):
         self.attachment_count += 1
         return self.responses["attachmentExtractionText"]
+
+    def extract_design_parameters(self, context):
+        del context
+        self.query_count += 1
+        values = {}
+        for line in self.responses["parameterExtraction"].splitlines():
+            label, separator, value = line.partition(":")
+            if separator:
+                values[label.strip()] = value.strip()
+        return DesignParameterExtraction(
+            email_subject=values.get("Email Subject"),
+            post_code=values.get("Post Code of Project Location"),
+            drawing_reference=values.get("Drawing Reference"),
+            drawing_title=values.get("Drawing Title"),
+            revision=values.get("Revision"),
+            date_received=values.get("Date Received"),
+            hour_received=values.get("Hour Received"),
+            company=values.get("Company"),
+            contact=values.get("Contact"),
+            surveyor=values.get("Surveyor"),
+            target_u_value=values.get("Target U-Value"),
+            target_min_u_value=values.get("Target Min U-Value"),
+            fall_of_tapered=values.get("Fall of Tapered"),
+            tapered_insulation=values.get("Tapered Insulation"),
+            decking=values.get("Decking"),
+        )
 
     def query_llm(self, context, query):
         self.query_count += 1
