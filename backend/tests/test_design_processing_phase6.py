@@ -409,6 +409,7 @@ def _publication_snapshot(identity):
         board_id="1882196103",
         item_id="123",
         group_id="group_mkpbd6vy",
+        item_state="active",
         name="Human entered name",
         email_assets=(asset,),
         input_revision=identity.input_revision,
@@ -622,6 +623,43 @@ def test_publication_gates_each_side_effect_and_advances_atomically(db_session):
         "hour_mkpbb3j1",
         "dropdown_mkpbafca",
     }
+
+
+@pytest.mark.parametrize(
+    ("inactive_gate", "expected_updates", "expected_upload_columns"),
+    [
+        (2, 0, []),
+        (3, 1, []),
+        (4, 1, ["file_mkza7y37"]),
+    ],
+)
+def test_publication_rejects_item_becoming_inactive_before_each_side_effect(
+    db_session,
+    inactive_gate,
+    expected_updates,
+    expected_upload_columns,
+):
+    identity, _, _, storage, _ = _seed_publication(db_session)
+
+    class InactivatingGateway(PublicationGateway):
+        def fetch_target(self, item_id):
+            if len([event for event in self.events if event[0] == "gate"]) + 1 >= inactive_gate:
+                self.snapshot = replace(self.snapshot, item_state="deleted")
+            return super().fetch_target(item_id)
+
+    gateway = InactivatingGateway(_publication_snapshot(identity))
+
+    result = _run_publication(db_session, gateway, storage)
+
+    item = db_session.query(DesignProcessingItem).one()
+    job = db_session.query(DesignProcessingJob).one()
+    uploads = [event[1] for event in gateway.events if event[0] == "upload"]
+    assert result.cancelled == 1
+    assert job.status == "cancelled"
+    assert item.state == "ineligible"
+    assert len([event for event in gateway.events if event[0] == "update"]) == expected_updates
+    assert uploads == expected_upload_columns
+    assert item.latest_published_input_revision is None
 
 
 def test_pipeline_omits_invalid_values_and_persists_warnings(db_session):

@@ -749,6 +749,7 @@ DESIGN_PROCESSING_INTAKE_QUERY = """
 query ($itemIds: [ID!]) {
     items(ids: $itemIds) {
         id
+        state
         name
         board { id }
         group { id }

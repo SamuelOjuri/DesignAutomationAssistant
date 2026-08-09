@@ -41,6 +41,7 @@ class DesignProcessingTargetSnapshot:
     board_id: str
     item_id: str
     group_id: str
+    item_state: str
     name: str
     email_assets: tuple[DesignEmailAsset, ...]
     input_revision: Optional[str]
@@ -172,6 +173,9 @@ def parse_design_processing_target(
     board_id = _nested_required_id(item, "board", context="item")
     group_id = _nested_required_id(item, "group", context="item")
     item_id = _required_decimal_id(item.get("id"), field_name="item.id")
+    item_state = item.get("state")
+    if not isinstance(item_state, str) or not item_state.strip():
+        raise DesignProcessingInputError("item.state must be a non-empty string")
     name_value = item.get("name")
     if name_value is not None and not isinstance(name_value, str):
         raise DesignProcessingInputError("item.name must be a string or null")
@@ -214,6 +218,7 @@ def parse_design_processing_target(
         board_id=board_id,
         item_id=item_id,
         group_id=group_id,
+        item_state=item_state,
         name=name_value or "",
         email_assets=ordered_assets,
         input_revision=input_revision,

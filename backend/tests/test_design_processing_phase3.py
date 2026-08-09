@@ -32,12 +32,14 @@ def _item(
     files: list[dict[str, object]] | None = None,
     assets: list[dict[str, object]] | None = None,
     name: str = "Human enquiry name",
+    state: object = "active",
     raw_email_value: object = None,
 ) -> dict[str, object]:
     if raw_email_value is None:
         raw_email_value = json.dumps({"files": files or []}) if files else None
     return {
         "id": "2657106977",
+        "state": state,
         "name": name,
         "board": {"id": "1882196103"},
         "group": {"id": "group_mkpbd6vy"},
@@ -83,6 +85,7 @@ def test_revision_uses_sorted_supported_metadata_records_only():
 
     target = parse_design_processing_target(item)
 
+    assert target.item_state == "active"
     assert [asset.asset_id for asset in target.email_assets] == ["3", "12"]
     assert [asset.created_at for asset in target.email_assets] == [
         "2026-07-29T09:45:00Z",
@@ -109,6 +112,12 @@ def test_revision_uses_sorted_supported_metadata_records_only():
     ).encode("utf-8")
     assert canonical_revision_bytes(target.email_assets) == canonical
     assert target.input_revision == hashlib.sha256(canonical).hexdigest()
+
+
+@pytest.mark.parametrize("item_state", [None, "", "   ", 123])
+def test_target_parser_requires_nonempty_monday_item_state(item_state):
+    with pytest.raises(DesignProcessingInputError, match="item.state"):
+        parse_design_processing_target(_item(state=item_state))
 
 
 def test_revision_serializes_preserved_filenames_as_utf8():
@@ -227,6 +236,7 @@ def test_intake_query_fetches_only_the_email_column_and_required_asset_metadata(
 
     assert actual is expected
     assert calls[0][1] == {"itemIds": ["2657106977"]}
+    assert "state" in calls[0][0]
     assert 'column_values(ids: ["file_mkpbm883"])' in calls[0][0]
     assert "updated_at" not in calls[0][0]
     assert "updates" not in calls[0][0]
@@ -516,8 +526,15 @@ def _running_job(identity: ProcessingIdentity) -> DesignProcessingJob:
     )
 
 
-def _target(*, name="Human name", files=None, assets=None, group_id="group_mkpbd6vy"):
-    raw = _item(name=name, files=files, assets=assets)
+def _target(
+    *,
+    name="Human name",
+    files=None,
+    assets=None,
+    group_id="group_mkpbd6vy",
+    item_state="active",
+):
+    raw = _item(name=name, files=files, assets=assets, state=item_state)
     raw["group"] = {"id": group_id}
     return parse_design_processing_target(raw)
 
@@ -646,6 +663,26 @@ def test_refresh_leaving_landing_zone_clears_desired_and_marks_ineligible():
     refreshed = refresh_current_target(
         item,
         gateway=FakeReadGateway(_target(group_id="active_group")),
+        pipeline_version="pipeline-v1",
+        expected_board_id="1882196103",
+        expected_group_id="group_mkpbd6vy",
+        now=NOW,
+    )
+
+    assert refreshed.readiness == "ineligible"
+    assert item.latest_desired_input_revision is None
+    assert item.latest_desired_pipeline_version is None
+    assert item.state == "ineligible"
+
+
+@pytest.mark.parametrize("item_state", ["archived", "deleted", "Active"])
+def test_refresh_nonactive_item_clears_desired_and_marks_ineligible(item_state):
+    existing = ProcessingIdentity("revision-a", "pipeline-v1")
+    item = _processing_item(desired=existing, state="scheduled")
+
+    refreshed = refresh_current_target(
+        item,
+        gateway=FakeReadGateway(_target(item_state=item_state)),
         pipeline_version="pipeline-v1",
         expected_board_id="1882196103",
         expected_group_id="group_mkpbd6vy",

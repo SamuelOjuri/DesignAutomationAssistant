@@ -371,6 +371,8 @@ def _target_readiness(
     expected_board_id: str,
     expected_group_id: str,
 ) -> TargetReadiness:
+    if snapshot.item_state != "active":
+        return "ineligible"
     if (
         snapshot.board_id != str(expected_board_id)
         or snapshot.group_id != str(expected_group_id)

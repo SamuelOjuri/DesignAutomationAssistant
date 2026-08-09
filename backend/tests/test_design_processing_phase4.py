@@ -98,6 +98,7 @@ def _snapshot(
         board_id=BOARD_ID,
         item_id=item_id,
         group_id=group_id,
+        item_state="active",
         name=name,
         email_assets=() if input_revision is None else (object(),),
         input_revision=input_revision,
@@ -121,6 +122,7 @@ def _monday_item(
     }
     return {
         "id": item_id,
+        "state": "active",
         "name": name,
         "account_id": "acct",
         "board": {"id": BOARD_ID, "name": "Design queue"},

@@ -577,7 +577,7 @@ def _cancel_or_replace_mismatched_job(
         cancel_job(
             item,
             job,
-            reason="item left the design-processing Landing Zone",
+            reason="current Monday item is no longer eligible for design processing",
             now=now,
             item_state="ineligible",
         )

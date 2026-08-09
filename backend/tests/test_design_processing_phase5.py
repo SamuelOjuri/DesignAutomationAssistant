@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -113,6 +114,7 @@ def _snapshot(golden_input, *, name: str = "Human enquiry name", revision=None):
         board_id=BOARD_ID,
         item_id=ITEM_ID,
         group_id=GROUP_ID,
+        item_state="active",
         name=name,
         email_assets=(asset,),
         input_revision=revision or compute_design_input_revision((asset,)),
@@ -367,6 +369,45 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
     assert downloader.call_count == 1
     assert client.query_count == 2
     assert gateway.mutation_calls == []
+
+
+def test_analysis_rejects_deleted_item_before_download_or_model_call(
+    db_session,
+    golden,
+):
+    golden_input, _ = golden
+    active_snapshot = _snapshot(golden_input)
+    _queue(db_session, active_snapshot)
+    deleted_snapshot = replace(active_snapshot, item_state="deleted")
+    gateway = FakeReadGateway(deleted_snapshot, golden_input)
+    client = FakeLegacyClient(golden_input)
+    source_path = WORKSPACE_ROOT / golden_input["sourceEmail"]["path"]
+    downloader = FixtureDownloader(source_path)
+    storage = MemoryArtifactStorage()
+
+    result = run_worker_once(
+        db_session,
+        worker_id="inactive-analysis-worker",
+        access_token="test-token",
+        gateway=gateway,
+        analysis_client=client,
+        artifact_storage=storage,
+        downloader=downloader,
+        mode="shadow",
+        claim_limit=1,
+        recover_leases=False,
+        heartbeat_interval_seconds=0,
+    )
+
+    item = db_session.query(DesignProcessingItem).one()
+    job = db_session.query(DesignProcessingJob).one()
+    assert result.cancelled == 1
+    assert job.status == "cancelled"
+    assert item.state == "ineligible"
+    assert downloader.call_count == 0
+    assert client.query_count == 0
+    assert client.attachment_count == 0
+    assert storage.write_count == 0
 
 
 def test_retry_resumes_persisted_outputs_without_repeating_gemini(db_session, golden):

@@ -72,6 +72,7 @@ def _snapshot(item_id: str = "123") -> DesignProcessingTargetSnapshot:
         board_id=BOARD_ID,
         item_id=item_id,
         group_id=GROUP_ID,
+        item_state="active",
         name="Human entered name",
         email_assets=(
             DesignEmailAsset(
