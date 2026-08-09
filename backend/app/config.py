@@ -77,7 +77,10 @@ class Settings(BaseSettings):
     design_processing_board_id: str = "1882196103"
     design_processing_landing_group_id: str = "group_mkpbd6vy"
     design_processing_project_board_id: str = "1825117125"
-    design_processing_extraction_model: str = "gemini-2.5-flash"
+    design_processing_extraction_model: str = "gemini-3.5-flash"
+    design_processing_thinking_level: Literal[
+        "minimal", "low", "medium", "high"
+    ] = "medium"
     design_processing_artifact_bucket: str = "design-processing-artifacts"
     design_processing_allowlist_item_ids: Annotated[list[str], NoDecode] = Field(
         default_factory=list
@@ -109,6 +112,11 @@ class Settings(BaseSettings):
     @field_validator("design_processing_mode", mode="before")
     @classmethod
     def _normalize_design_processing_mode(cls, v: str) -> str:
+        return str(v).strip().lower()
+
+    @field_validator("design_processing_thinking_level", mode="before")
+    @classmethod
+    def _normalize_design_processing_thinking_level(cls, v: object) -> str:
         return str(v).strip().lower()
 
     @field_validator(
@@ -243,6 +251,7 @@ class Settings(BaseSettings):
         return (
             f"legacy-files-{LEGACY_MANIFEST_DIGEST}:"
             f"model-{self.design_processing_extraction_model}:"
+            f"thinking-{self.design_processing_thinking_level}:"
             f"{DESIGN_PROCESSING_PIPELINE_REVISION}"
         )
 

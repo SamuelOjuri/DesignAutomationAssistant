@@ -30,6 +30,20 @@ class FakeEmbeddingClient:
         self.models = FakeEmbeddingModels()
 
 
+class FakeGenerationModels:
+    def __init__(self):
+        self.kwargs = None
+
+    def generate_content(self, **kwargs):
+        self.kwargs = kwargs
+        return {"ok": True}
+
+
+class FakeGenerationClient:
+    def __init__(self):
+        self.models = FakeGenerationModels()
+
+
 def test_create_gemini_client_configures_transient_retries(monkeypatch):
     captured = {}
 
@@ -47,6 +61,28 @@ def test_create_gemini_client_configures_transient_retries(monkeypatch):
     assert retry_options.initial_delay == 2
     assert 429 in retry_options.http_status_codes
     assert 503 in retry_options.http_status_codes
+
+
+def test_gemini_generate_content_forwards_config_and_releases_slot(monkeypatch):
+    limiter = FakeRateLimiter()
+    client = FakeGenerationClient()
+    config = {"thinking_config": {"thinking_level": "medium"}}
+    monkeypatch.setattr(llm_interface, "create_gemini_client", lambda **kwargs: client)
+    monkeypatch.setattr(llm_interface, "get_rate_limiter", lambda: limiter)
+
+    response = llm_interface.gemini_api_with_retry(
+        model="gemini-3.5-flash",
+        contents="Extract parameters",
+        config=config,
+    )
+
+    assert response == {"ok": True}
+    assert client.models.kwargs == {
+        "model": "gemini-3.5-flash",
+        "contents": "Extract parameters",
+        "config": config,
+    }
+    assert limiter.releases == 1
 
 
 def test_gemini_embed_content_uses_configured_client_once(monkeypatch):

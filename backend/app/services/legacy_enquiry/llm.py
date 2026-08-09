@@ -2,31 +2,47 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Literal, Sequence
 
 from google.genai import types
 
 from ..llm_interface import gemini_api_with_retry
 
 
-GenerateContent = Callable[[str, Any], Any]
+ThinkingLevel = Literal["minimal", "low", "medium", "high"]
+GenerateContent = Callable[[str, Any, types.GenerateContentConfig], Any]
 
 
-def _default_generate_content(model: str, contents: Any) -> Any:
-    return gemini_api_with_retry(model=model, contents=contents)
+def _default_generate_content(
+    model: str,
+    contents: Any,
+    config: types.GenerateContentConfig,
+) -> Any:
+    return gemini_api_with_retry(model=model, contents=contents, config=config)
 
 
 @dataclass(frozen=True, slots=True)
 class LegacyGeminiClient:
     model: str
+    thinking_level: ThinkingLevel = "medium"
     max_attachment_workers: int = 4
     generate_content: GenerateContent = _default_generate_content
 
     def __post_init__(self) -> None:
         if not self.model.strip():
             raise ValueError("model must not be empty")
+        if self.thinking_level not in {"minimal", "low", "medium", "high"}:
+            raise ValueError("thinking_level must be minimal, low, medium, or high")
         if self.max_attachment_workers < 1:
             raise ValueError("max_attachment_workers must be positive")
+
+    @property
+    def generation_config(self) -> types.GenerateContentConfig:
+        return types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(
+                thinking_level=types.ThinkingLevel(self.thinking_level),
+            ),
+        )
 
     def query_llm(self, context: str, query: str) -> str:
         prompt = (
@@ -42,7 +58,7 @@ class LegacyGeminiClient:
         Note that information may be found in any of the content sources, including text from image descriptions.
         """
         )
-        response = self.generate_content(self.model, prompt)
+        response = self.generate_content(self.model, prompt, self.generation_config)
         return response.text
 
     @staticmethod
@@ -61,6 +77,7 @@ class LegacyGeminiClient:
                     "including text from tables, diagrams, and charts."
                 ),
             ],
+            self.generation_config,
         )
         return response.text
 
@@ -82,7 +99,11 @@ class LegacyGeminiClient:
                     "Including text from tables, diagrams, and charts. "
                     "For each document, start with '=== PDF: [filename] ===' header and then provide the extracted content."
                 )
-                return self.generate_content(self.model, parts).text
+                return self.generate_content(
+                    self.model,
+                    parts,
+                    self.generation_config,
+                ).text
             except Exception:
                 pass
         return self._process_pdfs_in_parallel(pdf_files)
@@ -146,6 +167,7 @@ class LegacyGeminiClient:
                         "specifications you can see."
                     ),
                 ],
+                self.generation_config,
             )
             return response.text
         except Exception as exc:

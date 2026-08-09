@@ -926,7 +926,8 @@ def run_worker_once(
         project_board_id=str(settings.design_processing_project_board_id),
     )
     client = analysis_client or LegacyGeminiClient(
-        settings.design_processing_extraction_model
+        settings.design_processing_extraction_model,
+        thinking_level=settings.design_processing_thinking_level,
     )
     storage = artifact_storage or SupabaseDesignArtifactStorage()
     jobs = claim_due_design_processing_jobs(

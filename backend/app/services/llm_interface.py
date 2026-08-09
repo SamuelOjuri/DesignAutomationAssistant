@@ -26,7 +26,13 @@ def create_gemini_client(*, max_retries: int = 5, initial_backoff: float = 1.0):
     )
 
 
-def gemini_api_with_retry(model, contents, max_retries=5, initial_backoff=1):
+def gemini_api_with_retry(
+    model,
+    contents,
+    max_retries=5,
+    initial_backoff=1,
+    config=None,
+):
     client = create_gemini_client(
         max_retries=max_retries,
         initial_backoff=initial_backoff,
@@ -36,7 +42,11 @@ def gemini_api_with_retry(model, contents, max_retries=5, initial_backoff=1):
         raise RuntimeError("Could not acquire API rate limit slot within timeout")
 
     try:
-        return client.models.generate_content(model=model, contents=contents)
+        return client.models.generate_content(
+            model=model,
+            contents=contents,
+            config=config,
+        )
     finally:
         rate_limiter.release()
 

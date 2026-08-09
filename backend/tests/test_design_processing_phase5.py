@@ -9,6 +9,7 @@ import tempfile
 from types import SimpleNamespace
 import uuid
 
+from google.genai import types
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -32,6 +33,7 @@ from backend.app.services.design_processing_inputs import (
 from backend.app.services.design_processing_queue import queue_design_processing_snapshot
 from backend.app.services.design_processing_state import ProcessingIdentity
 from backend.app.services.legacy_enquiry.analysis import analyze_downloaded_email_assets
+from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.legacy_enquiry.matching import match_projects
 from backend.app.services.legacy_enquiry.parameter_extraction import (
     CANONICAL_PARAMETER_ORDER,
@@ -75,6 +77,30 @@ def golden():
         json.loads((FIXTURE_ROOT / "input.json").read_text(encoding="utf-8")),
         json.loads((FIXTURE_ROOT / "expected.json").read_text(encoding="utf-8")),
     )
+
+
+def test_legacy_gemini_client_uses_thinking_level_without_sampling_parameters():
+    captured = {}
+
+    def generate_content(model, contents, config):
+        captured.update(model=model, contents=contents, config=config)
+        return SimpleNamespace(text="Project Name: Test")
+
+    client = LegacyGeminiClient(
+        "gemini-3.5-flash",
+        thinking_level="medium",
+        generate_content=generate_content,
+    )
+
+    assert client.query_llm("email context", "extract project") == "Project Name: Test"
+    config = captured["config"]
+    assert captured["model"] == "gemini-3.5-flash"
+    assert config.thinking_config.thinking_level == types.ThinkingLevel.MEDIUM
+    assert config.temperature is None
+    assert config.top_p is None
+    assert config.top_k is None
+    assert config.candidate_count is None
+    assert config.thinking_config.thinking_budget is None
 
 
 def test_match_report_cleans_leading_company_separator():

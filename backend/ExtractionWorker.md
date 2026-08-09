@@ -194,7 +194,7 @@ Process multiple supported Email assets in that same deterministic order. After 
 
 Never include item `updated_at`, AI Data, Matched Projects, unsupported Email-column files, or unrelated item/update attachments in this revision. Otherwise, the worker’s own Monday writes would continually trigger new processing.
 
-Set the initial `pipeline_version` from the full legacy manifest digest and extraction model identifier: `legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-2.5-flash`. Persist the full value; shortened forms may be used only in logs and artifact filenames. Reprocessing is required when either the Email revision or `pipeline_version` changes.
+Set the `pipeline_version` from the full legacy manifest digest, extraction model identifier, thinking level, and output revision: `legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.5-flash:thinking-medium:output-v3`. Persist the full value; shortened forms may be used only in logs and artifact filenames. Reprocessing is required when the Email revision changes or any component of `pipeline_version` changes. Gemini 3.x requests must use `thinking_level` rather than `thinking_budget` and must omit `temperature`, `top_p`, `top_k`, and `candidate_count`.
 
 Throughout this plan, “identity” means the full input revision and pipeline version pair. Never compare or advance an analyzed or published revision without comparing or advancing its pipeline version in the same transaction.
 
@@ -270,7 +270,7 @@ On a new execution identity, upload or adopt the replacement first. Only after b
 - monday\_client.py: queries, mutations, and multipart uploads.  
 - monday\_webhooks.py: dual-queue dispatch only.
 
-Add validated settings for `design_processing_mode`, `design_processing_worker_enabled`, `design_processing_reconciliation_enabled`, `design_processing_board_id` (`1882196103`), `design_processing_landing_group_id` (`group_mkpbd6vy`), `design_processing_project_board_id` (`1825117125`), `design_processing_extraction_model` (`gemini-2.5-flash`), `design_processing_artifact_bucket`, `design_processing_allowlist_item_ids`, `design_processing_activation_timestamp`, and readiness backoff/alert intervals. Pin the extraction model separately rather than inheriting the current general `gemini_model`. Validate mode as `off`, `shadow`, `allowlist`, or `enabled`, normalize allowlist IDs to strings, and fail configuration when `allowlist` mode has an empty allowlist.
+Add validated settings for `design_processing_mode`, `design_processing_worker_enabled`, `design_processing_reconciliation_enabled`, `design_processing_board_id` (`1882196103`), `design_processing_landing_group_id` (`group_mkpbd6vy`), `design_processing_project_board_id` (`1825117125`), `design_processing_extraction_model` (`gemini-3.5-flash`), `design_processing_thinking_level` (`medium`), `design_processing_artifact_bucket`, `design_processing_allowlist_item_ids`, `design_processing_activation_timestamp`, and readiness backoff/alert intervals. Pin the extraction model and thinking level separately rather than inheriting the current general `gemini_model`. Validate thinking level as `minimal`, `low`, `medium`, or `high`; validate mode as `off`, `shadow`, `allowlist`, or `enabled`; normalize allowlist IDs to strings; and fail configuration when `allowlist` mode has an empty allowlist.
 
 **Implementation Readiness And Phases**
 
