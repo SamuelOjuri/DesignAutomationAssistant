@@ -142,7 +142,7 @@ def render_match_report_pdf(report: MatchReport) -> bytes:
     write(f"Source Monday item: {report.source_item_id}")
     write(f"Extracted Project Title: {report.extracted_project_title}")
     write(
-        "Extracted Client Company Name (context only for the reviewer's Accounts decision; "
+        "Extracted Company Name (context only for the reviewer's Accounts decision; "
         f"not a resolved Monday account): {report.extracted_company}",
         gap_after=8,
     )
@@ -168,7 +168,7 @@ def render_match_report_pdf(report: MatchReport) -> bytes:
 
     write("Reviewer action", font_name="Helvetica-Bold", gap_after=2)
     write(
-        "Choose Accounts using the extracted Client Company Name as context, decide New Enq / "
+        "Choose Accounts using the extracted Company Name as context, decide New Enq / "
         "Amend, and, for an amendment, select the appropriate candidate TP Ref "
         "before moving the item to an active group."
     )

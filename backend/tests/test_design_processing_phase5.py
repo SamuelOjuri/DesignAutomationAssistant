@@ -453,7 +453,7 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
     )
     assert expected_csv_content != legacy_csv_content
     assert csv_content == expected_csv_content
-    assert b"Extracted Client Company Name \\(context only" in pdf_content
+    assert b"Extracted Company Name \\(context only" in pdf_content
     assert b"Example Roofing Limited" in pdf_content
     assert b"Candidate TP Ref: 16771" in pdf_content
     assert b"Candidate TP Ref: 20442" in pdf_content
