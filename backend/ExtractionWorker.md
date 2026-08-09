@@ -106,7 +106,7 @@ Legacy `exists` and `best_match` values may be retained for parity diagnostics, 
 
 Use a server-side PDF generator such as `reportlab`, which is not currently installed. The report uploaded to `file_mm59rntf` should contain:
 
-1. Report title and source Monday item.  
+1. Report title and Source Monday Item.  
 2. Extracted Project Title.  
 3. Extracted Company (Client Company Name) from the email parameters, clearly labelled as context for the reviewer’s Accounts decision rather than a resolved Monday account.  
 4. Total potential-match count.  
