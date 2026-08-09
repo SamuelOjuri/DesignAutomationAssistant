@@ -140,7 +140,7 @@ def render_match_report_pdf(report: MatchReport) -> bytes:
         gap_after=8,
     )
     write(f"Source Monday item: {report.source_item_id}")
-    write(f"Extracted project title: {report.extracted_project_title}")
+    write(f"Extracted Project Title: {report.extracted_project_title}")
     write(
         "Extracted Client Company Name (context only for the reviewer's Accounts decision; "
         f"not a resolved Monday account): {report.extracted_company}",
