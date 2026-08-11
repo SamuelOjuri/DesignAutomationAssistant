@@ -140,6 +140,23 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
     config = captured["config"]
     assert config.response_mime_type == "application/json"
     assert config.response_json_schema == DesignParameterExtraction.model_json_schema()
+    schema_properties = config.response_json_schema["properties"]
+    assert list(schema_properties).index("drawing_title") < list(
+        schema_properties
+    ).index("drawing_reference")
+    assert schema_properties["drawing_reference"]["description"] == (
+        "The Drawing Reference Number issued by TaperedPlus "
+        "[e.g. TP*****_**.** - *]. If several references exist, use the latest "
+        "one associated with the request to TaperedPlus."
+    )
+    assert schema_properties["revision"]["description"] == (
+        "The suffix of the selected TaperedPlus Drawing Reference. This is the "
+        "suffix after the underscore in the drawing reference "
+        "[e.g. **.** - * from TP*****_**.** - *]."
+    )
+    assert CANONICAL_PARAMETER_ORDER.index("Drawing Reference") < (
+        CANONICAL_PARAMETER_ORDER.index("Drawing Title")
+    )
     assert config.thinking_config.thinking_level == types.ThinkingLevel.MEDIUM
     assert config.temperature is None
     assert config.top_p is None

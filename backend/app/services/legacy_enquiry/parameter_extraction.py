@@ -46,17 +46,22 @@ class DesignParameterExtraction(BaseModel):
             "company, sender, and recipient addresses."
         )
     )
-    drawing_reference: str | None = Field(
-        description=(
-            "The TaperedPlus drawing reference. If several references exist, use the "
-            "latest one associated with the request to TaperedPlus."
-        )
-    )
     drawing_title: str | None = Field(
         description="The drawing project name, usually the project location."
     )
+    drawing_reference: str | None = Field(
+        description=(
+            "The Drawing Reference Number issued by TaperedPlus "
+            "[e.g. TP*****_**.** - *]. If several references exist, use the latest "
+            "one associated with the request to TaperedPlus."
+        )
+    )
     revision: str | None = Field(
-        description="The revision associated with the selected drawing reference."
+        description=(
+            "The suffix of the selected TaperedPlus Drawing Reference. This is the "
+            "suffix after the underscore in the drawing reference "
+            "[e.g. **.** - * from TP*****_**.** - *]."
+        )
     )
     date_received: str | None = Field(
         description=(
@@ -106,8 +111,8 @@ class DesignParameterExtraction(BaseModel):
         return {
             "Email Subject": self.email_subject,
             "Post Code": self.post_code,
-            "Drawing Reference": self.drawing_reference,
             "Drawing Title": self.drawing_title,
+            "Drawing Reference": self.drawing_reference,
             "Revision": self.revision,
             "Date Received": self.date_received,
             "Hour Received": self.hour_received,

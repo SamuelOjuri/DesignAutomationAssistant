@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from .services.legacy_enquiry import LEGACY_MANIFEST_DIGEST
 
-DESIGN_PROCESSING_PIPELINE_REVISION = "output-v4"
+DESIGN_PROCESSING_PIPELINE_REVISION = "output-v5"
 
 class Settings(BaseSettings):
     # monday
