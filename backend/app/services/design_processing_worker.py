@@ -16,10 +16,12 @@ from ..config import settings
 from ..db import SessionLocal
 from ..models import DesignProcessingItem, DesignProcessingJob
 from .auto_sync import get_monday_ingestion_access_token, utc_now
+from .db_retry import is_postgres_deadlock, run_transaction_with_retry
 from .design_processing_artifacts import (
     DesignArtifactStorage,
     SupabaseDesignArtifactStorage,
 )
+from .design_processing_locks import lock_design_processing_item_and_job
 from .design_processing_observability import log_design_processing_event
 from .design_processing_pipeline import (
     AssetDownloader,
@@ -100,10 +102,6 @@ def _with_job_locks(db: Session, query):
     return query.with_for_update(skip_locked=True) if _supports_skip_locked(db) else query
 
 
-def _with_row_lock(db: Session, query):
-    return query.with_for_update() if _supports_skip_locked(db) else query
-
-
 def _analysis_or_readiness_filter():
     return or_(
         DesignProcessingJob.execution_kind == "analysis",
@@ -124,16 +122,11 @@ def _analysis_or_readiness_filter():
 def _load_item_for_job(
     db: Session,
     job: DesignProcessingJob,
-    *,
-    for_update: bool = False,
 ) -> DesignProcessingItem:
-    query = db.query(DesignProcessingItem).filter(
+    return db.query(DesignProcessingItem).filter(
         DesignProcessingItem.board_id == job.board_id,
         DesignProcessingItem.item_id == job.item_id,
-    )
-    if for_update:
-        query = _with_row_lock(db, query)
-    return query.one()
+    ).one()
 
 
 def claim_due_analysis_jobs(
@@ -324,6 +317,101 @@ def _elapsed_seconds(now: datetime, started_at: datetime) -> float:
     return (normalized_now - normalized_start).total_seconds()
 
 
+def _lease_is_expired(
+    job: DesignProcessingJob,
+    *,
+    now: datetime,
+    lease_timeout_seconds: int,
+) -> bool:
+    if job.status != "running" or job.locked_at is None:
+        return job.status == "running" and job.locked_at is None
+    lease_activity_at = job.heartbeat_at or job.locked_at
+    return _elapsed_seconds(now, lease_activity_at) >= lease_timeout_seconds
+
+
+def _is_analysis_or_readiness_job(
+    item: DesignProcessingItem,
+    job: DesignProcessingJob,
+) -> bool:
+    return job.execution_kind == "analysis" or (
+        job.execution_kind is None
+        and (
+            item.latest_desired_input_revision is None
+            or item.latest_analyzed_input_revision is None
+            or item.latest_analyzed_input_revision
+            != item.latest_desired_input_revision
+            or item.latest_analyzed_pipeline_version
+            != item.latest_desired_pipeline_version
+        )
+    )
+
+
+def _recover_locked_expired_job(
+    db: Session,
+    item: DesignProcessingItem,
+    job: DesignProcessingJob,
+    *,
+    mode: DesignProcessingMode,
+    allowlist_item_ids: Iterable[str],
+    now: datetime,
+) -> None:
+    identity = execution_identity(job)
+    execution_kind = job.execution_kind or "analysis"
+    execution_allowed = execution_allowed_for_item(
+        mode=mode,
+        execution_kind=execution_kind,
+        item_id=item.item_id,
+        allowlist_item_ids=allowlist_item_ids,
+    )
+    if not execution_allowed:
+        cancel_job(
+            item,
+            job,
+            reason="expired lease is disallowed by current operational policy",
+            now=now,
+            item_state=(
+                "analyzed"
+                if execution_kind == "publication"
+                else item.state
+                if item.state in {"waiting_for_name", "waiting_for_email"}
+                else "scheduled"
+            ),
+        )
+    elif identity is not None and identity != desired_identity(item):
+        readiness_stage = (
+            item.state
+            if item.state in {"waiting_for_name", "waiting_for_email"}
+            else None
+        )
+        cancel_and_schedule_successor(
+            db,
+            item,
+            job,
+            trigger_type="expired_lease_superseded",
+            readiness_stage=readiness_stage,
+            now=now,
+        )
+    elif identity is None:
+        job.status = "scheduled"
+        job.scheduled_for = now
+        job.next_retry_at = None
+        job.locked_at = None
+        job.locked_by = None
+        job.heartbeat_at = None
+        job.last_error = "Worker lease expired during readiness validation"
+        job.updated_at = now
+    elif job.attempt_count >= job.max_attempts:
+        fail_job(item, job, error="Worker lease expired", now=now)
+    else:
+        schedule_execution_retry(
+            item,
+            job,
+            scheduled_for=now,
+            error="Worker lease expired",
+            now=now,
+        )
+
+
 def recover_expired_analysis_leases(
     db: Session,
     *,
@@ -361,67 +449,30 @@ def recover_expired_analysis_leases(
         .order_by(DesignProcessingJob.locked_at.asc())
         .limit(limit)
     )
-    jobs = _with_job_locks(db, query).all()
-    for job in jobs:
-        item = _load_item_for_job(db, job, for_update=True)
-        identity = execution_identity(job)
-        execution_kind = job.execution_kind or "analysis"
-        execution_allowed = execution_allowed_for_item(
+    job_ids = [job_id for (job_id,) in query.with_entities(DesignProcessingJob.id)]
+    recovered = 0
+    for job_id in job_ids:
+        item, job = lock_design_processing_item_and_job(db, job_id)
+        if item is None or job is None:
+            continue
+        if not _lease_is_expired(
+            job,
+            now=recovered_at,
+            lease_timeout_seconds=lease_timeout_seconds,
+        ) or not _is_analysis_or_readiness_job(item, job):
+            continue
+        _recover_locked_expired_job(
+            db,
+            item,
+            job,
             mode=mode,
-            execution_kind=execution_kind,
-            item_id=item.item_id,
             allowlist_item_ids=allowlist_item_ids,
+            now=recovered_at,
         )
-        if not execution_allowed:
-            cancel_job(
-                item,
-                job,
-                reason="expired lease is disallowed by current operational policy",
-                now=recovered_at,
-                item_state=(
-                    "analyzed"
-                    if execution_kind == "publication"
-                    else item.state
-                    if item.state in {"waiting_for_name", "waiting_for_email"}
-                    else "scheduled"
-                ),
-            )
-        elif identity is not None and identity != desired_identity(item):
-            readiness_stage = (
-                item.state
-                if item.state in {"waiting_for_name", "waiting_for_email"}
-                else None
-            )
-            cancel_and_schedule_successor(
-                db,
-                item,
-                job,
-                trigger_type="expired_lease_superseded",
-                readiness_stage=readiness_stage,
-                now=recovered_at,
-            )
-        elif identity is None:
-            job.status = "scheduled"
-            job.scheduled_for = recovered_at
-            job.next_retry_at = None
-            job.locked_at = None
-            job.locked_by = None
-            job.heartbeat_at = None
-            job.last_error = "Worker lease expired during readiness validation"
-            job.updated_at = recovered_at
-        elif job.attempt_count >= job.max_attempts:
-            fail_job(item, job, error="Worker lease expired", now=recovered_at)
-        else:
-            schedule_execution_retry(
-                item,
-                job,
-                scheduled_for=recovered_at,
-                error="Worker lease expired",
-                now=recovered_at,
-            )
-    if jobs:
+        recovered += 1
+    if job_ids:
         db.commit()
-    return len(jobs)
+    return recovered
 
 
 def recover_expired_design_processing_leases(
@@ -453,67 +504,28 @@ def recover_expired_design_processing_leases(
         .order_by(DesignProcessingJob.locked_at.asc())
         .limit(limit)
     )
-    jobs = _with_job_locks(db, query).all()
-    for job in jobs:
-        item = _load_item_for_job(db, job, for_update=True)
-        identity = execution_identity(job)
-        execution_kind = job.execution_kind or "analysis"
-        execution_allowed = execution_allowed_for_item(
+    job_ids = [job_id for (job_id,) in query.with_entities(DesignProcessingJob.id)]
+    recovered = 0
+    for job_id in job_ids:
+        item, job = lock_design_processing_item_and_job(db, job_id)
+        if item is None or job is None or not _lease_is_expired(
+            job,
+            now=recovered_at,
+            lease_timeout_seconds=lease_timeout_seconds,
+        ):
+            continue
+        _recover_locked_expired_job(
+            db,
+            item,
+            job,
             mode=mode,
-            execution_kind=execution_kind,
-            item_id=item.item_id,
             allowlist_item_ids=allowlist_item_ids,
+            now=recovered_at,
         )
-        if not execution_allowed:
-            cancel_job(
-                item,
-                job,
-                reason="expired lease is disallowed by current operational policy",
-                now=recovered_at,
-                item_state=(
-                    "analyzed"
-                    if execution_kind == "publication"
-                    else item.state
-                    if item.state in {"waiting_for_name", "waiting_for_email"}
-                    else "scheduled"
-                ),
-            )
-        elif identity is not None and identity != desired_identity(item):
-            readiness_stage = (
-                item.state
-                if item.state in {"waiting_for_name", "waiting_for_email"}
-                else None
-            )
-            cancel_and_schedule_successor(
-                db,
-                item,
-                job,
-                trigger_type="expired_lease_superseded",
-                readiness_stage=readiness_stage,
-                now=recovered_at,
-            )
-        elif identity is None:
-            job.status = "scheduled"
-            job.scheduled_for = recovered_at
-            job.next_retry_at = None
-            job.locked_at = None
-            job.locked_by = None
-            job.heartbeat_at = None
-            job.last_error = "Worker lease expired during readiness validation"
-            job.updated_at = recovered_at
-        elif job.attempt_count >= job.max_attempts:
-            fail_job(item, job, error="Worker lease expired", now=recovered_at)
-        else:
-            schedule_execution_retry(
-                item,
-                job,
-                scheduled_for=recovered_at,
-                error="Worker lease expired",
-                now=recovered_at,
-            )
-    if jobs:
+        recovered += 1
+    if job_ids:
         db.commit()
-    return len(jobs)
+    return recovered
 
 
 def _cancel_or_replace_mismatched_job(
@@ -526,17 +538,16 @@ def _cancel_or_replace_mismatched_job(
     execution_policy: Optional[ExecutionPolicy],
     now: datetime,
 ) -> str:
-    job = _with_row_lock(
-        db,
-        db.query(DesignProcessingJob).filter(DesignProcessingJob.id == job_id),
-    ).one_or_none()
+    item, job = lock_design_processing_item_and_job(db, job_id)
     if job is None:
+        db.rollback()
+        return "missing"
+    if item is None:
         db.rollback()
         return "missing"
     if job.status != "running" or job.locked_by != worker_id:
         db.rollback()
         return "not_claimed"
-    item = _load_item_for_job(db, job, for_update=True)
     refreshed = refresh_current_target(
         item,
         gateway=gateway,
@@ -587,7 +598,8 @@ def _cancel_or_replace_mismatched_job(
     readiness_stage = (
         refreshed.readiness if refreshed.readiness != "ready" else None
     )
-    if execution_identity(job) is None:
+    identity = execution_identity(job)
+    if identity is None:
         cancel_job(
             item,
             job,
@@ -595,6 +607,26 @@ def _cancel_or_replace_mismatched_job(
             now=now,
             item_state=readiness_stage or "scheduled",
         )
+    elif identity == desired_identity(item):
+        item.supersession_requested_at = None
+        if job.attempt_count >= job.max_attempts:
+            fail_job(
+                item,
+                job,
+                error="execution target changed during validation",
+                now=now,
+            )
+            db.commit()
+            return "failed"
+        schedule_execution_retry(
+            item,
+            job,
+            scheduled_for=now,
+            error="execution target changed during validation; refreshed target is current",
+            now=now,
+        )
+        db.commit()
+        return "retry_wait"
     else:
         cancel_and_schedule_successor(
             db,
@@ -616,17 +648,16 @@ def _record_execution_failure(
     error: str,
     now: datetime,
 ) -> str:
-    job = _with_row_lock(
-        db,
-        db.query(DesignProcessingJob).filter(DesignProcessingJob.id == job_id),
-    ).one_or_none()
+    item, job = lock_design_processing_item_and_job(db, job_id)
     if job is None:
+        db.rollback()
+        return "missing"
+    if item is None:
         db.rollback()
         return "missing"
     if job.status != "running" or job.locked_by != worker_id:
         db.rollback()
         return "not_claimed"
-    item = _load_item_for_job(db, job, for_update=True)
     if execution_identity(job) is None:
         job.attempt_count += 1
         job.last_error = error
@@ -661,6 +692,35 @@ def _record_execution_failure(
         outcome = "retry_wait"
     db.commit()
     return outcome
+
+
+def _record_execution_failure_safely(
+    db: Session,
+    job_id: object,
+    *,
+    worker_id: str,
+    error: str,
+) -> str:
+    try:
+        return run_transaction_with_retry(
+            db,
+            lambda: _record_execution_failure(
+                db,
+                job_id,
+                worker_id=worker_id,
+                error=error,
+                now=utc_now(),
+            ),
+            operation_name=f"record design-processing job {job_id} failure",
+            retry_if=is_postgres_deadlock,
+        )
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Unable to persist failure state for design-processing job %s",
+            job_id,
+        )
+        return "failed"
 
 
 def execute_claimed_analysis_job(
@@ -808,7 +868,7 @@ def execute_claimed_analysis_job(
             worker_id=worker_id,
             interval_seconds=heartbeat_interval_seconds,
         )
-        try:
+        def run_pipeline() -> str:
             if obligation == "publication":
                 return run_publication_pipeline(
                     db,
@@ -840,28 +900,53 @@ def execute_claimed_analysis_job(
                 execution_policy=execution_policy,
                 downloader=downloader,
             )
+
+        try:
+            return run_transaction_with_retry(
+                db,
+                run_pipeline,
+                operation_name=f"execute design-processing job {job_id}",
+                retry_if=is_postgres_deadlock,
+            )
         finally:
             _stop_heartbeat(stop_event, heartbeat_thread)
-    except DesignProcessingTargetMismatch:
+    except DesignProcessingTargetMismatch as mismatch:
         db.rollback()
-        return _cancel_or_replace_mismatched_job(
-            db,
-            job_id,
-            worker_id=worker_id,
-            gateway=gateway,
-            mode=mode,
-            execution_policy=execution_policy,
-            now=utc_now(),
-        )
+        try:
+            return run_transaction_with_retry(
+                db,
+                lambda: _cancel_or_replace_mismatched_job(
+                    db,
+                    job_id,
+                    worker_id=worker_id,
+                    gateway=gateway,
+                    mode=mode,
+                    execution_policy=execution_policy,
+                    now=utc_now(),
+                ),
+                operation_name=f"reconcile design-processing job {job_id}",
+                retry_if=is_postgres_deadlock,
+            )
+        except Exception as recovery_exc:
+            db.rollback()
+            logger.exception(
+                "Unable to reconcile mismatched design-processing job %s",
+                job_id,
+            )
+            return _record_execution_failure_safely(
+                db,
+                job_id,
+                worker_id=worker_id,
+                error=f"{mismatch}; mismatch recovery failed: {recovery_exc}"[:2000],
+            )
     except Exception as exc:
         db.rollback()
         logger.exception("Design-processing job %s failed", job_id)
-        return _record_execution_failure(
+        return _record_execution_failure_safely(
             db,
             job_id,
             worker_id=worker_id,
             error=str(exc)[:2000],
-            now=utc_now(),
         )
 
 
@@ -937,19 +1022,32 @@ def run_worker_once(
     )
     outcomes: dict[str, int] = {}
     for job in jobs:
-        outcome = execute_claimed_design_processing_job(
-            db,
-            job.id,
-            worker_id=resolved_worker_id,
-            access_token=token,
-            gateway=read_gateway,
-            analysis_client=client,
-            artifact_storage=storage,
-            mode=configured_mode,
-            execution_policy=runtime_policy,
-            downloader=downloader,
-            heartbeat_interval_seconds=heartbeat_interval_seconds,
-        )
+        try:
+            outcome = execute_claimed_design_processing_job(
+                db,
+                job.id,
+                worker_id=resolved_worker_id,
+                access_token=token,
+                gateway=read_gateway,
+                analysis_client=client,
+                artifact_storage=storage,
+                mode=configured_mode,
+                execution_policy=runtime_policy,
+                downloader=downloader,
+                heartbeat_interval_seconds=heartbeat_interval_seconds,
+            )
+        except Exception as exc:
+            db.rollback()
+            logger.exception(
+                "Unhandled error while executing design-processing job %s",
+                job.id,
+            )
+            outcome = _record_execution_failure_safely(
+                db,
+                job.id,
+                worker_id=resolved_worker_id,
+                error=str(exc)[:2000],
+            )
         outcomes[outcome] = outcomes.get(outcome, 0) + 1
         log_design_processing_event(
             logger,

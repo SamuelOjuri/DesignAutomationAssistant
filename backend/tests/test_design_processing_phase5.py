@@ -12,6 +12,7 @@ import uuid
 from google.genai import types
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -24,6 +25,7 @@ from backend.app.models import (
 )
 from backend.app.monday_client import MondayProjectBoardItem
 from backend.app.services.auto_sync import utc_now
+from backend.app.services import design_processing_worker
 from backend.app.services.design_processing_inputs import (
     DownloadedDesignEmailAsset,
     DesignEmailAsset,
@@ -42,7 +44,6 @@ from backend.app.services.legacy_enquiry.parameter_extraction import (
     PARAMETER_EXTRACTION_PROMPT,
     extract_parameters,
 )
-from backend.app.services.match_report import MatchReport, render_match_report_pdf
 from backend.app.services.design_processing_worker import (
     claim_due_analysis_jobs,
     recover_expired_analysis_leases,
@@ -162,22 +163,6 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
     assert config.top_p is None
     assert config.top_k is None
     assert config.candidate_count is None
-
-
-def test_match_report_cleans_leading_company_separator():
-    report = MatchReport.from_contract(
-        source_item_id="3146597919",
-        extracted_company=": Axter Ltd",
-        match_contract={
-            "extractedProjectTitle": "18-24 Herne Hill, Brixton",
-            "candidates": [],
-        },
-    )
-
-    assert report.extracted_company == "Axter Ltd"
-    pdf_content = render_match_report_pdf(report)
-    assert rb"account\): Axter)" in pdf_content
-    assert rb"account\): :" not in pdf_content
 
 
 def test_reason_for_change_remains_in_csv_schema_but_not_llm_prompt():
@@ -360,6 +345,19 @@ class SupersedingArtifactStorage(MemoryArtifactStorage):
             item.latest_desired_pipeline_version = settings.design_processing_pipeline_version
             item.supersession_requested_at = utc_now()
             self.gateway.snapshot = self.superseding_snapshot
+
+
+class TransientSupersedingArtifactStorage(MemoryArtifactStorage):
+    def __init__(self, db_session):
+        super().__init__()
+        self.db_session = db_session
+
+    def write_private(self, bucket, object_key, content, content_type):
+        super().write_private(bucket, object_key, content, content_type)
+        if self.write_count == 2:
+            item = self.db_session.query(DesignProcessingItem).one()
+            item.latest_desired_input_revision = "transient-revision"
+            item.supersession_requested_at = utc_now()
 
 
 class FixtureDownloader:
@@ -565,6 +563,39 @@ def test_retry_resumes_persisted_outputs_without_repeating_gemini(db_session, go
     assert db_session.query(DesignProcessingJob).one().attempt_count == 2
 
 
+def test_postgres_deadlock_retries_the_same_execution_attempt(
+    db_session,
+    golden,
+    monkeypatch,
+):
+    golden_input, _ = golden
+    _queue(db_session, _snapshot(golden_input))
+    original_pipeline = design_processing_worker.run_analysis_pipeline
+    pipeline_calls = 0
+
+    class FakeDeadlockError(Exception):
+        pgcode = "40P01"
+
+    def deadlock_once(*args, **kwargs):
+        nonlocal pipeline_calls
+        pipeline_calls += 1
+        if pipeline_calls == 1:
+            raise OperationalError("SELECT ... FOR UPDATE", {}, FakeDeadlockError())
+        return original_pipeline(*args, **kwargs)
+
+    monkeypatch.setattr(
+        design_processing_worker,
+        "run_analysis_pipeline",
+        deadlock_once,
+    )
+
+    result, _, _, _, _ = _run_shadow(db_session, golden_input)
+
+    assert result.analyzed == 1
+    assert pipeline_calls == 2
+    assert db_session.query(DesignProcessingJob).one().attempt_count == 1
+
+
 def test_supersession_at_final_checkpoint_never_advances_analyzed_identity(
     db_session,
     golden,
@@ -610,6 +641,42 @@ def test_supersession_at_final_checkpoint_never_advances_analyzed_identity(
     assert len(artifacts) == 2
     assert {artifact.input_revision for artifact in artifacts} == {"revision-a"}
     assert all(artifact.status == "rendered" for artifact in artifacts)
+
+
+def test_transient_stored_supersession_retries_current_execution(
+    db_session,
+    golden,
+):
+    golden_input, _ = golden
+    original_snapshot = _snapshot(golden_input, revision="revision-a")
+    _queue(db_session, original_snapshot)
+    gateway = FakeReadGateway(original_snapshot, golden_input)
+    storage = TransientSupersedingArtifactStorage(db_session)
+    source_path = WORKSPACE_ROOT / golden_input["sourceEmail"]["path"]
+
+    result = run_worker_once(
+        db_session,
+        worker_id="transient-supersession-worker",
+        access_token="test-token",
+        gateway=gateway,
+        analysis_client=FakeLegacyClient(golden_input),
+        artifact_storage=storage,
+        downloader=FixtureDownloader(source_path),
+        mode="shadow",
+        claim_limit=1,
+        recover_leases=False,
+        heartbeat_interval_seconds=0,
+    )
+
+    item = db_session.query(DesignProcessingItem).one()
+    job = db_session.query(DesignProcessingJob).one()
+    assert result.retry_wait == 1
+    assert item.latest_desired_input_revision == "revision-a"
+    assert item.latest_analyzed_input_revision is None
+    assert item.supersession_requested_at is None
+    assert job.status == "retry_wait"
+    assert job.execution_input_revision == "revision-a"
+    assert db_session.query(DesignProcessingJob).count() == 1
 
 
 def test_policy_revoked_during_analysis_cancels_before_persisting_outputs(

@@ -14,6 +14,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.models import DesignProcessingItem, DesignProcessingJob
+from backend.app.services.design_processing_inputs import (
+    DesignEmailAsset,
+    DesignProcessingTargetSnapshot,
+)
+from backend.app.services.design_processing_locks import (
+    lock_design_processing_item_and_job,
+)
+from backend.app.services.design_processing_queue import queue_design_processing_snapshot
 from backend.app.services.design_processing_worker import (
     claim_due_analysis_jobs,
     recover_expired_analysis_leases,
@@ -266,6 +274,107 @@ def test_concurrent_workers_claim_one_job_once(postgres_worker_db):
     persisted = db.get(DesignProcessingJob, job.id)
     assert persisted.status == "running"
     assert persisted.locked_by in {"worker-a", "worker-b"}
+
+
+def test_checkpoint_and_queue_refresh_use_compatible_lock_order(
+    postgres_worker_db,
+):
+    db, Session = postgres_worker_db
+    now = datetime.now(timezone.utc)
+    _, job = _add_item_and_job(
+        db,
+        item_id="checkpoint-queue-lock-order",
+        now=now,
+        execution_revision="revision-a",
+        status="running",
+        locked_by="checkpoint-worker",
+        locked_at=now,
+        heartbeat_at=now,
+    )
+    snapshot = DesignProcessingTargetSnapshot(
+        board_id=BOARD_ID,
+        item_id=job.item_id,
+        group_id="landing-zone",
+        item_state="active",
+        name="Lock order test",
+        email_assets=(
+            DesignEmailAsset(
+                asset_id="1",
+                filename="design.msg",
+                file_extension="msg",
+                size=1,
+                created_at="2026-08-13T00:00:00Z",
+                download_url="https://monday.invalid/design.msg",
+                download_requires_auth=True,
+            ),
+        ),
+        input_revision="revision-a",
+    )
+    checkpoint_locked = threading.Event()
+    release_checkpoint = threading.Event()
+    queue_started = threading.Event()
+    queue_finished = threading.Event()
+    outcomes: Queue[BaseException | str] = Queue()
+
+    def hold_checkpoint_locks() -> None:
+        checkpoint_db = Session()
+        try:
+            item, locked_job = lock_design_processing_item_and_job(
+                checkpoint_db,
+                job.id,
+            )
+            assert item is not None
+            assert locked_job is not None
+            checkpoint_locked.set()
+            assert release_checkpoint.wait(timeout=5)
+            checkpoint_db.commit()
+            outcomes.put("checkpoint")
+        except BaseException as exc:
+            outcomes.put(exc)
+        finally:
+            checkpoint_db.close()
+
+    def refresh_queue() -> None:
+        queue_db = Session()
+        try:
+            assert checkpoint_locked.wait(timeout=5)
+            queue_started.set()
+            result = queue_design_processing_snapshot(
+                queue_db,
+                snapshot,
+                trigger_type="concurrent_refresh",
+                mode="shadow",
+                pipeline_version=PIPELINE_VERSION,
+                expected_board_id=BOARD_ID,
+                expected_group_id="landing-zone",
+                now=now,
+            )
+            queue_db.commit()
+            outcomes.put(result.outcome)
+        except BaseException as exc:
+            outcomes.put(exc)
+        finally:
+            queue_finished.set()
+            queue_db.close()
+
+    checkpoint_thread = threading.Thread(target=hold_checkpoint_locks, daemon=True)
+    queue_thread = threading.Thread(target=refresh_queue, daemon=True)
+    checkpoint_thread.start()
+    assert checkpoint_locked.wait(timeout=5)
+    queue_thread.start()
+    assert queue_started.wait(timeout=5)
+    assert not queue_finished.wait(timeout=0.2)
+    release_checkpoint.set()
+
+    for thread in (checkpoint_thread, queue_thread):
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+    results = [outcomes.get(timeout=1), outcomes.get(timeout=1)]
+    errors = [result for result in results if isinstance(result, BaseException)]
+    if errors:
+        raise errors[0]
+    assert sorted(results) == ["checkpoint", "coalesced"]
 
 
 def test_live_heartbeat_prevents_lease_recovery(postgres_worker_db):

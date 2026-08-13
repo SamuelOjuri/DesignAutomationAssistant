@@ -30,6 +30,7 @@ from .design_processing_inputs import (
     DownloadedAssetLike,
     download_design_email_assets,
 )
+from .design_processing_locks import lock_design_processing_item_and_job
 from .design_processing_observability import log_design_processing_event
 from .design_processing_queue import (
     DesignProcessingMode,
@@ -90,10 +91,6 @@ def _execution_is_allowed(
     )
 
 
-def _supports_row_locks(db: Session) -> bool:
-    return db.bind is not None and db.bind.dialect.name == "postgresql"
-
-
 def _lock_current_analysis(
     db: Session,
     job_id: object,
@@ -101,31 +98,17 @@ def _lock_current_analysis(
     worker_id: str,
     execution_policy: Optional[ExecutionPolicy] = None,
 ) -> tuple[DesignProcessingItem, DesignProcessingJob, ProcessingIdentity]:
-    job_query = (
-        db.query(DesignProcessingJob)
-        .filter(DesignProcessingJob.id == job_id)
-        .populate_existing()
-    )
-    if _supports_row_locks(db):
-        job_query = job_query.with_for_update()
-    job = job_query.one_or_none()
+    item, job = lock_design_processing_item_and_job(db, job_id)
     if job is None:
         raise DesignProcessingTargetMismatch(
             "job_missing",
             "design-processing analysis job no longer exists",
         )
-
-    item_query = (
-        db.query(DesignProcessingItem)
-        .filter(
-            DesignProcessingItem.board_id == job.board_id,
-            DesignProcessingItem.item_id == job.item_id,
+    if item is None:
+        raise DesignProcessingTargetMismatch(
+            "item_missing",
+            "design-processing analysis item no longer exists",
         )
-        .populate_existing()
-    )
-    if _supports_row_locks(db):
-        item_query = item_query.with_for_update()
-    item = item_query.one()
     if job.status != "running" or job.locked_by != worker_id:
         raise DesignProcessingTargetMismatch(
             "lease_lost",
@@ -444,30 +427,17 @@ def _lock_current_publication(
     *,
     worker_id: str,
 ) -> tuple[DesignProcessingItem, DesignProcessingJob, ProcessingIdentity]:
-    job_query = (
-        db.query(DesignProcessingJob)
-        .filter(DesignProcessingJob.id == job_id)
-        .populate_existing()
-    )
-    if _supports_row_locks(db):
-        job_query = job_query.with_for_update()
-    job = job_query.one_or_none()
+    item, job = lock_design_processing_item_and_job(db, job_id)
     if job is None:
         raise DesignProcessingTargetMismatch(
             "job_missing",
             "design-processing publication job no longer exists",
         )
-    item_query = (
-        db.query(DesignProcessingItem)
-        .filter(
-            DesignProcessingItem.board_id == job.board_id,
-            DesignProcessingItem.item_id == job.item_id,
+    if item is None:
+        raise DesignProcessingTargetMismatch(
+            "item_missing",
+            "design-processing publication item no longer exists",
         )
-        .populate_existing()
-    )
-    if _supports_row_locks(db):
-        item_query = item_query.with_for_update()
-    item = item_query.one()
     identity = execution_identity(job)
     if (
         job.status != "running"
@@ -723,7 +693,7 @@ def cleanup_delete_pending_artifacts(
                 .filter(DesignProcessingArtifact.id == artifact_id)
                 .populate_existing()
             )
-            if _supports_row_locks(db):
+            if db.bind is not None and db.bind.dialect.name == "postgresql":
                 artifact_query = artifact_query.with_for_update()
             artifact = artifact_query.one_or_none()
             if artifact is None or artifact.status != "delete_pending":
@@ -733,7 +703,7 @@ def cleanup_delete_pending_artifacts(
                 DesignProcessingItem.board_id == artifact.board_id,
                 DesignProcessingItem.item_id == artifact.item_id,
             )
-            if _supports_row_locks(db):
+            if db.bind is not None and db.bind.dialect.name == "postgresql":
                 item_query = item_query.with_for_update()
             item = item_query.one()
             replacement_identity = published_identity(item)

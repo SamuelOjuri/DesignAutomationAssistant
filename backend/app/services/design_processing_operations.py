@@ -19,6 +19,7 @@ from ..models import (
     DesignProcessingJob,
 )
 from .auto_sync import get_monday_ingestion_access_token, utc_now
+from .design_processing_locks import lock_design_processing_item_and_job
 from .design_processing_observability import (
     collect_design_processing_metrics,
     log_design_processing_event,
@@ -46,12 +47,6 @@ class FailedJobRetryResult:
     item_id: str
     outcome: str
     status: str
-
-
-def _with_row_lock(db: Session, query):
-    if db.bind is not None and db.bind.dialect.name == "postgresql":
-        return query.with_for_update()
-    return query
 
 
 def enqueue_design_processing_item(
@@ -104,19 +99,11 @@ def retry_failed_design_processing_job(
     now: Optional[datetime] = None,
 ) -> FailedJobRetryResult:
     retry_at = now or utc_now()
-    job = _with_row_lock(
-        db,
-        db.query(DesignProcessingJob).filter(DesignProcessingJob.id == job_id),
-    ).one_or_none()
+    item, job = lock_design_processing_item_and_job(db, job_id)
     if job is None:
         raise ValueError(f"design-processing job {job_id} was not found")
-    item = _with_row_lock(
-        db,
-        db.query(DesignProcessingItem).filter(
-            DesignProcessingItem.board_id == job.board_id,
-            DesignProcessingItem.item_id == job.item_id,
-        ),
-    ).one()
+    if item is None:
+        raise ValueError(f"design-processing item for job {job_id} was not found")
 
     active = db.query(DesignProcessingJob).filter(
         DesignProcessingJob.board_id == job.board_id,
