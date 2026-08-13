@@ -125,9 +125,14 @@ class DesignParameterExtraction(BaseModel):
     )
     bauder_contract_number: str | None = Field(
         description=(
-            "The Bauder contract number for a design request from Bauder, usually "
-            "found in the email subject. Return only the contract identifier "
-            "(for example, B******). Return null for non-Bauder requests or when absent."
+            "The contract or project reference assigned by Bauder Ltd, the roofing-system "
+            "manufacturer and supplier. It is usually found in the email subject, but may "
+            "also appear in the email body or an attachment, and commonly has the format "
+            "B followed by six digits (for example, B123456). Extract only a reference "
+            "explicitly identified as Bauder's contract or project number. Do not assume "
+            "that Bauder is the customer or requester, and do not infer a number merely "
+            "because Bauder products are specified. Return null when no such reference "
+            "is present."
         )
     )
     membrane: str | None = Field(
