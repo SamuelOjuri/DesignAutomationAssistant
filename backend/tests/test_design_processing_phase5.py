@@ -118,6 +118,11 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
             "scheme itself)."
         ),
         tapered_insulation=None,
+        scale="1:100",
+        page_size="A1",
+        bauder_contract_number="B123456",
+        membrane="SBS modified bitumen",
+        vcl="BauderTEC KSA DUO",
     )
     captured = {}
 
@@ -135,9 +140,19 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
 
     assert parameters["Fall of Tapered"].endswith("scheme itself).")
     assert parameters["Tapered Insulation"] == "Not provided"
+    assert parameters["Scale"] == "1:100"
+    assert parameters["Page Size"] == "A1"
+    assert parameters["Bauder Contract Number"] == "B123456"
+    assert parameters["Membrane"] == "SBS modified bitumen"
+    assert parameters["VCL"] == "BauderTEC KSA DUO"
     csv_content = build_ai_data_csv_bytes(parameters).decode("utf-8")
     assert "Tapered Insulation,Not provided" in csv_content
     assert "Tapered Insulation,scheme itself)." not in csv_content
+    assert "Scale,1:100" in csv_content
+    assert "Page Size,A1" in csv_content
+    assert "Bauder Contract Number,B123456" in csv_content
+    assert "Membrane,SBS modified bitumen" in csv_content
+    assert "VCL,BauderTEC KSA DUO" in csv_content
     config = captured["config"]
     assert config.response_mime_type == "application/json"
     assert config.response_json_schema == DesignParameterExtraction.model_json_schema()
@@ -166,9 +181,16 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
 
 
 def test_reason_for_change_remains_in_csv_schema_but_not_llm_prompt():
-    assert len(CANONICAL_PARAMETER_ORDER) == 16
+    assert len(CANONICAL_PARAMETER_ORDER) == 21
     assert "Reason for Change" in CANONICAL_PARAMETER_ORDER
     assert "Reason for Change" not in PARAMETER_EXTRACTION_PROMPT
+    assert CANONICAL_PARAMETER_ORDER[-5:] == (
+        "Scale",
+        "Page Size",
+        "Bauder Contract Number",
+        "Membrane",
+        "VCL",
+    )
 
 
 def _snapshot(golden_input, *, name: str = "Human enquiry name", revision=None):
@@ -302,6 +324,11 @@ class FakeLegacyClient:
             fall_of_tapered=values.get("Fall of Tapered"),
             tapered_insulation=values.get("Tapered Insulation"),
             decking=values.get("Decking"),
+            scale=values.get("Scale"),
+            page_size=values.get("Page Size"),
+            bauder_contract_number=values.get("Bauder Contract Number"),
+            membrane=values.get("Membrane"),
+            vcl=values.get("VCL"),
         )
 
     def query_llm(self, context, query):
@@ -442,6 +469,15 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
     assert item.latest_published_input_revision is None
     expected_parameters = dict(golden_expected["extraction"]["parameters"])
     expected_parameters["Reason for Change"] = "Reviewer decision required"
+    expected_parameters.update(
+        {
+            "Scale": "Not provided",
+            "Page Size": "Not provided",
+            "Bauder Contract Number": "Not provided",
+            "Membrane": "Not provided",
+            "VCL": "Not provided",
+        }
+    )
     assert item.extracted_parameters_json["parameters"] == expected_parameters
     assert item.extracted_parameters_json["sources"]["Reason for Change"] == "Business Rule"
     assert item.match_result_json["legacyDiagnostics"] == golden_expected["matching"]
@@ -465,6 +501,13 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
     expected_csv_content = legacy_csv_content.replace(
         b"Reason for Change,New Enquiry,Email Content",
         b"Reason for Change,Reviewer decision required,Business Rule",
+    )
+    expected_csv_content += (
+        b"Scale,Not provided,Email Content\r\n"
+        b"Page Size,Not provided,Email Content\r\n"
+        b"Bauder Contract Number,Not provided,Email Content\r\n"
+        b"Membrane,Not provided,Email Content\r\n"
+        b"VCL,Not provided,Email Content\r\n"
     )
     assert expected_csv_content != legacy_csv_content
     assert csv_content == expected_csv_content

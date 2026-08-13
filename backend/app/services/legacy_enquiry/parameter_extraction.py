@@ -11,8 +11,8 @@ QueryLlm = Callable[[str, str], str]
 CANONICAL_PARAMETER_ORDER = (
     "Email Subject",
     "Post Code",
-    "Drawing Reference",
     "Drawing Title",
+    "Drawing Reference",
     "Revision",
     "Date Received",
     "Hour Received",
@@ -25,6 +25,11 @@ CANONICAL_PARAMETER_ORDER = (
     "Fall of Tapered",
     "Tapered Insulation",
     "Decking",
+    "Scale",
+    "Page Size",
+    "Bauder Contract Number",
+    "Membrane",
+    "VCL",
 )
 
 PARAMETER_EXTRACTION_PROMPT = (
@@ -106,6 +111,37 @@ class DesignParameterExtraction(BaseModel):
     decking: str | None = Field(
         description="The type of roof decking material described."
     )
+    scale: str | None = Field(
+        description=(
+            "The drawing scale, usually found in a drawing title block "
+            "(for example, 1:100)."
+        )
+    )
+    page_size: str | None = Field(
+        description=(
+            "The drawing page or paper size, usually found in a drawing title block "
+            "(for example, A1)."
+        )
+    )
+    bauder_contract_number: str | None = Field(
+        description=(
+            "The Bauder contract number for a design request from Bauder, usually "
+            "found in the email subject. Return only the contract identifier "
+            "(for example, B******). Return null for non-Bauder requests or when absent."
+        )
+    )
+    membrane: str | None = Field(
+        description=(
+            "The type of waterproofing membrane material requested for the roofing "
+            "solution."
+        )
+    )
+    vcl: str | None = Field(
+        description=(
+            "The Air and Vapour Control Layer (VCL or AVCL) component requested for "
+            "the roof insulation."
+        )
+    )
 
     def as_canonical_parameters(self) -> dict[str, str | None]:
         return {
@@ -124,6 +160,11 @@ class DesignParameterExtraction(BaseModel):
             "Fall of Tapered": self.fall_of_tapered,
             "Tapered Insulation": self.tapered_insulation,
             "Decking": self.decking,
+            "Scale": self.scale,
+            "Page Size": self.page_size,
+            "Bauder Contract Number": self.bauder_contract_number,
+            "Membrane": self.membrane,
+            "VCL": self.vcl,
         }
 
 
