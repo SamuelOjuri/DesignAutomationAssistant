@@ -461,7 +461,11 @@ def _current_publication_artifacts(
     db: Session,
     item: DesignProcessingItem,
     identity: ProcessingIdentity,
-) -> tuple[DesignProcessingArtifact, DesignProcessingArtifact]:
+) -> tuple[
+    DesignProcessingArtifact,
+    DesignProcessingArtifact,
+    DesignProcessingArtifact,
+]:
     artifacts = (
         db.query(DesignProcessingArtifact)
         .filter(
@@ -479,6 +483,7 @@ def _current_publication_artifacts(
     try:
         return (
             by_key[("ai_data", AI_DATA_COLUMN_ID)],
+            by_key[("ai_data_pdf", AI_DATA_COLUMN_ID)],
             by_key[("match_report", MATCH_REPORT_COLUMN_ID)],
         )
     except KeyError as exc:
@@ -626,11 +631,11 @@ def _publish_one_artifact(
         ),
     )
     if candidate is None:
-        content_type = (
-            "text/csv; charset=utf-8"
-            if artifact.artifact_kind == "ai_data"
-            else "application/pdf"
-        )
+        content_type = {
+            "ai_data": "text/csv; charset=utf-8",
+            "ai_data_pdf": "application/pdf",
+            "match_report": "application/pdf",
+        }[artifact.artifact_kind]
         candidate = gateway.upload_design_file(
             item.item_id,
             artifact.column_id,
@@ -856,6 +861,22 @@ def run_publication_pipeline(
         allowlist_item_ids=allowlist_item_ids,
         execution_policy=execution_policy,
         artifact_kind="ai_data",
+        next_stage="uploading_ai_data_pdf",
+        clock=clock,
+    )
+    _publish_one_artifact(
+        db,
+        job_id,
+        worker_id=worker_id,
+        gateway=gateway,
+        artifact_storage=artifact_storage,
+        pipeline_version=pipeline_version,
+        expected_board_id=expected_board_id,
+        expected_group_id=expected_group_id,
+        mode=mode,
+        allowlist_item_ids=allowlist_item_ids,
+        execution_policy=execution_policy,
+        artifact_kind="ai_data_pdf",
         next_stage="uploading_match_report",
         clock=clock,
     )

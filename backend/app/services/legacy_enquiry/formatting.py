@@ -83,34 +83,45 @@ def format_dropdown_for_monday(
     return None
 
 
+def build_ai_data_rows(
+    parameters: Mapping[str, Any],
+    sources: Optional[Mapping[str, Any]] = None,
+) -> list[tuple[str, Any, Any]]:
+    if not isinstance(parameters, Mapping) or not parameters:
+        return []
+    source_values = sources if isinstance(sources, Mapping) else {}
+    rows: list[tuple[str, Any, Any]] = []
+    seen: set[str] = set()
+    for key in CANONICAL_PARAMETER_ORDER:
+        if key in parameters:
+            rows.append(
+                (
+                    key,
+                    clean_extracted_value(parameters.get(key, "")),
+                    source_values.get(key, ""),
+                )
+            )
+            seen.add(key)
+    for key in sorted(value for value in parameters if value not in seen):
+        rows.append(
+            (
+                key,
+                clean_extracted_value(parameters.get(key, "")),
+                source_values.get(key, ""),
+            )
+        )
+    return rows
+
+
 def build_ai_data_csv_bytes(
     parameters: Mapping[str, Any],
     sources: Optional[Mapping[str, Any]] = None,
 ) -> bytes:
-    if not isinstance(parameters, Mapping) or not parameters:
+    rows = build_ai_data_rows(parameters, sources)
+    if not rows:
         return b""
-    source_values = sources if isinstance(sources, Mapping) else {}
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer)
     writer.writerow(["Parameter", "Value", "Source"])
-
-    seen: set[str] = set()
-    for key in CANONICAL_PARAMETER_ORDER:
-        if key in parameters:
-            writer.writerow(
-                [
-                    key,
-                    clean_extracted_value(parameters.get(key, "")),
-                    source_values.get(key, ""),
-                ]
-            )
-            seen.add(key)
-    for key in sorted(value for value in parameters if value not in seen):
-        writer.writerow(
-            [
-                key,
-                clean_extracted_value(parameters.get(key, "")),
-                source_values.get(key, ""),
-            ]
-        )
+    writer.writerows(rows)
     return buffer.getvalue().encode("utf-8")

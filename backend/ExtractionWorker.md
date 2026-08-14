@@ -17,7 +17,7 @@ The worker processes that same Monday item. It must never create a duplicate ite
 | Date Received | `date_mkpb23av` | Worker |
 | Hour Received | `hour_mkpbb3j1` | Worker |
 | Zip Code | `dropdown_mkpbafca` | Worker |
-| AI Data | `file_mkza7y37` | Worker uploads CSV |
+| AI Data | `file_mkza7y37` | Worker uploads CSV and preview PDF |
 | Matched Projects | `file_mm59rntf` | Worker uploads PDF |
 | New Enq / Amend | `dropdown_mkpb98es` | **Human only; worker must never write or clear** |
 | TP Ref | `board_relation_mkpbm5np` | **Human only; worker must never write or clear** |
@@ -121,6 +121,7 @@ Calculate `pipeline_digest` as the lowercase hexadecimal SHA-256 of the UTF-8 `p
 
 ```text
 AI_Data_<item_id>_<input_revision_12>_<pipeline_digest_12>.csv
+AI_Data_Preview_<item_id>_<input_revision_12>_<pipeline_digest_12>.pdf
 Matched_Projects_<item_id>_<input_revision_12>_<pipeline_digest_12>.pdf
 ```
 
@@ -137,7 +138,7 @@ Add migration `0010_design_processing_queue.py` with four independent persistenc
 - `design_processing_artifacts`: automation-owned artifact records containing board item, target column, artifact kind, full input revision, full pipeline version, deterministic filename, durable internal `storage_bucket` and `storage_object_key`, content SHA-256, size in bytes, nullable Monday asset ID, status, last error, and timestamps. Artifact statuses are `rendered`, `uploading`, `published`, `superseded`, `delete_pending`, `deleted`, and `failed`. Add a unique constraint on `(board_id, item_id, column_id, artifact_kind, input_revision, pipeline_version)`. Exactly one row represents each tuple; rendering and publication retries update that row rather than inserting additional attempts.  
 - `monday_webhook_dispatches`: one child result per webhook event and consumer, as defined under Webhook Dispatch.
 
-Job statuses are `scheduled`, `running`, `retry_wait`, `completed`, `failed`, and `cancelled`. Active statuses are `scheduled`, `running`, and `retry_wait`. Stages include `waiting_for_name`, `waiting_for_email`, `extracting`, `matching`, `rendering`, `writing_columns`, `uploading_ai_data`, and `uploading_match_report`.
+Job statuses are `scheduled`, `running`, `retry_wait`, `completed`, `failed`, and `cancelled`. Active statuses are `scheduled`, `running`, and `retry_wait`. Stages include `waiting_for_name`, `waiting_for_email`, `extracting`, `matching`, `rendering`, `writing_columns`, `uploading_ai_data`, `uploading_ai_data_pdf`, and `uploading_match_report`.
 
 Item business states are `waiting_for_name`, `waiting_for_email`, `scheduled`, `processing`, `analyzed`, `publishing`, `ready_for_review`, `ineligible`, and `failed`. `analyzed` means the desired identity has completed analysis but is not currently published. If both required inputs are absent, `waiting_for_name` takes precedence. A missing name or absence of a supported Email asset is a readiness condition, not a processing failure: reschedule the active job with backoff, increment `readiness_check_count`, and do not increment normal `attempt_count`. Malformed Email-column data, incomplete metadata for a referenced supported asset, or a Monday/API failure is a retryable processing error rather than ordinary readiness.
 
@@ -154,6 +155,9 @@ ready_for_review = desired_identity == published_identity
                    and current_ai_data.identity == published_identity
                    and current_ai_data.status == published
                    and current_ai_data.monday_asset_id is not null
+                   and current_ai_data_pdf.identity == published_identity
+                   and current_ai_data_pdf.status == published
+                   and current_ai_data_pdf.monday_asset_id is not null
                    and current_match_report.identity == published_identity
                    and current_match_report.status == published
                    and current_match_report.monday_asset_id is not null
@@ -229,17 +233,18 @@ For an analysis execution:
 5. Run the pinned legacy email, attachment, PDF/image, parameter, and project-title extraction logic.  
 6. Run the complete legacy matching algorithm against board `1825117125`.  
 7. Before persisting extracted outputs, lock the item and job and reject a superseded execution. Persist parameters and matches with their full execution identity so retries do not repeat Gemini calls or reuse stale results.  
-8. Generate the canonical AI Data CSV and matching PDF with deterministic pipeline-aware filenames and store both in durable private Supabase object storage using the existing retry-enabled storage gateway. Use configured bucket `design_processing_artifact_bucket` and object key `design-processing/<board_id>/<item_id>/<input_revision>/<pipeline_digest>/<filename>`. The bucket must be private and accessible only through the backend service role; never generate public artifact URLs. Persist bucket, key, byte size, content hash, and artifact status. If a `rendered` artifact already exists for the full identity, verify its stored hash and reuse it rather than re-rendering. After a final locked desired-versus-execution comparison, atomically advance the analyzed identity, mark the analysis job `completed`, set the item to `analyzed`, and queue a publication successor only when publication is currently allowed. Analysis executions never issue Monday mutations, uploads, or deletes in any operational mode.  
+8. Generate the canonical AI Data CSV, an AI Data preview PDF containing the same ordered parameter rows, and the matching PDF with deterministic pipeline-aware filenames. Store all three in durable private Supabase object storage using the existing retry-enabled storage gateway. Use configured bucket `design_processing_artifact_bucket` and object key `design-processing/<board_id>/<item_id>/<input_revision>/<pipeline_digest>/<filename>`. The bucket must be private and accessible only through the backend service role; never generate public artifact URLs. Persist bucket, key, byte size, content hash, and artifact status. If a `rendered` artifact already exists for the full identity, verify its stored hash and reuse it rather than re-rendering. After a final locked desired-versus-execution comparison, atomically advance the analyzed identity, mark the analysis job `completed`, set the item to `analyzed`, and queue a publication successor only when publication is currently allowed. Analysis executions never issue Monday mutations, uploads, or deletes in any operational mode.
 
 For a publication execution:
 
 9. Load only outputs and rendered artifacts belonging to the execution identity. A publication retry or a later shadow-to-publishing transition must not repeat Gemini extraction or matching.  
 10. Run the execution validation gate immediately before updating Date Received, Hour Received, and Zip Code.  
-11. Run the gate again immediately before uploading or adopting AI Data.  
-12. Run the gate again immediately before uploading or adopting Matched Projects, which remains the final Monday side effect.  
-13. Lock the item and job for a final desired-versus-execution comparison. In one transaction, verify both current artifacts have Monday asset IDs, mark AI Data and the match report `published`, advance the published identity, mark the job `completed`, and set the item to `ready_for_review` only when the readiness predicate above is true. Mark prior automation-owned artifacts `delete_pending`; delete them from Monday after commit as best-effort cleanup.
+11. Run the gate again immediately before uploading or adopting the AI Data CSV.
+12. Run the gate again immediately before uploading or adopting the AI Data preview PDF in the same Monday file column.
+13. Run the gate again immediately before uploading or adopting Matched Projects, which remains the final Monday side effect.
+14. Lock the item and job for a final desired-versus-execution comparison. In one transaction, verify all three current artifacts have Monday asset IDs, mark the CSV, preview PDF, and match report `published`, advance the published identity, mark the job `completed`, and set the item to `ready_for_review` only when the readiness predicate above is true. Mark prior automation-owned artifacts `delete_pending`; delete them from Monday after commit as best-effort cleanup.
 
-The AI Data CSV should retain all 21 parameter rows for schema compatibility. The worker must not infer New Enquiry or Amendment: `Reason for Change` is always `Reviewer decision required` with source `Business Rule`, and only the reviewer may record that decision in the human-owned New Enq / Amend column. Since no project is selected, every other parameter contains email-derived values only. Any default inserted by a business rule should have source `Business Rule`; it must not be represented as a human CRM decision.
+The AI Data CSV should retain all 21 parameter rows for schema compatibility, and the preview PDF should display the same ordered rows without changing their values. The worker must not infer New Enquiry or Amendment: `Reason for Change` is always `Reviewer decision required` with source `Business Rule`, and only the reviewer may record that decision in the human-owned New Enq / Amend column. Since no project is selected, every other parameter contains email-derived values only. Any default inserted by a business rule should have source `Business Rule`; it must not be represented as a human CRM decision.
 
 Implement one validation gate with two explicit modes. In readiness mode, `refresh_current_target()` re-fetches item state, board, group, item `name`, Email-column membership, and joined asset metadata from Monday, requires item state to be exactly `active`, recomputes the Email input revision, and updates the locked item’s latest desired identity; it does not require or assign execution identity. If the refreshed desired identity differs from published identity, it also moves the item out of `ready_for_review` in that transaction. In execution mode, `assert_current_execution_target()` performs the same Monday re-fetch and revision calculation, then locks the item and claimed job to verify active item state, board `1882196103`, Landing Zone group `group_mkpbd6vy`, a non-empty human name, at least one supported Email asset, current remote identity and stored desired identity both equal to immutable execution identity, the configured pipeline version equal to execution pipeline version, continued lease ownership, and that the current operational mode still permits the execution kind for this item. No other remote work may occur between a successful execution-mode gate and its guarded side effect.
 
@@ -255,7 +260,7 @@ File helpers accept only `file_mkza7y37` for AI Data or `file_mm59rntf` for Matc
 
 File uploads are at-least-once side effects. Use the full `(board_id, item_id, column_id, artifact_kind, input_revision, pipeline_version)` tuple as the persisted idempotency identity. Before retrying an uncertain upload, inspect the target column for the exact deterministic filename. Adoption is allowed only when the corresponding artifact row already exists for that full identity and is in `uploading`, `failed`, or `published`; require the Monday asset filename to match and, when Monday returns size metadata, require its size to match the rendered artifact. If zero or multiple candidates satisfy those checks, do not infer ownership: retry or fail for operator review. Persist the adopted Monday asset ID on that existing row.
 
-On a new execution identity, upload or adopt the replacement first. Only after both replacement artifacts are recorded as published and published identity advances may prior artifacts be marked `delete_pending` and their recorded Monday asset IDs deleted. Cleanup retries independently and never clears an entire file column. Never create ownership or infer readiness from a filename alone.
+On a new execution identity, upload or adopt the replacements first. Only after all three replacement artifacts are recorded as published and published identity advances may prior artifacts be marked `delete_pending` and their recorded Monday asset IDs deleted. Cleanup retries independently and never clears an entire file column. Never create ownership or infer readiness from a filename alone.
 
 **Implementation Layout**
 

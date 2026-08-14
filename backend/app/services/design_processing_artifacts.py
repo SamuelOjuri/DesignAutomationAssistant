@@ -12,6 +12,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from ..monday_client import MondayFileColumnAsset
 from ..models import DesignProcessingArtifact, DesignProcessingItem
+from .ai_data_report import render_ai_data_pdf
 from .design_processing_state import (
     AI_DATA_COLUMN_ID,
     MATCH_REPORT_COLUMN_ID,
@@ -85,11 +86,12 @@ def pipeline_digest(pipeline_version: str) -> str:
 def deterministic_artifact_filenames(
     item_id: str,
     identity: ProcessingIdentity,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     input_label = identity.input_revision[:12]
     pipeline_label = pipeline_digest(identity.pipeline_version)[:12]
     return (
         f"AI_Data_{item_id}_{input_label}_{pipeline_label}.csv",
+        f"AI_Data_Preview_{item_id}_{input_label}_{pipeline_label}.pdf",
         f"Matched_Projects_{item_id}_{input_label}_{pipeline_label}.pdf",
     )
 
@@ -114,8 +116,11 @@ def render_analysis_artifacts(
     parameters: Mapping[str, str],
     sources: Mapping[str, str],
     report: MatchReport,
-) -> tuple[RenderedArtifact, RenderedArtifact]:
-    csv_filename, pdf_filename = deterministic_artifact_filenames(item_id, identity)
+) -> tuple[RenderedArtifact, RenderedArtifact, RenderedArtifact]:
+    csv_filename, preview_filename, report_filename = deterministic_artifact_filenames(
+        item_id,
+        identity,
+    )
     return (
         RenderedArtifact(
             artifact_kind="ai_data",
@@ -125,9 +130,16 @@ def render_analysis_artifacts(
             content=build_ai_data_csv_bytes(parameters, sources),
         ),
         RenderedArtifact(
+            artifact_kind="ai_data_pdf",
+            column_id=AI_DATA_COLUMN_ID,
+            filename=preview_filename,
+            content_type="application/pdf",
+            content=render_ai_data_pdf(parameters, sources),
+        ),
+        RenderedArtifact(
             artifact_kind="match_report",
             column_id=MATCH_REPORT_COLUMN_ID,
-            filename=pdf_filename,
+            filename=report_filename,
             content_type="application/pdf",
             content=render_match_report_pdf(report),
         ),
@@ -322,6 +334,7 @@ def find_verified_rendered_artifacts(
     )
     required = {
         ("ai_data", AI_DATA_COLUMN_ID),
+        ("ai_data_pdf", AI_DATA_COLUMN_ID),
         ("match_report", MATCH_REPORT_COLUMN_ID),
     }
     matching = {

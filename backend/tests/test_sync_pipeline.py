@@ -521,6 +521,83 @@ def test_pipeline_returns_unchanged_only_for_complete_snapshot(monkeypatch):
     assert snapshot.ingestion_status == "complete"
 
 
+def test_ai_data_pdf_preview_is_stored_without_csv_parsing_or_embedding(
+    monkeypatch,
+    tmp_path,
+):
+    task = Task(
+        external_task_key="acct:board:item-preview",
+        account_id="acct",
+        board_id="board",
+        item_id="item-preview",
+    )
+    filename = "AI_Data_Preview_item-preview_revision_pipeline.pdf"
+    item = {
+        "id": task.item_id,
+        "updated_at": "2026-08-14T12:00:00Z",
+        "assets": [
+            {
+                "id": "preview-asset",
+                "name": filename,
+                "file_extension": "pdf",
+                "file_size": 12,
+            }
+        ],
+        "updates": [],
+        "column_values": [
+            {
+                "type": "file",
+                "value": '{"files":[{"assetId":"preview-asset"}]}',
+                "column": {"title": "AI Data"},
+            }
+        ],
+    }
+    preview_path = tmp_path / filename
+    preview_path.write_bytes(b"%PDF-preview")
+    ingested_kinds = []
+
+    monkeypatch.setattr(sync_pipeline, "fetch_item_with_assets", lambda *args: item)
+    monkeypatch.setattr(
+        sync_pipeline,
+        "download_asset_to_temp",
+        lambda *args: SimpleNamespace(
+            temp_path=str(preview_path),
+            size_bytes=preview_path.stat().st_size,
+            content_type="application/pdf",
+            sha256="preview-sha",
+        ),
+    )
+    monkeypatch.setattr(
+        sync_pipeline,
+        "ingest_asset",
+        lambda *args, **kwargs: (
+            ingested_kinds.append(args[4]) or SimpleNamespace(id="preview-file")
+        ),
+    )
+    monkeypatch.setattr(
+        sync_pipeline,
+        "_parse_key_value_csv",
+        lambda *args: pytest.fail("preview PDF must not use key-value CSV parsing"),
+    )
+    monkeypatch.setattr(
+        sync_pipeline,
+        "_parse_generic_csv",
+        lambda *args: pytest.fail("preview PDF must not use generic CSV parsing"),
+    )
+    monkeypatch.setattr(
+        sync_pipeline,
+        "process_pdf_batch",
+        lambda *args: pytest.fail("preview PDF must not create duplicate embeddings"),
+    )
+
+    db = FakeDB(task)
+    result = sync_pipeline.run_sync_pipeline(db, task.external_task_key, "token")
+
+    assert result.status == "done"
+    assert ingested_kinds == ["ai_data_preview"]
+    assert db.snapshot.task_context_json["csv_params"] == []
+
+
 def test_pipeline_resumes_failed_snapshot_and_marks_it_complete(monkeypatch):
     task = Task(
         external_task_key="acct:board:item-retry",

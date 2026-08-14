@@ -472,10 +472,19 @@ def _seed_publication(db, *, prior_identity=None):
         updated_at=now,
     )
     storage = MemoryArtifactStorage()
-    csv_filename, pdf_filename = deterministic_artifact_filenames(item.item_id, identity)
+    csv_filename, preview_filename, report_filename = deterministic_artifact_filenames(
+        item.item_id,
+        identity,
+    )
     for kind, column_id, filename, content in (
         ("ai_data", "file_mkza7y37", csv_filename, b"csv-content"),
-        ("match_report", "file_mm59rntf", pdf_filename, b"pdf-content"),
+        (
+            "ai_data_pdf",
+            "file_mkza7y37",
+            preview_filename,
+            b"preview-content",
+        ),
+        ("match_report", "file_mm59rntf", report_filename, b"pdf-content"),
     ):
         object_key = build_artifact_object_key(
             board_id=item.board_id,
@@ -507,6 +516,7 @@ def _seed_publication(db, *, prior_identity=None):
     if prior_identity is not None:
         for kind, column_id, suffix, asset_id in (
             ("ai_data", "file_mkza7y37", "csv", "801"),
+            ("ai_data_pdf", "file_mkza7y37", "pdf", "803"),
             ("match_report", "file_mm59rntf", "pdf", "802"),
         ):
             artifact = DesignProcessingArtifact(
@@ -707,8 +717,16 @@ def test_uncertain_upload_is_adopted_without_repeating_analysis(db_session):
         event
         for event in gateway.events
         if event[:2] == ("upload", "file_mkza7y37")
+        and event[2].endswith(".csv")
     ]
     assert len(ai_uploads) == 1
+    preview_uploads = [
+        event
+        for event in gateway.events
+        if event[:2] == ("upload", "file_mkza7y37")
+        and event[2].endswith(".pdf")
+    ]
+    assert len(preview_uploads) == 1
     assert db_session.query(DesignProcessingJob).one().attempt_count == 2
 
 
@@ -790,7 +808,7 @@ def test_report_retry_does_not_repeat_columns_or_ai_upload(db_session):
             for event in gateway.events
             if event[:2] == ("upload", "file_mkza7y37")
         ]
-    ) == 1
+    ) == 2
     assert len(
         [
             event
@@ -1055,7 +1073,7 @@ def test_cleanup_retries_after_reviewer_moves_item(db_session):
         gateway=gateway,
     )
 
-    assert (deleted, failed) == (2, 0)
+    assert (deleted, failed) == (3, 0)
     assert len([event for event in gateway.events if event[0] == "gate"]) == gate_count
     assert all(
         db_session.get(DesignProcessingArtifact, artifact.id).status == "deleted"
@@ -1063,7 +1081,7 @@ def test_cleanup_retries_after_reviewer_moves_item(db_session):
     )
 
 
-def test_ready_for_review_requires_both_recorded_asset_ids(db_session):
+def test_ready_for_review_requires_all_recorded_asset_ids(db_session):
     identity, item, _, _, _ = _seed_publication(db_session)
     item.latest_published_input_revision = identity.input_revision
     item.latest_published_pipeline_version = identity.pipeline_version
@@ -1082,4 +1100,11 @@ def test_ready_for_review_requires_both_recorded_asset_ids(db_session):
         for artifact in artifacts
         if artifact.artifact_kind == "match_report"
     ).monday_asset_id = "1002"
+    assert is_ready_for_review(item, artifacts) is False
+
+    next(
+        artifact
+        for artifact in artifacts
+        if artifact.artifact_kind == "ai_data_pdf"
+    ).monday_asset_id = "1003"
     assert is_ready_for_review(item, artifacts) is True

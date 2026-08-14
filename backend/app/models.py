@@ -310,10 +310,11 @@ DESIGN_PROCESSING_JOB_STAGES = (
     "rendering",
     "writing_columns",
     "uploading_ai_data",
+    "uploading_ai_data_pdf",
     "uploading_match_report",
 )
 DESIGN_PROCESSING_EXECUTION_KINDS = ("analysis", "publication")
-DESIGN_PROCESSING_ARTIFACT_KINDS = ("ai_data", "match_report")
+DESIGN_PROCESSING_ARTIFACT_KINDS = ("ai_data", "ai_data_pdf", "match_report")
 DESIGN_PROCESSING_ARTIFACT_STATUSES = (
     "rendered",
     "uploading",

@@ -26,6 +26,7 @@ from backend.app.models import (
 from backend.app.monday_client import MondayProjectBoardItem
 from backend.app.services.auto_sync import utc_now
 from backend.app.services import design_processing_worker
+from backend.app.services.ai_data_report import render_ai_data_pdf
 from backend.app.services.design_processing_inputs import (
     DownloadedDesignEmailAsset,
     DesignEmailAsset,
@@ -153,6 +154,11 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
     assert "Bauder Contract Number,B123456" in csv_content
     assert "Membrane,SBS modified bitumen" in csv_content
     assert "VCL,BauderTEC KSA DUO" in csv_content
+    pdf_content = render_ai_data_pdf(parameters)
+    assert pdf_content.startswith(b"%PDF")
+    assert b"(Scale)" in pdf_content
+    assert b"(1:100)" in pdf_content
+    assert b"(Bauder Contract Number)" in pdf_content
     config = captured["config"]
     assert config.response_mime_type == "application/json"
     assert config.response_json_schema == DesignParameterExtraction.model_json_schema()
@@ -170,8 +176,8 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
         "suffix after the underscore in the drawing reference "
         "[e.g. **.** - * from TP*****_**.** - *]."
     )
-    assert CANONICAL_PARAMETER_ORDER.index("Drawing Reference") < (
-        CANONICAL_PARAMETER_ORDER.index("Drawing Title")
+    assert CANONICAL_PARAMETER_ORDER.index("Drawing Title") < (
+        CANONICAL_PARAMETER_ORDER.index("Drawing Reference")
     )
     assert config.thinking_config.thinking_level == types.ThinkingLevel.MEDIUM
     assert config.temperature is None
@@ -483,43 +489,53 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
     assert item.match_result_json["legacyDiagnostics"] == golden_expected["matching"]
     assert job.status == "completed"
     assert job.attempt_count == 1
-    assert {artifact.artifact_kind for artifact in artifacts} == {"ai_data", "match_report"}
+    assert {artifact.artifact_kind for artifact in artifacts} == {
+        "ai_data",
+        "ai_data_pdf",
+        "match_report",
+    }
     assert all(artifact.status == "rendered" for artifact in artifacts)
     assert all(artifact.monday_asset_id is None for artifact in artifacts)
-    assert len(storage.objects) == 2
+    assert len(storage.objects) == 3
     csv_content = next(
         content
         for (_, object_key), content in storage.objects.items()
         if object_key.endswith(".csv")
     )
-    pdf_content = next(
+    preview_pdf_content = next(
         content
         for (_, object_key), content in storage.objects.items()
-        if object_key.endswith(".pdf")
+        if "/AI_Data_Preview_" in object_key
+    )
+    match_pdf_content = next(
+        content
+        for (_, object_key), content in storage.objects.items()
+        if "/Matched_Projects_" in object_key
     )
     legacy_csv_content = (FIXTURE_ROOT / "ai_data.csv").read_bytes()
-    expected_csv_content = legacy_csv_content.replace(
-        b"Reason for Change,New Enquiry,Email Content",
-        b"Reason for Change,Reviewer decision required,Business Rule",
-    )
-    expected_csv_content += (
-        b"Scale,Not provided,Email Content\r\n"
-        b"Page Size,Not provided,Email Content\r\n"
-        b"Bauder Contract Number,Not provided,Email Content\r\n"
-        b"Membrane,Not provided,Email Content\r\n"
-        b"VCL,Not provided,Email Content\r\n"
+    expected_sources = {
+        parameter: "Email Content" for parameter in expected_parameters
+    }
+    expected_sources["Reason for Change"] = "Business Rule"
+    expected_csv_content = build_ai_data_csv_bytes(
+        expected_parameters,
+        expected_sources,
     )
     assert expected_csv_content != legacy_csv_content
     assert csv_content == expected_csv_content
-    assert b"Extracted Company Name \\(context only" in pdf_content
-    assert b"Example Roofing Limited" in pdf_content
-    assert b"Candidate TP Ref: 16771" in pdf_content
-    assert b"Candidate TP Ref: 20442" in pdf_content
-    assert b"Match: 81.8%" in pdf_content
-    assert b"Match: 62.7%" in pdf_content
-    assert b"Accounts" in pdf_content
-    assert b"New Enq / Amend" in pdf_content
-    assert b"candidate TP Ref" in pdf_content
+    assert preview_pdf_content.startswith(b"%PDF")
+    assert b"(AI Data Preview)" in preview_pdf_content
+    assert b"(Scale)" in preview_pdf_content
+    assert b"(Not provided)" in preview_pdf_content
+    assert b"Extracted Company Name \\(context only" in match_pdf_content
+    assert b"Example Roofing Limited" in match_pdf_content
+    assert b"Candidate TP Ref: 16771" in match_pdf_content
+    assert b"Candidate TP Ref: 20442" in match_pdf_content
+    assert b"Match: 81.8%" in match_pdf_content
+    assert b"Match: 62.7%" in match_pdf_content
+    assert b"Accounts" in match_pdf_content
+    assert b"New Enq / Amend" in match_pdf_content
+    assert b"candidate TP Ref" in match_pdf_content
     assert downloader.call_count == 1
     assert client.query_count == 2
     assert gateway.mutation_calls == []
@@ -681,7 +697,7 @@ def test_supersession_at_final_checkpoint_never_advances_analyzed_identity(
     assert len(
         [job for job in jobs if job.status in {"scheduled", "running", "retry_wait"}]
     ) == 1
-    assert len(artifacts) == 2
+    assert len(artifacts) == 3
     assert {artifact.input_revision for artifact in artifacts} == {"revision-a"}
     assert all(artifact.status == "rendered" for artifact in artifacts)
 

@@ -162,6 +162,12 @@ def _published_artifacts(
         ),
         _artifact(
             identity,
+            artifact_kind="ai_data_pdf",
+            column_id=AI_DATA_COLUMN_ID,
+            monday_asset_id="ai-preview-asset",
+        ),
+        _artifact(
+            identity,
             artifact_kind="match_report",
             column_id=MATCH_REPORT_COLUMN_ID,
             monday_asset_id="report-asset",
@@ -375,7 +381,7 @@ def test_superseded_execution_cannot_complete_and_is_cancelled():
     assert item.state == "scheduled"
 
 
-def test_publication_completion_requires_both_exact_current_artifacts():
+def test_publication_completion_requires_all_exact_current_artifacts():
     identity = ProcessingIdentity("revision-a", "pipeline-v1")
     item = _item(desired=identity, analyzed=identity, state="analyzed")
     job = _job()
@@ -389,7 +395,7 @@ def test_publication_completion_requires_both_exact_current_artifacts():
     ) == "publication"
 
     only_ai_data = _published_artifacts(identity)[:1]
-    with pytest.raises(InvalidDesignProcessingTransition, match="both current artifacts"):
+    with pytest.raises(InvalidDesignProcessingTransition, match="all current artifacts"):
         complete_publication(
             item,
             job,

@@ -21,6 +21,7 @@ PUBLICATION_STAGES = frozenset(
     {
         "writing_columns",
         "uploading_ai_data",
+        "uploading_ai_data_pdf",
         "uploading_match_report",
     }
 )
@@ -344,7 +345,7 @@ def complete_publication(
     artifact_list = list(artifacts)
     if not _has_published_artifacts(item, identity, artifact_list):
         raise InvalidDesignProcessingTransition(
-            "both current artifacts must be published with Monday asset IDs"
+            "all current artifacts must be published with Monday asset IDs"
         )
 
     item.latest_published_input_revision = identity.input_revision
@@ -480,6 +481,7 @@ def _has_published_artifacts(
 ) -> bool:
     required = {
         ("ai_data", AI_DATA_COLUMN_ID),
+        ("ai_data_pdf", AI_DATA_COLUMN_ID),
         ("match_report", MATCH_REPORT_COLUMN_ID),
     }
     present = {

@@ -282,6 +282,7 @@ def _seed_cleanup(db_session):
     db_session.add(item)
     for kind, column_id, asset_id in (
         ("ai_data", "file_mkza7y37", "1001"),
+        ("ai_data_pdf", "file_mkza7y37", "1003"),
         ("match_report", "file_mm59rntf", "1002"),
     ):
         content = kind.encode("ascii")
@@ -349,8 +350,8 @@ def test_cleanup_retry_obeys_current_mode(monkeypatch, db_session):
         item_id="123",
     )
 
-    assert completed == {"itemId": "123", "deleted": 2, "failed": 0}
-    assert len(gateway.deleted) == 2
+    assert completed == {"itemId": "123", "deleted": 3, "failed": 0}
+    assert len(gateway.deleted) == 3
 
 
 def test_metrics_cover_phase7_operational_dimensions(db_session):

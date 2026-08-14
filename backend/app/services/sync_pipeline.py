@@ -67,6 +67,18 @@ def _is_csv_asset(asset: Dict[str, Any], kind: str) -> bool:
     name = (asset.get("name") or "").lower()
     return ext == ".csv" or name.endswith(".csv")
 
+
+def _is_ai_data_pdf_preview(asset: Dict[str, Any], kind: str) -> bool:
+    if kind != "csv":
+        return False
+    ext = (asset.get("file_extension") or "").lower().lstrip(".")
+    name = (asset.get("name") or "").lower()
+    return (
+        name.startswith("ai_data_preview_")
+        and (ext == "pdf" or name.endswith(".pdf"))
+    )
+
+
 def _normalize_header(name: str) -> str:
     return (name or "").strip().lower()
 
@@ -417,6 +429,21 @@ def run_sync_pipeline(
 
         if asset_exceeds_storage_limit(asset):
             ingest_asset(db, task, snapshot, asset, kind, access_token)
+            continue
+
+        if _is_ai_data_pdf_preview(asset, kind):
+            downloaded = download_asset_to_temp(asset, access_token)
+            ingest_asset(
+                db,
+                task,
+                snapshot,
+                asset,
+                "ai_data_preview",
+                access_token,
+                downloaded=downloaded,
+            )
+            gc.collect()
+            _log_memory("After AI Data preview cleanup")
             continue
 
         # CSV handling (download once, parse, ingest once)
