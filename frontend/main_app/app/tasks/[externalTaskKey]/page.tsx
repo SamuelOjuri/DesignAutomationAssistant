@@ -138,6 +138,30 @@ const Markdown = ({ children }: { children: string }) => (
   </div>
 );
 
+function CitationExcerpt({ snippet }: { snippet: string }) {
+  return (
+    <details className="group/excerpt mt-3 min-w-0">
+      <summary className="cursor-pointer list-none rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+        <span className="line-clamp-3 whitespace-pre-line text-sm leading-6 text-muted-foreground [overflow-wrap:anywhere] group-open/excerpt:hidden">
+          <ReactMarkdown allowedElements={[]} unwrapDisallowed skipHtml>
+            {snippet}
+          </ReactMarkdown>
+        </span>
+        <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary">
+          <span className="group-open/excerpt:hidden">Show more</span>
+          <span className="hidden group-open/excerpt:inline">Show less</span>
+          <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" className="h-3 w-3 transition-transform group-open/excerpt:rotate-180">
+            <path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+      </summary>
+      <div className="mt-2">
+        <Markdown>{snippet}</Markdown>
+      </div>
+    </details>
+  );
+}
+
 function getCookie(name: string): string | null {
   const value = document.cookie
     .split("; ")
@@ -754,9 +778,12 @@ export default function TaskPage() {
 
       <div className="mt-8 space-y-4">
         {isAwaitingFirstToken && (
-          <div className="rounded-lg border border-border bg-secondary/70 px-4 py-3 shadow-sm">
-            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">assistant</div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+            <div className="flex items-center gap-3">
+              <span aria-hidden="true" className="h-2 w-2 rounded-full bg-primary" />
+              <h3 className="text-sm font-semibold text-foreground">Assistant</h3>
+            </div>
+            <div className="mt-4 flex items-center gap-2 rounded-md bg-secondary/70 p-4 text-sm text-muted-foreground">
               Thinking
               <span className="inline-flex items-center gap-1">
                 <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce" />
@@ -769,50 +796,77 @@ export default function TaskPage() {
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`rounded-lg border border-border px-4 py-3 shadow-sm ${
-              m.role === "user" ? "bg-card" : "bg-secondary/70"
+            className={`min-w-0 rounded-lg border border-border bg-card shadow-sm ${
+              m.role === "user" ? "px-4 py-3" : "p-5"
             }`}
           >
-            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {m.role}
-            </div>
             {m.role === "assistant" ? (
-              <Markdown>{m.content}</Markdown>
+              <div className="flex items-center gap-3">
+                <span aria-hidden="true" className="h-2 w-2 rounded-full bg-primary" />
+                <h3 className="text-sm font-semibold text-foreground">Assistant</h3>
+              </div>
+            ) : (
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {m.role}
+              </div>
+            )}
+            {m.role === "assistant" ? (
+              <div className="mt-4 min-w-0 rounded-md bg-secondary/70 p-4">
+                <Markdown>{m.content}</Markdown>
+              </div>
             ) : (
               <div className="whitespace-pre-wrap">{m.content}</div>
             )}
             {m.role === "assistant" && (m.citations?.length ?? 0) > 0 && (
-              <div className="mt-4 border-t border-border pt-4">
-                <div className="text-sm font-semibold text-foreground">Sources:</div>
-                <ul className="mt-2 divide-y divide-border text-sm">
+              <section className="mt-6" aria-label="Citation sources">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-semibold text-foreground">Sources</h4>
+                  <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                    {m.citations?.length}
+                  </span>
+                </div>
+                <ul className="mt-3 space-y-3 text-sm">
                   {m.citations?.map((citation, citationIndex) => (
                     <li
                       key={`${citation.sourceId ?? "source"}-${citationIndex}`}
-                      className="py-3 text-muted-foreground"
+                      className="min-w-0 rounded-md border border-border bg-background p-3 sm:p-4"
                     >
-                      <div className="font-medium text-foreground">
-                        {citation.sourceId ? `[${citation.sourceId}] ` : ""}
-                        {citation.filename || "Untitled"}
-                      </div>
-                      <div>
-                        {citation.page != null ? `Page ${citation.page}` : "Page N/A"}
-                        {citation.section ? ` • ${citation.section}` : ""}
-                      </div>
-                      {citation.snippet && <Markdown>{citation.snippet}</Markdown>}
-                      {citation.fileId ? (
-                        <div className="mt-2">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex min-w-0 items-start gap-2">
+                          {citation.sourceId && (
+                            <span className="shrink-0 rounded bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
+                              [{citation.sourceId}]
+                            </span>
+                          )}
+                          <div className="min-w-0">
+                            <div className="font-medium leading-6 text-foreground [overflow-wrap:anywhere]">
+                              {citation.filename || "Untitled"}
+                            </div>
+                            {(citation.page != null || citation.section) && (
+                              <div className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                                {[citation.page != null ? `Page ${citation.page}` : null, citation.section]
+                                  .filter(Boolean)
+                                  .join(" • ")}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {citation.fileId ? (
                           <button
+                            type="button"
                             onClick={() => openSignedUrl(citation.fileId as string)}
-                            className="inline-flex items-center justify-center rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary"
+                            aria-label={`View source ${citation.sourceId || citation.filename || citationIndex + 1}`}
+                            className="inline-flex shrink-0 items-center justify-center self-start rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                           >
                             View source
                           </button>
-                        </div>
-                      ) : null}
+                        ) : null}
+                      </div>
+                      {citation.snippet && <CitationExcerpt snippet={citation.snippet} />}
                     </li>
                   ))}
                 </ul>
-              </div>
+              </section>
             )}
           </div>
         ))}
