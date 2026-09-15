@@ -705,7 +705,7 @@ export default function TaskPage() {
         <section className="mt-6 rounded-lg border border-border bg-card p-5 shadow-sm">
           <div className="flex items-center gap-3">
             <div className="h-2 w-2 rounded-full bg-primary" />
-            <div className="text-sm font-semibold text-foreground">Sources:</div>
+            <div className="text-sm font-semibold text-foreground">Sources</div>
           </div>
           {signedUrlError && (
             <p className="mt-2 text-sm text-red-500">{signedUrlError}</p>
@@ -783,7 +783,7 @@ export default function TaskPage() {
             )}
             {m.role === "assistant" && (m.citations?.length ?? 0) > 0 && (
               <div className="mt-4 border-t border-border pt-4">
-                <div className="text-sm font-semibold text-foreground">Sources</div>
+                <div className="text-sm font-semibold text-foreground">Sources:</div>
                 <ul className="mt-2 divide-y divide-border text-sm">
                   {m.citations?.map((citation, citationIndex) => (
                     <li
