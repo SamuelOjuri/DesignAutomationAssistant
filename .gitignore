@@ -29,6 +29,7 @@ desktop.ini
 
 # Ignore compiled files and dependencies
 node_modules/
+/tmp/excel_deps/
 dist/
 build/
 

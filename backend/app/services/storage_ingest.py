@@ -557,6 +557,8 @@ def attachment_kind_for_filename(filename: str) -> str:
     lower = filename.lower()
     if lower.endswith(".pdf"):
         return "attachment_pdf"
+    if lower.endswith((".xls", ".xlsx")):
+        return "attachment_spreadsheet"
     if lower.endswith((".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp")):
         return "attachment_image"
     return "attachment_other"

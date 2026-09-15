@@ -111,7 +111,6 @@ const VALIDATED_COLUMN_TITLES = new Set([
   "Zip Code",
   "Date Completed",
   "Hour Completed",
-  "Turn Around (Hours)",
   "Date Sort",
 ]);
 

@@ -20,6 +20,7 @@ from ..db import SessionLocal
 from .email_extraction import process_email_content, extract_email_sections, process_email_content_to_temp, cleanup_temp_files
 from .pdf_extraction import process_pdf_batch as _process_pdf_batch
 from .image_extraction import process_image_with_gemini as _process_image_with_gemini
+from .spreadsheet_extraction import extract_spreadsheet_documents, is_spreadsheet
 from .llm_interface import create_gemini_client, gemini_embed_content_with_retry
 from .storage_ingest import (
     ingest_derived_attachment_bytes as _ingest_derived_attachment_bytes,
@@ -446,6 +447,32 @@ def run_sync_pipeline(
             _log_memory("After AI Data preview cleanup")
             continue
 
+        # Excel assets, including files attached directly to Monday updates.
+        if is_spreadsheet(filename):
+            downloaded = download_asset_to_temp(asset, access_token)
+            try:
+                documents = []
+                if not _should_skip("spreadsheet extraction"):
+                    documents = extract_spreadsheet_documents(
+                        downloaded.temp_path, asset.get("name") or filename,
+                    )
+                # ingest_asset removes the temporary download, so parse first.
+                file_record = ingest_asset(
+                    db, task, snapshot, asset, "attachment_spreadsheet", access_token,
+                    downloaded=downloaded,
+                )
+                for doc in documents:
+                    process_doc_for_embedding(
+                        file_record.id, doc["text"], kind="spreadsheet", section=doc["section"],
+                    )
+            finally:
+                try:
+                    os.unlink(downloaded.temp_path)
+                except OSError:
+                    pass
+                gc.collect()
+            continue
+
         # CSV handling (download once, parse, ingest once)
         if _is_csv_asset(asset, kind):
             downloaded = download_asset_to_temp(asset, access_token)
@@ -769,7 +796,7 @@ def run_sync_pipeline(
                     except OSError:
                         pass
 
-            # Clean up any remaining non-visual attachments
+            # Store non-visual attachments and index Excel worksheet contents.
             other_attachments = [
                 att for att in attachments
                 if not any(att["filename"].lower().endswith(ext) 
@@ -781,7 +808,7 @@ def run_sync_pipeline(
                 try:
                     with open(att["temp_path"], "rb") as f:
                         content = f.read()
-                    ingest_derived_attachment_bytes(
+                    file_record = ingest_derived_attachment_bytes(
                         db,
                         task,
                         snapshot,
@@ -791,6 +818,12 @@ def run_sync_pipeline(
                         kind=attachment_kind_for_filename(att["filename"]),
                     )
                     del content
+                    if is_spreadsheet(att["filename"]) and not _should_skip("email spreadsheet extraction"):
+                        documents = extract_spreadsheet_documents(att["temp_path"], att["filename"])
+                        for doc in documents:
+                            process_doc_for_embedding(
+                                file_record.id, doc["text"], kind="spreadsheet", section=doc["section"],
+                            )
                     gc.collect()
                 finally:
                     try:

@@ -1,5 +1,42 @@
 # Design Automation Assistant
 
+## Excel attachments in task chat
+
+Task sync reads `.xls` and `.xlsx` files attached to emails or directly to Monday
+items/updates. Sources labels these files `attachment_spreadsheet`. Searchable
+text includes workbook names, worksheet names, cell coordinates and row ranges;
+chat citations link to the original Excel file. This enriches task chat evidence,
+not the separately generated AI Data CSV or its Summary table.
+
+Deploy the backend with the updated `requirements.txt`. Existing completed
+snapshots need a **forced sync** to extract previously stored Excel attachments:
+send an authenticated `POST /api/tasks/{externalTaskKey}/sync` with JSON
+`{"force": true}` and the normal CSRF header. The current **Sync task** button
+does not request a forced sync, so unchanged completed snapshots can be skipped.
+New or changed snapshots are processed normally. No database migration is needed.
+
+The readers use saved cell values and do not execute macros, follow external
+workbook links, or calculate formulas. For `.xlsx`, a formula without a cached
+result is included with an explicit “cached result unavailable” label. `.xls`
+uses the results saved by Excel. Save/recalculate the original in Excel before
+syncing if calculated values are missing or stale. Numeric values are extracted
+as underlying values, rather than reproducing all Excel display formats.
+
+Extraction is bounded per workbook: 20 MiB input, 100 MiB expanded XLSX content,
+20 worksheets, 10,000 rows, 256 columns, 200,000 scanned cells, 400 characters per
+cell, and at most 400 searchable chunks (including any extraction notice).
+Limits and unreadable/encrypted workbooks produce a searchable notice; the
+original attachment remains downloadable when storage succeeds. The existing
+sync memory guard still applies. Formats such as `.xlsm` and `.xlsb` are outside
+this implementation.
+
+Run the Excel parser and ingestion regression tests after installing backend
+dependencies and pytest:
+
+```powershell
+python -m pytest backend/tests/test_spreadsheet_extraction.py backend/tests/test_sync_pipeline.py -q
+```
+
 ## Design Processing Phase 1
 
 The design-processing worker is disabled by default. Phase 1 pins the legacy

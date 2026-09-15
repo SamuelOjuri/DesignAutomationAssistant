@@ -7,13 +7,15 @@ from types import ModuleType
 from types import SimpleNamespace
 import uuid
 import logging
+from email.message import EmailMessage
+from pathlib import Path
 
 import httpx
 import pytest
 import requests
 from tenacity import wait_none
 
-from backend.app.models import Task, TaskSnapshot
+from backend.app.models import Task, TaskSnapshot, TaskChunk
 
 sys.modules.setdefault("extract_msg", ModuleType("extract_msg"))
 
@@ -486,6 +488,127 @@ def test_email_pipeline_cleans_pdf_attachments_skipped_by_limit(monkeypatch, tmp
 
     assert result.status == "done"
     assert all(not path.exists() for path in attachment_paths)
+
+
+@pytest.mark.parametrize("extension", [".xls", ".xlsx"])
+@pytest.mark.parametrize("via_email", [True, False])
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_spreadsheet_pipeline_stores_and_indexes_own_file(
+    monkeypatch, tmp_path, extension, via_email, corrupt,
+):
+    import openpyxl
+
+    filename = "Pricing Schedule" + extension
+    if corrupt:
+        content = b"broken workbook"
+    elif extension == ".xls":
+        content = (Path(__file__).parent / "fixtures/spreadsheets/pricing_schedule.xls").read_bytes()
+    else:
+        book = openpyxl.Workbook()
+        book.active.title = "Pricing"
+        book.active.append(["Item", "Price"])
+        book.active.append(["Roof insulation", 25.5])
+        stream = io.BytesIO()
+        book.save(stream)
+        book.close()
+        content = stream.getvalue()
+
+    if via_email:
+        message = EmailMessage()
+        message["Subject"] = "Pricing enquiry"
+        message.set_content("Please review the attached schedule.")
+        message.add_attachment(content, maintype="application", subtype="octet-stream", filename=filename)
+        # A second attachment proves unreadable Excel files do not stop the email.
+        message.add_attachment(b"keep me", maintype="application", subtype="octet-stream", filename="notes.txt")
+        download_content = message.as_bytes()
+        asset_name = "enquiry.eml"
+    else:
+        download_content = content
+        asset_name = filename
+    task, _ = _ingest_test_task_and_snapshot()
+    item = {"assets": [{"id": "asset-1", "name": asset_name}], "column_values": [], "updates": []}
+    stored = []
+    temp_paths = []
+    spreadsheet_id = uuid.uuid4()
+
+    class ChunkQuery(FakeQuery):
+        def filter(self, expression):
+            self.file_id = expression.right.value
+            return self
+
+        def delete(self, **kwargs):
+            db.chunks[:] = [chunk for chunk in db.chunks if chunk.file_id != self.file_id]
+
+    class ChunkDB(FakeDB):
+        def __init__(self):
+            super().__init__(task)
+            self.chunks = []
+
+        def query(self, model):
+            return ChunkQuery() if model is TaskChunk else super().query(model)
+
+        def add(self, obj):
+            if isinstance(obj, TaskChunk):
+                self.chunks.append(obj)
+            else:
+                super().add(obj)
+
+    db = ChunkDB()
+
+    def download(*args):
+        path = tmp_path / "download"
+        path.write_bytes(download_content)
+        temp_paths.append(path)
+        return SimpleNamespace(temp_path=str(path), size_bytes=len(download_content))
+
+    def store_asset(*args, downloaded, **kwargs):
+        path = Path(downloaded.temp_path)
+        stored.append((asset_name, path.read_bytes(), args[4]))
+        path.unlink()  # Real ingest_asset also deletes the download.
+        return SimpleNamespace(id=uuid.uuid4() if via_email else spreadsheet_id)
+
+    def store_attachment(*args, **kwargs):
+        stored.append((kwargs["filename"], kwargs["content"], kwargs["kind"]))
+        return SimpleNamespace(id=spreadsheet_id if kwargs["filename"] == filename else uuid.uuid4())
+
+    real_email_extract = sync_pipeline.process_email_content_to_temp
+
+    def extract_email(*args):
+        result = real_email_extract(*args)
+        temp_paths.extend(Path(att["temp_path"]) for att in result[2])
+        return result
+
+    monkeypatch.setattr(sync_pipeline, "fetch_item_with_assets", lambda *args: item)
+    monkeypatch.setattr(sync_pipeline, "download_asset_to_temp", download)
+    monkeypatch.setattr(sync_pipeline, "ingest_asset", store_asset)
+    monkeypatch.setattr(sync_pipeline, "ingest_derived_attachment_bytes", store_attachment)
+    monkeypatch.setattr(sync_pipeline, "process_email_content_to_temp", extract_email)
+    monkeypatch.setattr(sync_pipeline, "create_gemini_client", lambda: object())
+    monkeypatch.setattr(sync_pipeline, "gemini_embed_content_with_retry", lambda *args, **kwargs: SimpleNamespace(
+        embeddings=[SimpleNamespace(values=[1.0, 0.0]) for _ in kwargs["contents"]],
+    ))
+
+    result = sync_pipeline.run_sync_pipeline(db, task.external_task_key, "token")
+    assert result.status == "done"
+    assert (filename, content, "attachment_spreadsheet") in stored
+    if via_email:
+        assert ("notes.txt", b"keep me", "attachment_other") in stored
+    chunks = [chunk for chunk in db.chunks if chunk.file_id == spreadsheet_id]
+    assert chunks
+    if corrupt:
+        assert chunks[0].section == "spreadsheet:extraction-notice"
+        assert "could not be fully read" in chunks[0].chunk_text
+    else:
+        assert any("Roof insulation" in chunk.chunk_text and "25.5" in chunk.chunk_text for chunk in chunks)
+        assert all(chunk.section.startswith("sheet:") for chunk in chunks)
+    assert db.snapshot.task_context_json["extracted_docs_summary"]["by_kind"]["spreadsheet"] == len(chunks)
+    assert all(not path.exists() for path in temp_paths)
+
+    # A forced sync upgrades existing snapshots and replaces spreadsheet chunks.
+    result = sync_pipeline.run_sync_pipeline(db, task.external_task_key, "token", force=True)
+    assert result.status == "done"
+    assert len([c for c in db.chunks if c.file_id == spreadsheet_id]) == len(chunks)
+    assert all(not path.exists() for path in temp_paths)
 
 
 def test_pipeline_returns_unchanged_only_for_complete_snapshot(monkeypatch):
