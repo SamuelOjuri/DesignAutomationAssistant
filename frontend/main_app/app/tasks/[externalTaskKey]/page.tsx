@@ -642,7 +642,7 @@ export default function TaskPage() {
       {summary?.syncStatus && (
         <p className="mt-3 inline-flex rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-foreground">
           Server Sync Status: {summary.syncStatus}
-          {summary.syncCompletedAt ? ` • completed ${new Date(summary.syncCompletedAt).toLocaleString()}` : ""}
+          {summary.syncCompletedAt ? ` • Completed ${new Date(summary.syncCompletedAt).toLocaleString()}` : ""}
         </p>
       )}
 
@@ -806,8 +806,9 @@ export default function TaskPage() {
                 <h3 className="text-sm font-semibold text-foreground">Assistant</h3>
               </div>
             ) : (
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {m.role}
+              <div className="flex items-center gap-3">
+                <span aria-hidden="true" className="h-2 w-2 rounded-full bg-primary" />
+                <h3 className="text-sm font-semibold text-foreground">User</h3>
               </div>
             )}
             {m.role === "assistant" ? (
