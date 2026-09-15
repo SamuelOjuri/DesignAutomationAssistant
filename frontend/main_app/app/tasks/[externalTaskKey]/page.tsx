@@ -834,7 +834,7 @@ export default function TaskPage() {
           aria-busy={isStreaming}
           className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {isStreaming ? "Sending..." : "Send"}
+          {isStreaming ? "Thinking..." : "Send"}
           {isStreaming && (
             <span className="h-3 w-3 animate-spin rounded-full border-2 border-background border-t-transparent" />
           )}
