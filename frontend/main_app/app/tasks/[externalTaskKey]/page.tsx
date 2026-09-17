@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { Bot, UserRound } from "lucide-react";
+import { ClipboardList, Files, MessageSquare, UserRound } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
@@ -653,7 +653,7 @@ export default function TaskPage() {
       {summary && (
         <section className="mt-6 rounded-lg border border-border bg-card p-5 shadow-sm">
           <div className="flex items-center gap-3">
-            <div className="h-2 w-2 rounded-full bg-primary" />
+            <ClipboardList aria-hidden="true" className="h-4 w-4 text-primary" strokeWidth={1.75} />
             <div className="text-sm font-semibold text-foreground">Summary</div>
           </div>
           {!hasSnapshot ? (
@@ -729,7 +729,7 @@ export default function TaskPage() {
       {sources && (
         <section className="mt-6 rounded-lg border border-border bg-card p-5 shadow-sm">
           <div className="flex items-center gap-3">
-            <div className="h-2 w-2 rounded-full bg-primary" />
+            <Files aria-hidden="true" className="h-4 w-4 text-primary" strokeWidth={1.75} />
             <div className="text-sm font-semibold text-foreground">Sources</div>
           </div>
           {signedUrlError && (
@@ -781,7 +781,7 @@ export default function TaskPage() {
         {isAwaitingFirstToken && (
           <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
             <div className="flex items-center gap-3">
-              <Bot aria-hidden="true" className="h-4 w-4 text-primary" strokeWidth={1.75} />
+              <MessageSquare aria-hidden="true" className="h-4 w-4 text-primary" strokeWidth={1.75} />
               <h3 className="text-sm font-semibold text-foreground">Assistant</h3>
             </div>
             <div className="mt-4 flex items-center gap-2 rounded-md bg-secondary/70 p-4 text-sm text-muted-foreground">
@@ -803,7 +803,7 @@ export default function TaskPage() {
           >
             {m.role === "assistant" ? (
               <div className="flex items-center gap-3">
-                <Bot aria-hidden="true" className="h-4 w-4 text-primary" strokeWidth={1.75} />
+                <MessageSquare aria-hidden="true" className="h-4 w-4 text-primary" strokeWidth={1.75} />
                 <h3 className="text-sm font-semibold text-foreground">Assistant</h3>
               </div>
             ) : (
