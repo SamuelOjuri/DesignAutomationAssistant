@@ -3,10 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import csv
+import hashlib
 from typing import Any, Dict, List
 import psutil  # Add this import for memory monitoring
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import os
@@ -21,6 +23,7 @@ from .email_extraction import process_email_content, extract_email_sections, pro
 from .pdf_extraction import process_pdf_batch as _process_pdf_batch
 from .image_extraction import process_image_with_gemini as _process_image_with_gemini
 from .spreadsheet_extraction import extract_spreadsheet_documents, is_spreadsheet
+from .sync_asset_reuse import AssetResultReuse, MANIFEST_KEY
 from .llm_interface import create_gemini_client, gemini_embed_content_with_retry
 from .storage_ingest import (
     ingest_derived_attachment_bytes as _ingest_derived_attachment_bytes,
@@ -155,6 +158,24 @@ def run_sync_pipeline(
     access_token: str,
     force: bool = False,
 ) -> SyncResult:
+    downloads: dict[str, Any] = {}
+    try:
+        return _run_sync_pipeline(db, external_task_key, access_token, force, downloads)
+    finally:
+        for downloaded in downloads.values():
+            try:
+                os.unlink(downloaded.temp_path)
+            except FileNotFoundError:
+                pass
+
+
+def _run_sync_pipeline(
+    db: Session,
+    external_task_key: str,
+    access_token: str,
+    force: bool,
+    downloads: dict[str, Any],
+) -> SyncResult:
     task = db.get(Task, external_task_key)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -186,6 +207,9 @@ def run_sync_pipeline(
         db.add(snapshot)
         db.flush()
     else:
+        file_ids = select(TaskFile.id).where(TaskFile.snapshot_id == snapshot.id)
+        db.query(TaskChunk).filter(TaskChunk.file_id.in_(file_ids)).delete(synchronize_session=False)
+        db.query(TaskFile).filter(TaskFile.snapshot_id == snapshot.id).delete(synchronize_session=False)
         snapshot.task_context_json = item
         snapshot.ingestion_status = "building"
         snapshot.ingestion_error = None
@@ -200,28 +224,44 @@ def run_sync_pipeline(
     process_image_operation = globals()["process_image_with_gemini"]
 
     def download_asset_to_temp(asset: Dict[str, Any], token: str):
-        db.commit()
-        return download_asset_operation(asset, token)
+        asset_id = str(asset.get("id"))
+        if asset_id not in downloads:
+            db.commit()
+            downloads[asset_id] = download_asset_operation(asset, token)
+        return downloads[asset_id]
 
     def ingest_asset(*args, **kwargs):
+        if "downloaded" not in kwargs and not asset_exceeds_storage_limit(args[3]):
+            kwargs["downloaded"] = download_asset_to_temp(args[3], args[5])
         db.commit()
-        return ingest_asset_operation(*args, **kwargs)
+        result = ingest_asset_operation(*args, **kwargs)
+        reuse.record_file(result)
+        return result
 
     def ingest_derived_attachment_bytes(*args, **kwargs):
         db.commit()
-        return ingest_derived_attachment_operation(*args, **kwargs)
+        result = ingest_derived_attachment_operation(*args, **kwargs)
+        reuse.record_file(result)
+        return result
 
     def process_pdf_batch(*args, **kwargs):
         db.commit()
-        return process_pdf_operation(*args, **kwargs)
+        result = process_pdf_operation(*args, **kwargs)
+        if not result or "Error processing PDF:" in result:
+            reuse.disallow()
+        return result
 
     def process_image_with_gemini(*args, **kwargs):
         db.commit()
-        return process_image_operation(*args, **kwargs)
+        result = process_image_operation(*args, **kwargs)
+        if not result:
+            reuse.disallow()
+        return result
 
     asset_jobs = _collect_asset_jobs(item)
     csv_params: List[Dict[str, Any]] = []
     doc_stats: Dict[str, Any] = {"total_docs": 0, "total_chunks": 0, "by_kind": {}}
+    reuse = AssetResultReuse(db, snapshot, force=force, doc_stats=doc_stats, csv_params=csv_params)
     embed_buffer: list[dict] = []
     cleared_file_ids: set = set()
     embed_client = None
@@ -247,6 +287,7 @@ def run_sync_pipeline(
     def _should_skip(reason: str) -> bool:
         rss = _rss_mb()
         if rss and rss > RSS_GUARD_MB:
+            reuse.disallow_all()
             logger.warning(f"[OOM-GUARD] Skipping {reason}: RSS>{RSS_GUARD_MB}MB (current: {rss:.1f}MB)")
             return True
         return False
@@ -314,6 +355,8 @@ def run_sync_pipeline(
                 ),
             )
             embeddings = [_normalize(list(e.values)) for e in result.embeddings]
+            if len(embeddings) != len(embed_buffer):
+                raise RuntimeError("Embedding response did not cover every requested chunk")
             for record, vector in zip(embed_buffer, embeddings):
                 _ensure_chunks_cleared(record["file_id"])
                 db.add(
@@ -387,13 +430,18 @@ def run_sync_pipeline(
 
         text = _sanitize_text(text).strip()
         if not text:
+            reuse.disallow()
             return
+        if section == "spreadsheet:extraction-notice":
+            reuse.disallow()
         if len(text) > MAX_TEXT_CHARS:
+            reuse.disallow()
             text = text[:MAX_TEXT_CHARS]
         chunks = _chunk_text(text)
         if not chunks:
             return
         if len(chunks) > MAX_CHUNKS_PER_DOC:
+            reuse.disallow()
             chunks = chunks[:MAX_CHUNKS_PER_DOC]
         doc_stats["total_docs"] += 1
         doc_stats["total_chunks"] += len(chunks)
@@ -422,6 +470,10 @@ def run_sync_pipeline(
         asset = job["asset"]
         kind = job["kind"]
         filename = (asset.get("name") or "").lower()
+        reuse.begin(
+            str(asset.get("id")), filename=asset.get("name") or "", kind=kind,
+            extension=asset.get("file_extension") or "",
+        )
 
         logger.info(
             f"[ASSET] kind={kind} name={asset.get('name')} id={asset.get('id')}"
@@ -430,6 +482,13 @@ def run_sync_pipeline(
 
         if asset_exceeds_storage_limit(asset):
             ingest_asset(db, task, snapshot, asset, kind, access_token)
+            continue
+
+        downloaded = download_asset_to_temp(asset, access_token)
+        reuse.set_hash(getattr(downloaded, "sha256", None))
+        if reuse.try_reuse():
+            logger.info("[ASSET] Reused completed result for %s", asset.get("id"))
+            os.unlink(downloaded.temp_path)
             continue
 
         if _is_ai_data_pdf_preview(asset, kind):
@@ -532,6 +591,7 @@ def run_sync_pipeline(
             logger.info(f"[EMAIL] Downloaded to temp: {downloaded.temp_path}, size: {downloaded.size_bytes / (1024*1024):.2f} MB")
             _log_memory("After email download")
             if downloaded.size_bytes and downloaded.size_bytes > MAX_EMAIL_SIZE:
+                reuse.disallow()
                 logger.warning(
                     f"[EMAIL] Too large to extract: {downloaded.size_bytes} bytes"
                 )
@@ -609,6 +669,7 @@ def run_sync_pipeline(
             # Process PDF attachments ONE AT A TIME to minimize memory
             pdf_attachments = [att for att in attachments if att["filename"].lower().endswith(".pdf")]
             if len(pdf_attachments) > MAX_ATTACHMENTS_PER_EMAIL:
+                reuse.disallow()
                 logger.warning(f"[EMAIL] Limiting PDF attachments from {len(pdf_attachments)} to {MAX_ATTACHMENTS_PER_EMAIL}")
                 pdf_attachments = pdf_attachments[:MAX_ATTACHMENTS_PER_EMAIL]
             logger.info(f"[EMAIL] Processing {len(pdf_attachments)} PDF attachments one at a time")
@@ -627,6 +688,7 @@ def run_sync_pipeline(
                     file_size = os.path.getsize(att["temp_path"])
                     logger.info(f"[PDF {idx}] File size: {file_size / (1024*1024):.2f} MB")
                     if file_size > MAX_SINGLE_PDF_SIZE:
+                        reuse.disallow()
                         logger.warning(
                             f"[PDF {idx}] Too large for extraction: {file_size} bytes"
                         )
@@ -664,6 +726,7 @@ def run_sync_pipeline(
                             page=None,
                         )
                     else:
+                        reuse.disallow()
                         logger.warning(f"[PDF {idx}] Too large for extraction: {len(pdf_bytes) / (1024*1024):.2f} MB")
                         process_doc_for_embedding(
                             email_file.id,
@@ -705,6 +768,7 @@ def run_sync_pipeline(
                 if any(att["filename"].lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp"))
             ]
             if len(image_attachments) > MAX_ATTACHMENTS_PER_EMAIL:
+                reuse.disallow()
                 logger.warning(f"[EMAIL] Limiting image attachments from {len(image_attachments)} to {MAX_ATTACHMENTS_PER_EMAIL}")
                 image_attachments = image_attachments[:MAX_ATTACHMENTS_PER_EMAIL]
             logger.info(f"[EMAIL] Processing {len(image_attachments)} image attachments one at a time")
@@ -722,6 +786,7 @@ def run_sync_pipeline(
                     file_size = os.path.getsize(att["temp_path"])
                     logger.info(f"[IMAGE {idx}] File size: {file_size / (1024*1024):.2f} MB")
                     if file_size > MAX_IMAGE_SIZE:
+                        reuse.disallow()
                         logger.warning(
                             f"[IMAGE {idx}] Too large to extract: {file_size} bytes"
                         )
@@ -857,6 +922,7 @@ def run_sync_pipeline(
                 )
                 continue
             if downloaded.size_bytes > MAX_SINGLE_PDF_SIZE:
+                reuse.disallow()
                 file_record = ingest_asset(
                     db,
                     task,
@@ -927,6 +993,7 @@ def run_sync_pipeline(
                 )
                 continue
             if downloaded.size_bytes and downloaded.size_bytes > MAX_IMAGE_SIZE:
+                reuse.disallow()
                 logger.warning(
                     f"[IMAGE] Too large to extract: {downloaded.size_bytes} bytes"
                 )
@@ -1038,7 +1105,9 @@ def run_sync_pipeline(
 
     column_text = _build_column_text(item)
 
-    if column_text:
+    reuse.begin(f"columns:{task.item_id}", filename="monday_columns.txt", kind="monday_columns")
+    reuse.set_hash(hashlib.sha256(column_text.encode("utf-8")).hexdigest())
+    if column_text and not reuse.try_reuse():
         col_file = ingest_derived_attachment_bytes(
             db,
             task,
@@ -1062,6 +1131,7 @@ def run_sync_pipeline(
     task_context = dict(item)
     task_context["csv_params"] = csv_params
     task_context["extracted_docs_summary"] = doc_stats
+    task_context[MANIFEST_KEY] = reuse.manifest()
     snapshot.task_context_json = task_context
     snapshot.ingestion_status = "complete"
     snapshot.ingestion_error = None

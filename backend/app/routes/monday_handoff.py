@@ -11,7 +11,8 @@ from ..config import settings
 from ..db import get_db
 from ..monday_client import can_read_item, verify_session_token
 from ..models import HandoffCode, Task, TaskSnapshot, UserMondayLink
-from ..services.auto_sync import fetch_desired_source_revision
+from ..services.auto_sync import enqueue_user_refresh, fetch_desired_source_revision, log_refresh_decision
+from ..services.db_retry import run_transaction_with_retry
 from ..services.auto_sync_purge import mark_expired_task_restoring, record_meaningful_access
 from ..schemas import (
     HandoffInitRequest,
@@ -32,7 +33,7 @@ def _task_has_fresh_completed_snapshot(
     *,
     current_source_revision: str | None,
 ) -> bool:
-    if task.sync_status != "completed" or task.auto_sync_state == "expired":
+    if task.auto_sync_state == "expired":
         return False
     if not current_source_revision:
         return False
@@ -155,6 +156,40 @@ def handoff_resolve(
 
     if not can_read_item(link.access_token, handoff_code.monday_item_id):
         raise HTTPException(status_code=403, detail="No access to monday item")
+
+    if handoff_code.monday_board_id == str(settings.auto_sync_board_id):
+        current_revision = _safe_current_source_revision(link.access_token, handoff_code.monday_item_id)
+
+        def resolve_managed_handoff() -> HandoffResolveResponse:
+            code_query = db.query(HandoffCode).filter(HandoffCode.code == payload.code).populate_existing()
+            if db.bind is not None and db.bind.dialect.name == "postgresql":
+                code_query = code_query.with_for_update()
+            code = code_query.one_or_none()
+            if code is None or code.used or _as_aware_utc(code.expires_at) <= datetime.now(timezone.utc):
+                raise HTTPException(status_code=400, detail="Invalid or expired code")
+            task_key = f"{code.monday_account_id}:{code.monday_board_id}:{code.monday_item_id}"
+            current_task = db.get(Task, task_key, populate_existing=True)
+            fresh = current_task is not None and _task_has_fresh_completed_snapshot(
+                db, current_task, current_source_revision=current_revision,
+            )
+            if payload.force or not fresh:
+                enqueue_user_refresh(
+                    db, account_id=code.monday_account_id, board_id=code.monday_board_id,
+                    item_id=code.monday_item_id, trigger_type="handoff",
+                    desired_source_revision=current_revision, force=payload.force,
+                    refresh_reason="freshness_unavailable" if current_revision is None else None,
+                )
+            else:
+                log_refresh_decision(
+                    external_task_key=task_key, trigger_type="handoff", action="skipped", reason="fresh",
+                    desired_source_revision=current_revision,
+                    indexed_source_revision=current_task.last_indexed_source_revision,
+                )
+            code.used = True
+            db.commit()
+            return HandoffResolveResponse(externalTaskKey=task_key)
+
+        return run_transaction_with_retry(db, resolve_managed_handoff, operation_name="enqueue handoff refresh")
 
     handoff_code.used = True
 

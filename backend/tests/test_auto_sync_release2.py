@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 import uuid
 
@@ -292,11 +292,241 @@ def test_worker_runs_due_job_and_updates_task_state(db_session):
     assert task.last_successful_sync_at is not None
 
 
+@pytest.mark.parametrize("request_revision", ["rev-2", None])
+@pytest.mark.parametrize("result_revision", ["rev-1", "rev-2"])
+@pytest.mark.parametrize("force_request", [False, True])
+def test_worker_preserves_request_arriving_during_execution(
+    db_session, request_revision, result_revision, force_request,
+):
+    task = _task()
+    db_session.add(task)
+    db_session.flush()
+    job, _ = coalesce_auto_sync_job(
+        db_session, task, trigger_type="backfill",
+        desired_source_revision="rev-1", scheduled_for=datetime.now(timezone.utc),
+    )
+    db_session.commit()
+
+    def pipeline_with_new_request(db, external_task_key, access_token, force):
+        assert force is False
+        coalesce_auto_sync_job(
+            db, db.get(Task, external_task_key), trigger_type="webhook",
+            desired_source_revision=request_revision, force=force_request,
+            scheduled_for=datetime.now(timezone.utc),
+        )
+        db.commit()
+        return FakeSyncResult(status="done", snapshot_version=result_revision)
+
+    result = run_due_jobs_once(
+        db_session, worker_id="worker-1", access_token="service-token",
+        pipeline_runner=pipeline_with_new_request,
+    )
+
+    assert result.completed == 1
+    assert db_session.get(AutoSyncJob, job.id).status == "completed"
+    followups = db_session.query(AutoSyncJob).filter(AutoSyncJob.id != job.id).all()
+    assert len(followups) == 1
+    assert followups[0].status == "scheduled"
+    assert followups[0].desired_source_revision == request_revision
+    assert followups[0].force_requested == force_request
+    assert job.execution_generation == 1
+    assert job.desired_generation == 2
+    assert job.execution_trigger_type == "backfill"
+    assert task.sync_status == "queued"
+    assert task.last_indexed_source_revision == result_revision
+
+    def successor_pipeline(db, external_task_key, access_token, force):
+        assert force == force_request
+        return FakeSyncResult(status="done", snapshot_version="rev-3")
+
+    run_due_jobs_once(
+        db_session, worker_id="worker-2", access_token="service-token",
+        pipeline_runner=successor_pipeline,
+    )
+    assert db_session.query(AutoSyncJob).count() == 2
+    assert task.sync_status == "completed"
+    assert task.last_indexed_source_revision == "rev-3"
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_force_intent_survives_failure_but_is_not_repeated_after_success(db_session, failure):
+    task = _task()
+    task.last_indexed_source_revision = "rev-1"
+    db_session.add(task)
+    db_session.flush()
+    job, _ = coalesce_auto_sync_job(
+        db_session, task, trigger_type="manual", desired_source_revision="rev-1",
+        force=True, scheduled_for=datetime.now(timezone.utc),
+    )
+    job.max_attempts = 1
+    db_session.commit()
+
+    def pipeline(db, external_task_key, access_token, force):
+        assert force is True
+        coalesce_auto_sync_job(db, task, trigger_type="webhook", desired_source_revision="rev-2")
+        db.commit()
+        if failure:
+            raise RuntimeError("interrupted extraction")
+        return FakeSyncResult(status="done", snapshot_version="rev-1")
+
+    run_due_jobs_once(db_session, worker_id="worker", access_token="token", pipeline_runner=pipeline)
+    successor = db_session.query(AutoSyncJob).filter(AutoSyncJob.id != job.id).one()
+    assert job.status == ("failed" if failure else "completed")
+    assert successor.force_requested == failure
+    assert successor.attempt_count == 0
+    assert task.sync_status == "queued"
+
+
+def test_user_refresh_remains_immediate_after_multiple_webhooks(db_session):
+    task = _task()
+    db_session.add(task)
+    db_session.flush()
+    now = datetime.now(timezone.utc)
+    job, _ = coalesce_auto_sync_job(
+        db_session, task, trigger_type="manual", force=True, scheduled_for=now,
+    )
+    db_session.commit()
+    for revision in ("rev-2", "rev-3"):
+        coalesce_auto_sync_job(
+            db_session, task, trigger_type="webhook", desired_source_revision=revision,
+            scheduled_for=now + timedelta(minutes=5),
+        )
+        db_session.commit()
+    assert job.trigger_type == "manual"
+    assert job.force_requested is True
+    assert job.desired_source_revision is None
+    assert len(claim_due_jobs(db_session, worker_id="worker", now=now)) == 1
+    assert job.execution_generation == 3
+
+
+def test_forced_execution_retries_with_force(db_session):
+    task = _task()
+    db_session.add(task)
+    db_session.flush()
+    job, _ = coalesce_auto_sync_job(
+        db_session, task, trigger_type="manual", force=True,
+        scheduled_for=datetime.now(timezone.utc),
+    )
+    db_session.commit()
+    calls = []
+
+    def pipeline(db, external_task_key, access_token, force):
+        calls.append(force)
+        if len(calls) == 1:
+            raise RuntimeError("transient error")
+        return FakeSyncResult(status="done", snapshot_version="rev-1")
+
+    run_due_jobs_once(db_session, worker_id="worker", access_token="token", pipeline_runner=pipeline)
+    assert job.status == "retry_wait"
+    assert job.force_requested is True
+    job.next_retry_at = datetime.now(timezone.utc)
+    db_session.commit()
+    run_due_jobs_once(db_session, worker_id="worker", access_token="token", pipeline_runner=pipeline)
+    assert calls == [True, True]
+    assert job.status == "completed"
+
+
+def test_expired_execution_preserves_new_request_and_force(db_session):
+    task = _task()
+    db_session.add(task)
+    db_session.flush()
+    now = datetime.now(timezone.utc)
+    job, _ = coalesce_auto_sync_job(db_session, task, trigger_type="manual", force=True, scheduled_for=now)
+    db_session.commit()
+    auto_sync_worker.claim_due_jobs(db_session, worker_id="worker", now=now)
+    job.locked_at = now - timedelta(hours=2)
+    db_session.commit()
+    assert auto_sync_worker.recover_stuck_jobs(db_session, now=now) == 0
+    coalesce_auto_sync_job(db_session, task, trigger_type="webhook", desired_source_revision="rev-2")
+    job.heartbeat_at = now - timedelta(hours=2)
+    job.max_attempts = 1
+    db_session.commit()
+
+    assert auto_sync_worker.recover_stuck_jobs(db_session, now=now) == 1
+    successor = db_session.query(AutoSyncJob).filter(AutoSyncJob.id != job.id).one()
+    assert successor.force_requested is True
+    assert successor.status == "scheduled"
+    assert task.sync_status == "queued"
+
+
+@pytest.mark.parametrize("skip_execution", [False, True])
+def test_completion_reloads_requests_committed_by_another_session(db_session, monkeypatch, skip_execution):
+    task = _task()
+    task.last_indexed_source_revision = "rev-1"
+    db_session.add(task)
+    db_session.flush()
+    if skip_execution:
+        db_session.add(TaskSnapshot(
+            id=uuid.uuid4(), external_task_key=task.external_task_key,
+            snapshot_version="rev-1", task_context_json={}, ingestion_status="complete",
+        ))
+    job, _ = coalesce_auto_sync_job(
+        db_session, task, trigger_type="backfill", desired_source_revision="rev-1",
+        scheduled_for=datetime.now(timezone.utc),
+    )
+    db_session.commit()
+    job_id = job.id
+    task_key = task.external_task_key
+    sessions = sessionmaker(bind=db_session.bind, autoflush=False, expire_on_commit=False)
+    lock_execution = auto_sync_worker._lock_claimed_job_and_task
+    interleaved = []
+
+    def completion_after_request(db, job_id, *, worker_id):
+        if not interleaved:
+            with sessions() as api_db:
+                api_task = api_db.get(Task, task_key)
+                coalesce_auto_sync_job(
+                    api_db, api_task, trigger_type="manual", force=True,
+                    scheduled_for=datetime.now(timezone.utc),
+                )
+                api_db.commit()
+            interleaved.append(True)
+        return lock_execution(db, job_id, worker_id=worker_id)
+
+    monkeypatch.setattr(auto_sync_worker, "_lock_claimed_job_and_task", completion_after_request)
+    with sessions() as worker_db:
+        cached_job = worker_db.get(AutoSyncJob, job_id)
+        result = run_due_jobs_once(
+            worker_db, worker_id="worker", access_token="token",
+            pipeline_runner=lambda *args: FakeSyncResult(status="done", snapshot_version="rev-1"),
+        )
+        assert result.skipped == int(skip_execution)
+        assert result.completed == int(not skip_execution)
+        assert cached_job.execution_generation == 1
+        assert cached_job.desired_generation == 2
+        successor = worker_db.query(AutoSyncJob).filter(AutoSyncJob.status == "scheduled").one()
+        assert successor.force_requested is True
+        assert successor.trigger_type == "manual"
+        assert worker_db.get(Task, task_key).sync_status == "queued"
+
+
+def test_worker_does_not_skip_missing_snapshot(db_session):
+    task = _task()
+    task.last_indexed_source_revision = "rev-1"
+    db_session.add(task)
+    db_session.flush()
+    coalesce_auto_sync_job(
+        db_session, task, trigger_type="handoff", desired_source_revision="rev-1",
+        scheduled_for=datetime.now(timezone.utc),
+    )
+    db_session.commit()
+    result = run_due_jobs_once(
+        db_session, worker_id="worker", access_token="token",
+        pipeline_runner=lambda *args: FakeSyncResult(status="done", snapshot_version="rev-1"),
+    )
+    assert result.completed == 1
+    assert result.skipped == 0
+
+
 def test_worker_skips_job_when_source_revision_is_fresh(db_session):
     now = datetime.now(timezone.utc)
     task = _task()
     task.last_indexed_source_revision = "rev-1"
     db_session.add(task)
+    db_session.add(TaskSnapshot(
+        id=uuid.uuid4(), external_task_key=task.external_task_key,
+        snapshot_version="rev-1", task_context_json={}, ingestion_status="complete",
+    ))
     db_session.flush()
     job, _ = coalesce_auto_sync_job(
         db_session,
@@ -373,7 +603,8 @@ def test_worker_retries_failed_job_without_losing_durable_state(db_session, capl
     assert job.attempt_count == 1
     assert job.next_retry_at is not None
     assert job.locked_at is None
-    assert task.sync_status == "failed"
+    assert task.sync_status == "queued"
+    assert task.sync_completed_at is None
     assert task.last_sync_result == "failed"
     assert snapshot.ingestion_status == "failed"
     assert snapshot.ingestion_error == "temporary monday throttling"
@@ -672,6 +903,10 @@ def test_active_backfill_skips_already_indexed_revision(db_session, monkeypatch)
     }
     existing_task = _task("1")
     existing_task.last_indexed_source_revision = "latest-revision"
+    db_session.add(TaskSnapshot(
+        id=uuid.uuid4(), external_task_key=existing_task.external_task_key,
+        snapshot_version="latest-revision", task_context_json={}, ingestion_status="complete",
+    ))
     db_session.add(existing_task)
     db_session.commit()
 

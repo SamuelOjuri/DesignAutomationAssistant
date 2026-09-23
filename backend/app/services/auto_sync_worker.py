@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import SessionLocal
 from ..models import AutoSyncJob, Task, TaskSnapshot
-from .auto_sync import get_monday_ingestion_access_token, utc_now
+from .auto_sync import coalesce_auto_sync_job, get_monday_ingestion_access_token, has_completed_snapshot, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +155,7 @@ def _mark_task_completed(
     task.last_sync_result = result
     if source_revision:
         task.last_indexed_source_revision = source_revision
+        task.latest_snapshot_version = source_revision
     if result in {"done", "unchanged"}:
         task.auto_synced_at = now
         task.last_successful_sync_at = now
@@ -185,11 +186,11 @@ def recover_stuck_jobs(
     cutoff = now - timedelta(seconds=lease_timeout_seconds)
     query = (
         db.query(AutoSyncJob)
+        .populate_existing()
         .filter(
             AutoSyncJob.status == "running",
             or_(
                 AutoSyncJob.locked_at.is_(None),
-                AutoSyncJob.locked_at <= cutoff,
                 AutoSyncJob.heartbeat_at <= cutoff,
                 and_(AutoSyncJob.heartbeat_at.is_(None), AutoSyncJob.locked_at <= cutoff),
             ),
@@ -206,6 +207,12 @@ def recover_stuck_jobs(
         job.heartbeat_at = None
         job.updated_at = now
         job.last_error = "Worker lease expired"
+        job.force_requested = job.force_requested or job.execution_force
+        if task is not None and _has_newer_request(job):
+            _finish_job(job, status="failed", error=job.last_error, now=now)
+            _mark_task_failed(task, error=job.last_error, now=now)
+            _schedule_successor(db, job, task, now=now)
+            continue
         if job.attempt_count >= job.max_attempts:
             job.status = "failed"
             job.completed_at = now
@@ -215,6 +222,10 @@ def recover_stuck_jobs(
             job.next_retry_at = now
             job.scheduled_for = now
             _mark_task_failed(task, error=job.last_error, now=now)
+            if task is not None:
+                task.sync_status = "queued"
+                task.sync_completed_at = None
+                task.sync_finished_at = None
 
     if stuck_jobs:
         db.commit()
@@ -231,6 +242,7 @@ def claim_due_jobs(
     now = now or utc_now()
     query = (
         db.query(AutoSyncJob)
+        .populate_existing()
         .filter(
             or_(
                 and_(AutoSyncJob.status.in_(("pending", "scheduled")), AutoSyncJob.scheduled_for <= now),
@@ -246,6 +258,11 @@ def claim_due_jobs(
     due_jobs = _with_row_locks(db, query).all()
 
     for job in due_jobs:
+        job.execution_generation = job.desired_generation
+        job.execution_source_revision = job.desired_source_revision
+        job.execution_trigger_type = job.trigger_type
+        job.execution_force = job.force_requested
+        job.force_requested = False
         job.status = "running"
         job.locked_at = now
         job.locked_by = worker_id
@@ -351,6 +368,32 @@ def _finish_job(
     job.updated_at = now
 
 
+def _has_newer_request(job: AutoSyncJob) -> bool:
+    return job.desired_generation > (job.execution_generation or 0)
+
+
+def _schedule_successor(db: Session, job: AutoSyncJob, task: Task, *, now: datetime) -> None:
+    db.flush()
+    coalesce_auto_sync_job(
+        db, task, trigger_type=job.trigger_type,
+        desired_source_revision=job.desired_source_revision,
+        scheduled_for=now, now=now, force=job.force_requested,
+        active_job_lookup_complete=True,
+        refresh_reason="newer_request_during_execution",
+    )
+
+
+def _complete_execution(
+    db: Session, job: AutoSyncJob, task: Task, *,
+    result: str, source_revision: Optional[str], now: datetime,
+) -> None:
+    _finish_job(job, status="skipped" if result == "skipped" else "completed", now=now)
+    task.last_sync_trigger = job.execution_trigger_type or job.trigger_type
+    _mark_task_completed(task, result=result, source_revision=source_revision, now=now)
+    if _has_newer_request(job):
+        _schedule_successor(db, job, task, now=now)
+
+
 def _record_claimed_job_failure(
     db: Session,
     job_id: object,
@@ -376,6 +419,7 @@ def _record_claimed_job_failure(
     job.heartbeat_at = None
     job.last_error = error
     job.updated_at = failed_at
+    job.force_requested = job.force_requested or job.execution_force
     _mark_task_failed(task, error=error, now=failed_at)
     if task is not None:
         db.query(TaskSnapshot).filter(
@@ -389,10 +433,19 @@ def _record_claimed_job_failure(
             },
             synchronize_session=False,
         )
+    if task is not None and _has_newer_request(job):
+        _finish_job(job, status="failed", error=error, now=failed_at)
+        _schedule_successor(db, job, task, now=failed_at)
+        db.commit()
+        return "retry_wait"
     if job.attempt_count < job.max_attempts:
         job.status = "retry_wait"
         job.next_retry_at = failed_at + _retry_delay(job.attempt_count)
         job.scheduled_for = job.next_retry_at
+        if task is not None:
+            task.sync_status = "queued"
+            task.sync_completed_at = None
+            task.sync_finished_at = None
         db.commit()
         return "retry_wait"
 
@@ -460,7 +513,11 @@ def execute_claimed_job(
             db.commit()
             return "failed"
 
-    if job.desired_source_revision and job.desired_source_revision == task.last_indexed_source_revision:
+    if (
+        not force and not job.execution_force
+        and job.execution_source_revision
+        and job.execution_source_revision == task.last_indexed_source_revision
+    ):
         job, task = _lock_claimed_job_and_task(db, job_id, worker_id=worker_id)
         if job is None:
             db.rollback()
@@ -473,8 +530,10 @@ def execute_claimed_job(
             db.commit()
             return "failed"
         if not (
-            job.desired_source_revision
-            and job.desired_source_revision == task.last_indexed_source_revision
+            not force and not job.execution_force
+            and job.execution_source_revision
+            and job.execution_source_revision == task.last_indexed_source_revision
+            and has_completed_snapshot(db, task, job.execution_source_revision)
         ):
             db.rollback()
             job = db.get(AutoSyncJob, job_id)
@@ -482,8 +541,10 @@ def execute_claimed_job(
             if job is None or task is None:
                 return "missing"
         else:
-            _finish_job(job, status="skipped", now=now)
-            _mark_task_completed(task, result="skipped", source_revision=job.desired_source_revision, now=now)
+            _complete_execution(
+                db, job, task, result="skipped",
+                source_revision=job.execution_source_revision, now=now,
+            )
             db.commit()
             return "skipped"
 
@@ -494,6 +555,8 @@ def execute_claimed_job(
 
     job_id_for_retry = job.id
     external_task_key = task.external_task_key
+    execution_force = force or job.execution_force
+    execution_revision = job.execution_source_revision
     db.commit()
     heartbeat_stop, heartbeat_thread = _start_job_heartbeat(
         db,
@@ -503,7 +566,7 @@ def execute_claimed_job(
     )
     try:
         token = access_token or get_monday_ingestion_access_token()
-        result = pipeline_runner(db, external_task_key, token, force)
+        result = pipeline_runner(db, external_task_key, token, execution_force)
         _stop_job_heartbeat(heartbeat_stop, heartbeat_thread)
         finished_at = utc_now()
         job, task = _lock_claimed_job_and_task(db, job_id, worker_id=worker_id)
@@ -517,10 +580,9 @@ def execute_claimed_job(
             _finish_job(job, status="failed", now=finished_at, error="Task not found for auto-sync job")
             db.commit()
             return "failed"
-        source_revision = result.snapshot_version or job.desired_source_revision
+        source_revision = result.snapshot_version or execution_revision
         result_status = "unchanged" if result.status == "unchanged" else "done"
-        _finish_job(job, status="completed", now=finished_at)
-        _mark_task_completed(task, result=result_status, source_revision=source_revision, now=finished_at)
+        _complete_execution(db, job, task, result=result_status, source_revision=source_revision, now=finished_at)
         db.commit()
         return "completed"
     except Exception as exc:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+import hashlib
 import io
 import os
 import sys
@@ -13,13 +15,16 @@ from pathlib import Path
 import httpx
 import pytest
 import requests
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session
 from tenacity import wait_none
 
-from backend.app.models import Task, TaskSnapshot, TaskChunk
+from backend.app.db import Base
+from backend.app.models import Task, TaskSnapshot, TaskChunk, TaskFile
 
 sys.modules.setdefault("extract_msg", ModuleType("extract_msg"))
 
-from backend.app.services import storage_ingest, sync_pipeline
+from backend.app.services import storage_ingest, sync_pipeline, sync_asset_reuse
 
 
 class FakeQuery:
@@ -28,6 +33,15 @@ class FakeQuery:
 
     def filter_by(self, **kwargs):
         return self
+
+    def filter(self, *args):
+        return self
+
+    def order_by(self, *args):
+        return self
+
+    def delete(self, **kwargs):
+        pass
 
     def first(self):
         return self.result
@@ -533,11 +547,14 @@ def test_spreadsheet_pipeline_stores_and_indexes_own_file(
 
     class ChunkQuery(FakeQuery):
         def filter(self, expression):
-            self.file_id = expression.right.value
+            self.file_id = getattr(expression.right, "value", None)
             return self
 
         def delete(self, **kwargs):
-            db.chunks[:] = [chunk for chunk in db.chunks if chunk.file_id != self.file_id]
+            db.chunks[:] = [
+                chunk for chunk in db.chunks
+                if self.file_id is not None and chunk.file_id != self.file_id
+            ]
 
     class ChunkDB(FakeDB):
         def __init__(self):
@@ -642,6 +659,299 @@ def test_pipeline_returns_unchanged_only_for_complete_snapshot(monkeypatch):
 
     assert result.status == "unchanged"
     assert snapshot.ingestion_status == "complete"
+
+
+@pytest.fixture()
+def incremental_pipeline(monkeypatch, tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+
+    @event.listens_for(engine, "connect")
+    def register_uuid(connection, record):
+        connection.create_function("gen_random_uuid", 0, lambda: uuid.uuid4().hex)
+
+    Base.metadata.create_all(engine)
+    task, _ = _ingest_test_task_and_snapshot()
+    item = {
+        "id": task.item_id,
+        "name": "Roof enquiry",
+        "updated_at": "2026-09-21T08:16:14Z",
+        "assets": [{"id": "drawing", "name": "roof.pdf"}],
+        "updates": [],
+        "column_values": [{"id": "priority", "column": {"title": "Priority"}, "text": "Low"}],
+    }
+    contents = {"drawing": b"%PDF-drawing"}
+    calls = {"downloads": [], "uploads": [], "pdfs": [], "embeddings": []}
+
+    def download(asset, access_token):
+        content = contents[asset["id"]]
+        path = tmp_path / str(uuid.uuid4())
+        path.write_bytes(content)
+        calls["downloads"].append(asset["id"])
+        return storage_ingest.DownloadedAsset(
+            temp_path=str(path), content_type="application/octet-stream",
+            sha256=hashlib.sha256(content).hexdigest(), size_bytes=len(content),
+        )
+
+    def extract(pdfs):
+        calls["pdfs"].extend(pdf["filename"] for pdf in pdfs)
+        return "Roof specification"
+
+    def embed(*args, **kwargs):
+        calls["embeddings"].extend(kwargs["contents"])
+        return SimpleNamespace(embeddings=[
+            SimpleNamespace(values=[1.0] + [0.0] * 1535)
+            for _ in kwargs["contents"]
+        ])
+
+    original_upsert = storage_ingest.upsert_task_file
+
+    def upsert(db, **values):
+        values["snapshot_id"] = uuid.UUID(str(values["snapshot_id"]))
+        return original_upsert(db, **values)
+
+    monkeypatch.setattr(storage_ingest, "upsert_task_file", upsert)
+    monkeypatch.setattr(sync_pipeline, "fetch_item_with_assets", lambda *args: deepcopy(item))
+    monkeypatch.setattr(sync_pipeline, "download_asset_to_temp", download)
+    monkeypatch.setattr(storage_ingest, "download_asset_to_temp", download)
+    monkeypatch.setattr(storage_ingest, "upload_with_retry", lambda bucket, path, *args: calls["uploads"].append(path))
+    monkeypatch.setattr(sync_pipeline, "process_pdf_batch", extract)
+    monkeypatch.setattr(sync_pipeline, "create_gemini_client", lambda: object())
+    monkeypatch.setattr(sync_pipeline, "gemini_embed_content_with_retry", embed)
+    monkeypatch.setattr(sync_pipeline.psutil, "Process", lambda: SimpleNamespace(
+        memory_info=lambda: SimpleNamespace(rss=100 * 1024 * 1024),
+    ))
+    with Session(engine) as db:
+        db.add(task)
+        db.commit()
+        yield SimpleNamespace(db=db, task=task, item=item, contents=contents, calls=calls, temp_path=tmp_path)
+    engine.dispose()
+
+
+def test_metadata_only_refresh_reuses_asset_results(incremental_pipeline):
+    case = incremental_pipeline
+    first = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    previous_calls = deepcopy(case.calls)
+    case.item["updated_at"] = "2026-09-21T10:47:59Z"
+    second = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+
+    assert second.snapshot_version != first.snapshot_version
+    assert second.snapshot_version == storage_ingest.compute_snapshot_version(case.item)
+    assert case.calls["pdfs"] == previous_calls["pdfs"]
+    assert case.calls["embeddings"] == previous_calls["embeddings"]
+    assert case.calls["uploads"] == previous_calls["uploads"]
+    assert case.calls["downloads"] == ["drawing", "drawing"]
+    snapshots = case.db.query(TaskSnapshot).all()
+    assert len(snapshots) == 2
+    assert all(snapshot.ingestion_status == "complete" for snapshot in snapshots)
+    for snapshot in snapshots:
+        files = case.db.query(TaskFile).filter_by(snapshot_id=snapshot.id).all()
+        assert len(files) == 2
+        assert case.db.query(TaskChunk).filter(TaskChunk.file_id.in_([file.id for file in files])).count() == 2
+    assert list(case.temp_path.iterdir()) == []
+
+
+def test_metadata_changes_only_reembed_changed_columns(incremental_pipeline):
+    case = incremental_pipeline
+    sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    case.item["updated_at"] = "2026-09-23T09:00:00Z"
+    case.item["name"] = "Renamed enquiry"
+    case.item["column_values"][0]["text"] = "High"
+    result = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+
+    snapshot = case.db.query(TaskSnapshot).filter_by(snapshot_version=result.snapshot_version).one()
+    assert snapshot.task_context_json["name"] == "Renamed enquiry"
+    assert snapshot.task_context_json["column_values"][0]["text"] == "High"
+    assert case.calls["pdfs"] == ["roof.pdf"]
+    assert case.calls["embeddings"] == [
+        "Roof specification", "Column: Priority | Value: Low", "Column: Priority | Value: High",
+    ]
+    assert len(case.calls["uploads"]) == 3
+
+
+def test_reuse_manifest_is_private_to_ingestion(incremental_pipeline, monkeypatch):
+    from backend.app.routes import tasks
+    from backend.app.services.retrieval import get_task_context
+
+    case = incremental_pipeline
+    sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    monkeypatch.setattr(tasks, "require_task_access", lambda *args: case.task)
+    summary = tasks.task_summary(case.task.external_task_key, db=case.db, current_user=None)
+    context = get_task_context(case.db, case.task.external_task_key)
+
+    assert sync_asset_reuse.MANIFEST_KEY not in summary.taskContext
+    assert sync_asset_reuse.MANIFEST_KEY not in context
+    assert context == summary.taskContext
+    assert sync_asset_reuse.MANIFEST_KEY in case.db.query(TaskSnapshot).one().task_context_json
+
+
+@pytest.mark.parametrize("change", ["bytes", "name", "role", "version", "legacy", "failed", "deleted", "missing_chunks"])
+def test_asset_reuse_requires_verified_compatible_results(incremental_pipeline, monkeypatch, change):
+    case = incremental_pipeline
+    first = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    snapshot = case.db.query(TaskSnapshot).filter_by(snapshot_version=first.snapshot_version).one()
+    file_record = case.db.query(TaskFile).filter_by(snapshot_id=snapshot.id, monday_asset_id="drawing").one()
+    if change == "bytes":
+        case.contents["drawing"] = b"%PDF-revised drawing"
+    elif change == "name":
+        case.item["assets"][0]["name"] = "renamed.pdf"
+    elif change == "role":
+        case.item["column_values"].append({
+            "type": "file", "column": {"title": "Drawings"},
+            "value": '{"files":[{"assetId":"drawing"}]}',
+        })
+    elif change == "version":
+        monkeypatch.setattr(sync_asset_reuse, "PROCESSING_VERSION", "asset-results-v2")
+    elif change == "legacy":
+        context = deepcopy(snapshot.task_context_json)
+        context.pop(sync_asset_reuse.MANIFEST_KEY)
+        snapshot.task_context_json = context
+    elif change == "failed":
+        snapshot.ingestion_status = "failed"
+    elif change == "deleted":
+        file_record.deleted_at = snapshot.completed_at
+    elif change == "missing_chunks":
+        case.db.query(TaskChunk).filter_by(file_id=file_record.id).delete()
+    case.db.commit()
+    case.item["updated_at"] = "2026-09-23T09:00:00Z"
+
+    sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+
+    assert len(case.calls["pdfs"]) == 2
+    assert list(case.temp_path.iterdir()) == []
+
+
+def test_incremental_addition_and_removal_only_processes_new_asset(incremental_pipeline):
+    case = incremental_pipeline
+    sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    case.item["updated_at"] = "2026-09-23T09:00:00Z"
+    case.item["updates"] = [{"id": "update", "assets": [{"id": "new", "name": "new.pdf"}]}]
+    case.contents["new"] = b"%PDF-new drawing"
+    sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    assert case.calls["pdfs"] == ["roof.pdf", "new.pdf"]
+    case.item["updated_at"] = "2026-09-23T10:00:00Z"
+    case.item["assets"] = []
+    result = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+
+    snapshot = case.db.query(TaskSnapshot).filter_by(snapshot_version=result.snapshot_version).one()
+    files = case.db.query(TaskFile).filter_by(snapshot_id=snapshot.id).all()
+    assert len(files) == 2
+    assert not any(file.monday_asset_id == "drawing" for file in files)
+    assert case.calls["pdfs"] == ["roof.pdf", "new.pdf"]
+    assert snapshot.task_context_json["extracted_docs_summary"]["total_chunks"] == 2
+
+
+def test_reuse_preserves_email_family_csv_and_vectors(incremental_pipeline):
+    case = incremental_pipeline
+    message = EmailMessage()
+    message["Subject"] = "Roof enquiry"
+    message.set_content("Please review this drawing")
+    message.add_attachment(b"%PDF-attachment", maintype="application", subtype="pdf", filename="drawing.pdf")
+    message.add_attachment(b"notes", maintype="text", subtype="plain", filename="notes.txt")
+    case.item["assets"] = [
+        {"id": "email", "name": "enquiry.eml"}, {"id": "csv", "name": "parameters.csv"},
+    ]
+    case.contents.update({"email": message.as_bytes(), "csv": b"Parameter,Value,Source\nU-Value,0.12,Email\n"})
+    first = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    before = deepcopy(case.calls)
+    case.item["updated_at"] = "2026-09-23T09:00:00Z"
+    second = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    snapshots = [case.db.query(TaskSnapshot).filter_by(snapshot_version=version).one()
+                 for version in (first.snapshot_version, second.snapshot_version)]
+
+    assert snapshots[0].task_context_json["csv_params"] == snapshots[1].task_context_json["csv_params"]
+    assert snapshots[0].task_context_json["extracted_docs_summary"] == snapshots[1].task_context_json["extracted_docs_summary"]
+    file_sets = [case.db.query(TaskFile).filter_by(snapshot_id=snapshot.id).all() for snapshot in snapshots]
+    assert len(file_sets[0]) == len(file_sets[1]) == 5
+    assert {file.object_path for file in file_sets[0]} == {file.object_path for file in file_sets[1]}
+    assert {file.id for file in file_sets[0]}.isdisjoint({file.id for file in file_sets[1]})
+    chunks = [case.db.query(TaskChunk).filter(TaskChunk.file_id.in_([file.id for file in files]))
+              .order_by(TaskChunk.chunk_text).all() for files in file_sets]
+    assert [chunk.chunk_text for chunk in chunks[0]] == [chunk.chunk_text for chunk in chunks[1]]
+    assert all((old.embedding == new.embedding).all() for old, new in zip(*chunks))
+    for name in ("pdfs", "embeddings", "uploads"):
+        assert case.calls[name] == before[name]
+
+
+def test_force_reprocesses_without_overwriting_shared_objects(incremental_pipeline):
+    case = incremental_pipeline
+    first = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    case.item["updated_at"] = "2026-09-23T09:00:00Z"
+    second = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    case.item["updated_at"] = "2026-09-21T08:16:14Z"
+    case.contents["drawing"] = b"%PDF-changed without new asset id"
+    forced = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token", force=True)
+
+    assert forced.snapshot_version == first.snapshot_version
+    assert len(case.calls["pdfs"]) == 2
+    snapshots = [case.db.query(TaskSnapshot).filter_by(snapshot_version=version).one()
+                 for version in (first.snapshot_version, second.snapshot_version)]
+    files = [case.db.query(TaskFile).filter_by(snapshot_id=snapshot.id, monday_asset_id="drawing").one()
+             for snapshot in snapshots]
+    assert files[0].sha256 != files[1].sha256
+    assert files[0].object_path != files[1].object_path
+    assert case.calls["uploads"].count(files[1].object_path) == 1
+
+
+def test_failed_extraction_is_not_reused(incremental_pipeline, monkeypatch):
+    case = incremental_pipeline
+    original = sync_pipeline.process_pdf_batch
+    monkeypatch.setattr(sync_pipeline, "process_pdf_batch", lambda *args: "Error processing PDF: service unavailable")
+    first = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    snapshot = case.db.query(TaskSnapshot).filter_by(snapshot_version=first.snapshot_version).one()
+    assert "drawing" not in snapshot.task_context_json[sync_asset_reuse.MANIFEST_KEY]["assets"]
+    monkeypatch.setattr(sync_pipeline, "process_pdf_batch", original)
+    case.item["updated_at"] = "2026-09-23T09:00:00Z"
+
+    sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+
+    assert case.calls["pdfs"] == ["roof.pdf"]
+
+
+def test_failed_refresh_keeps_previous_complete_snapshot(incremental_pipeline, monkeypatch):
+    case = incremental_pipeline
+    first = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    case.item["updated_at"] = "2026-09-23T09:00:00Z"
+    case.item["assets"].append({"id": "new", "name": "new.pdf"})
+    case.contents["new"] = b"%PDF-new"
+    original_embed = sync_pipeline.gemini_embed_content_with_retry
+
+    def fail_embedding(*args, **kwargs):
+        raise RuntimeError("embedding unavailable")
+
+    monkeypatch.setattr(sync_pipeline, "gemini_embed_content_with_retry", fail_embedding)
+    with pytest.raises(RuntimeError, match="embedding unavailable"):
+        sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    case.db.rollback()
+    assert case.task.latest_snapshot_version == first.snapshot_version
+    complete = case.db.query(TaskSnapshot).filter_by(ingestion_status="complete").all()
+    assert len(complete) == 1
+    assert complete[0].snapshot_version == first.snapshot_version
+    assert list(case.temp_path.iterdir()) == []
+
+    monkeypatch.setattr(sync_pipeline, "gemini_embed_content_with_retry", original_embed)
+    result = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    snapshot = case.db.query(TaskSnapshot).filter_by(snapshot_version=result.snapshot_version).one()
+    files = case.db.query(TaskFile).filter_by(snapshot_id=snapshot.id).all()
+    assert len(files) == 3
+    assert case.db.query(TaskChunk).filter(TaskChunk.file_id.in_([file.id for file in files])).count() == 3
+    assert snapshot.ingestion_status == "complete"
+    assert case.calls["pdfs"] == ["roof.pdf", "new.pdf", "new.pdf"]
+
+
+def test_memory_guard_does_not_cache_incomplete_asset_results(incremental_pipeline, monkeypatch):
+    case = incremental_pipeline
+    monkeypatch.setattr(sync_pipeline.psutil, "Process", lambda: SimpleNamespace(
+        memory_info=lambda: SimpleNamespace(rss=2800 * 1024 * 1024),
+    ))
+    result = sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    snapshot = case.db.query(TaskSnapshot).filter_by(snapshot_version=result.snapshot_version).one()
+    assert snapshot.task_context_json[sync_asset_reuse.MANIFEST_KEY]["assets"] == {}
+    monkeypatch.setattr(sync_pipeline.psutil, "Process", lambda: SimpleNamespace(
+        memory_info=lambda: SimpleNamespace(rss=100 * 1024 * 1024),
+    ))
+    case.item["updated_at"] = "2026-09-23T09:00:00Z"
+    sync_pipeline.run_sync_pipeline(case.db, case.task.external_task_key, "token")
+    assert case.calls["pdfs"] == ["roof.pdf"]
 
 
 def test_ai_data_pdf_preview_is_stored_without_csv_parsing_or_embedding(

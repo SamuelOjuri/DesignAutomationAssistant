@@ -536,7 +536,7 @@ export default function TaskPage() {
         }
 
         // If still syncing, keep polling at a slower interval
-        while (!isCancelled() && finalStatus === "syncing") {
+        while (!isCancelled() && (finalStatus === "syncing" || finalStatus === "queued")) {
           await delay(slowIntervalMs);
 
           const data = await fetchSummary();
@@ -567,7 +567,7 @@ export default function TaskPage() {
   }, []);
 
   useEffect(() => {
-    if (summary?.syncStatus === "syncing") {
+    if (summary?.syncStatus === "syncing" || summary?.syncStatus === "queued") {
       void pollForSnapshotChange(summary.snapshotVersion ?? null);
     }
   }, [pollForSnapshotChange, summary?.snapshotVersion, summary?.syncStatus]);

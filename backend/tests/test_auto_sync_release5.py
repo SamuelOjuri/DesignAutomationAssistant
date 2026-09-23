@@ -182,6 +182,54 @@ def test_purge_keeps_retryable_file_references_when_storage_delete_fails(db_sess
     assert db_session.query(TaskFile).count() == 2
 
 
+@pytest.mark.parametrize("retain_other_task", [False, True])
+@pytest.mark.parametrize("fail_delete", [False, True])
+def test_purge_handles_shared_storage_references(db_session, retain_other_task, fail_delete):
+    task = _completed_task()
+    db_session.add(task)
+    first = _add_snapshot_file_and_chunk(db_session, task)
+    second_snapshot = TaskSnapshot(
+        id=uuid.uuid4(), external_task_key=task.external_task_key,
+        snapshot_version="rev-2", task_context_json={},
+    )
+    second = TaskFile(
+        id=uuid.uuid4(), external_task_key=task.external_task_key,
+        snapshot_id=second_snapshot.id, kind=first.kind, monday_asset_id=first.monday_asset_id,
+        bucket=first.bucket, object_path=first.object_path,
+    )
+    db_session.add_all([second_snapshot, second])
+    if retain_other_task:
+        retained = Task(
+            external_task_key="acct:1882196103:retained", account_id="acct",
+            board_id="1882196103", item_id="retained", auto_sync_state="active",
+        )
+        db_session.add(retained)
+        _add_snapshot_file_and_chunk(db_session, retained)
+    db_session.commit()
+    storage_key = (first.bucket, first.object_path)
+    removed = []
+
+    def remove(bucket, path):
+        removed.append((bucket, path))
+        if fail_delete:
+            raise RuntimeError("storage unavailable")
+
+    result = purge_expired_tasks_once(
+        db_session, dry_run=False, policy=_policy(),
+        remove_storage_object=remove, ignore_disabled=True,
+    )
+
+    assert removed == ([] if retain_other_task else [storage_key])
+    if fail_delete and not retain_other_task:
+        assert result.failed == 1
+        assert first.deleted_at is None and second.deleted_at is None
+        assert first.delete_error == second.delete_error == "storage unavailable"
+    else:
+        assert result.purged == 1
+        assert db_session.query(TaskFile).filter_by(external_task_key=task.external_task_key).count() == 0
+        assert db_session.query(TaskFile).count() == (1 if retain_other_task else 0)
+
+
 def test_purge_skips_storage_delete_for_unsupported_file(db_session):
     task = _completed_task()
     db_session.add(task)

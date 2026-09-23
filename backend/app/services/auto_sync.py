@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import logging
 from typing import Any, Optional
 import uuid
 
@@ -10,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import AutoSyncJob, Task
+from ..models import AutoSyncJob, Task, TaskSnapshot
 from ..monday_client import fetch_current_source_revision_inputs
 from .auto_sync_policy import (
     ACTIVE_JOB_STATUSES,
@@ -21,6 +22,8 @@ from .auto_sync_policy import (
 )
 from .db_retry import AutoSyncConcurrencyError
 from .storage_ingest import compute_snapshot_version
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,58 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def has_completed_snapshot(db: Session, task: Task, revision: Optional[str]) -> bool:
+    return bool(revision) and task.auto_sync_state != "expired" and (
+        db.query(TaskSnapshot.id).filter_by(
+            external_task_key=task.external_task_key,
+            snapshot_version=revision, ingestion_status="complete",
+        ).first() is not None
+    )
+
+
+def refresh_reason_for_task(
+    db: Session, task: Optional[Task], *, desired_source_revision: Optional[str], force: bool = False,
+) -> str:
+    if force:
+        return "force"
+    if task is None:
+        return "missing"
+    if task.auto_sync_state == "expired":
+        return "restore"
+    if desired_source_revision is None:
+        return "source_revision_unknown"
+    if task.sync_status == "failed":
+        return "failed"
+    if not task.last_indexed_source_revision and not task.latest_snapshot_version:
+        return "missing_snapshot"
+    if desired_source_revision not in {task.last_indexed_source_revision, task.latest_snapshot_version}:
+        return "stale"
+    return "fresh" if has_completed_snapshot(db, task, desired_source_revision) else "missing_snapshot"
+
+
+def log_refresh_decision(
+    *, external_task_key: str, trigger_type: str, action: str, reason: str,
+    desired_source_revision: Optional[str] = None, indexed_source_revision: Optional[str] = None,
+    force: bool = False, job: Optional[AutoSyncJob] = None,
+) -> None:
+    fields = dict(
+        event="auto_sync.refresh_decision", external_task_key=external_task_key,
+        sync_trigger=trigger_type, refresh_action=action, refresh_reason=reason,
+        desired_source_revision=desired_source_revision, indexed_source_revision=indexed_source_revision,
+        force=force, job_id=str(job.id) if job is not None else None,
+        desired_generation=job.desired_generation if job is not None else None,
+        execution_generation=job.execution_generation if job is not None else None,
+        execution_source_revision=job.execution_source_revision if job is not None else None,
+    )
+    logger.info(
+        "Refresh decision task=%s trigger=%s action=%s reason=%s desired_revision=%s indexed_revision=%s "
+        "force=%s job=%s desired_generation=%s execution_generation=%s execution_revision=%s",
+        external_task_key, trigger_type, action, reason, desired_source_revision, indexed_source_revision,
+        force, fields["job_id"], fields["desired_generation"], fields["execution_generation"],
+        fields["execution_source_revision"], extra=fields,
+    )
+
+
 def _supports_row_locks(db: Session) -> bool:
     return db.bind is not None and db.bind.dialect.name == "postgresql"
 
@@ -75,6 +130,7 @@ def _active_jobs_query(db: Session, *, board_id: str, item_id: str):
             AutoSyncJob.item_id == str(item_id),
             AutoSyncJob.status.in_(ACTIVE_JOB_STATUSES),
         )
+        .populate_existing()
         .order_by(AutoSyncJob.created_at.asc(), AutoSyncJob.id.asc())
     )
     return query.with_for_update() if _supports_row_locks(db) else query
@@ -88,7 +144,7 @@ def lock_auto_sync_state(
     external_task_key: str,
 ) -> tuple[list[AutoSyncJob], Optional[Task]]:
     active_jobs = _active_jobs_query(db, board_id=board_id, item_id=item_id).all()
-    task_query = db.query(Task).filter(Task.external_task_key == external_task_key)
+    task_query = db.query(Task).filter(Task.external_task_key == external_task_key).populate_existing()
     if _supports_row_locks(db):
         task_query = task_query.with_for_update()
     task = task_query.one_or_none()
@@ -199,8 +255,13 @@ def coalesce_auto_sync_job(
     now: Optional[datetime] = None,
     existing_job: Optional[AutoSyncJob] = None,
     active_job_lookup_complete: bool = False,
+    force: bool = False,
+    refresh_reason: Optional[str] = None,
 ) -> tuple[AutoSyncJob, bool]:
     now = now or utc_now()
+    refresh_reason = refresh_reason or refresh_reason_for_task(
+        db, task, desired_source_revision=desired_source_revision, force=force,
+    )
     if scheduled_for is None:
         delay = debounce_seconds if debounce_seconds is not None else policy_from_settings().debounce_seconds
         scheduled_for = now + timedelta(seconds=delay)
@@ -222,6 +283,8 @@ def coalesce_auto_sync_job(
             external_task_key=task.external_task_key,
             trigger_type=trigger_type,
             desired_source_revision=desired_source_revision,
+            desired_generation=1,
+            force_requested=force,
             status="scheduled",
             scheduled_for=scheduled_for,
             attempt_count=0,
@@ -250,12 +313,19 @@ def coalesce_auto_sync_job(
 
     if job is not None and not created:
         was_running = job.status == "running"
+        user_requested = job.trigger_type in {"manual", "handoff", "restore"}
         job.external_task_key = task.external_task_key
-        job.trigger_type = trigger_type
-        job.desired_source_revision = desired_source_revision or job.desired_source_revision
+        if was_running or not user_requested or trigger_type in {"manual", "handoff", "restore"}:
+            job.trigger_type = trigger_type
+        job.desired_generation += 1
+        job.force_requested = job.force_requested or force
+        job.desired_source_revision = (
+            desired_source_revision if job.desired_source_revision is not None else None
+        )
         if job.status != "running":
             job.status = "scheduled"
-            job.scheduled_for = scheduled_for
+            if not user_requested or trigger_type in {"manual", "handoff", "restore"}:
+                job.scheduled_for = scheduled_for
             job.next_retry_at = None
             job.locked_at = None
             job.locked_by = None
@@ -271,8 +341,60 @@ def coalesce_auto_sync_job(
             task.last_sync_result = None
         task.updated_at = now
     else:
-        mark_task_queued(task, trigger_type=trigger_type, desired_source_revision=desired_source_revision, now=now)
+        mark_task_queued(task, trigger_type=job.trigger_type, desired_source_revision=desired_source_revision, now=now)
+    log_refresh_decision(
+        external_task_key=task.external_task_key, trigger_type=trigger_type,
+        action="queued" if created else "coalesced_running" if was_running else "coalesced",
+        reason=refresh_reason, desired_source_revision=desired_source_revision,
+        indexed_source_revision=task.last_indexed_source_revision, force=force, job=job,
+    )
     return job, created
+
+
+def enqueue_user_refresh(
+    db: Session,
+    *,
+    account_id: str,
+    board_id: str,
+    item_id: str,
+    trigger_type: str,
+    desired_source_revision: Optional[str] = None,
+    force: bool = False,
+    refresh_reason: Optional[str] = None,
+) -> tuple[Task, AutoSyncJob]:
+    from .auto_sync_purge import mark_expired_task_restoring, record_meaningful_access
+
+    if not settings.auto_sync_worker_enabled:
+        raise HTTPException(status_code=503, detail="The durable sync worker is disabled")
+    get_monday_ingestion_access_token()
+    external_task_key = build_external_task_key(account_id, board_id, item_id)
+    jobs, task = lock_auto_sync_state(
+        db, board_id=board_id, item_id=item_id, external_task_key=external_task_key,
+    )
+    refresh_reason = "force" if force else refresh_reason or refresh_reason_for_task(
+        db, task, desired_source_revision=desired_source_revision,
+    )
+    if task is None:
+        task = Task(
+            external_task_key=external_task_key, account_id=account_id,
+            board_id=board_id, item_id=item_id,
+        )
+        try:
+            with db.begin_nested():
+                db.add(task)
+                db.flush([task])
+        except IntegrityError as exc:
+            raise AutoSyncConcurrencyError("Task was created concurrently") from exc
+    record_meaningful_access(db, task)
+    mark_expired_task_restoring(db, task)
+    job, _ = coalesce_auto_sync_job(
+        db, task, trigger_type=trigger_type,
+        desired_source_revision=desired_source_revision,
+        scheduled_for=utc_now(), force=force,
+        existing_job=jobs[0] if jobs else None, active_job_lookup_complete=True,
+        refresh_reason=refresh_reason,
+    )
+    return task, job
 
 
 def cancel_active_auto_sync_jobs(
@@ -311,6 +433,7 @@ def apply_auto_sync_policy_for_item(
     now: Optional[datetime] = None,
     schedule_immediately: bool = False,
     fallback_account_id: Optional[str] = None,
+    refresh_reason: Optional[str] = None,
 ) -> QueueResult:
     now = now or utc_now()
     policy = policy or policy_from_settings()
@@ -318,6 +441,10 @@ def apply_auto_sync_policy_for_item(
     decision = policy.classify_group(metadata.board_id, metadata.group_id)
 
     if not decision.should_track_task:
+        log_refresh_decision(
+            external_task_key=metadata.external_task_key, trigger_type=trigger_type,
+            action="ignored", reason=decision.reason, desired_source_revision=desired_source_revision,
+        )
         return QueueResult(task=None, job=None, decision=decision)
 
     active_jobs, task = lock_auto_sync_state(
@@ -331,8 +458,13 @@ def apply_auto_sync_policy_for_item(
     created_job = False
 
     if decision.requires_existing_index and task is None:
+        log_refresh_decision(
+            external_task_key=metadata.external_task_key, trigger_type=trigger_type,
+            action="ignored", reason="no_existing_index", desired_source_revision=desired_source_revision,
+        )
         return QueueResult(task=None, job=None, decision=decision)
 
+    refresh_reason = refresh_reason or refresh_reason_for_task(db, task, desired_source_revision=desired_source_revision)
     if task is None or decision.lifecycle_state in {"active", "excluded"}:
         task, created_task = upsert_auto_sync_task(
             db,
@@ -367,6 +499,9 @@ def apply_auto_sync_policy_for_item(
         and task is not None
         and desired_source_revision
         and task.last_indexed_source_revision == desired_source_revision
+        and not active_jobs
+        and task.auto_sync_state != "expired"
+        and has_completed_snapshot(db, task, desired_source_revision)
     ):
         task.sync_status = "completed"
         task.sync_finished_at = now
@@ -375,6 +510,10 @@ def apply_auto_sync_policy_for_item(
         task.last_sync_trigger = trigger_type
         task.last_sync_result = "skipped"
         task.updated_at = now
+        log_refresh_decision(
+            external_task_key=task.external_task_key, trigger_type=trigger_type, action="skipped", reason="fresh",
+            desired_source_revision=desired_source_revision, indexed_source_revision=task.last_indexed_source_revision,
+        )
         return QueueResult(task=task, job=None, decision=decision, created_task=created_task)
 
     if decision.should_queue_sync and task is not None:
@@ -388,6 +527,12 @@ def apply_auto_sync_policy_for_item(
             now=now,
             existing_job=active_jobs[0] if active_jobs else None,
             active_job_lookup_complete=True,
+            refresh_reason=refresh_reason,
+        )
+    else:
+        log_refresh_decision(
+            external_task_key=metadata.external_task_key, trigger_type=trigger_type,
+            action="lifecycle_only", reason=decision.reason, desired_source_revision=desired_source_revision,
         )
 
     return QueueResult(task=task, job=job, decision=decision, created_task=created_task, created_job=created_job)

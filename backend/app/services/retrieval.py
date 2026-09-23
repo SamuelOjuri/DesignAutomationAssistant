@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import TaskSnapshot, TaskFile, TaskChunk
 from .llm_interface import create_gemini_client
+from .sync_asset_reuse import public_task_context
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def get_task_context(db: Session, external_task_key: str) -> Optional[Dict[str, 
     Fetch latest task snapshot and return its task_context_json.
     """
     snapshot = _latest_snapshot(db, external_task_key)
-    return snapshot.task_context_json if snapshot else None
+    return public_task_context(snapshot.task_context_json) if snapshot else None
 
 
 def _search_snapshot_for_embedding(

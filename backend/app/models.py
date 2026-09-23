@@ -107,6 +107,18 @@ class Task(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class AutoSyncReconciliationCheck(Base):
+    __tablename__ = "auto_sync_reconciliation_checks"
+
+    board_id = Column(String, primary_key=True)
+    item_id = Column(String, primary_key=True)
+    scope = Column(String, primary_key=True)
+    last_attempted_at = Column(DateTime(timezone=True), nullable=False)
+    last_checked_at = Column(DateTime(timezone=True), nullable=True)
+    last_outcome = Column(String, nullable=False)
+    last_reason = Column(String, nullable=False)
+
+
 class TaskSnapshot(Base):
     __tablename__ = "task_snapshots"
     __table_args__ = (
@@ -261,6 +273,12 @@ class AutoSyncJob(Base):
     external_task_key = Column(String, ForeignKey("tasks.external_task_key"), nullable=True)
     trigger_type = Column(String, nullable=False)
     desired_source_revision = Column(String, nullable=True)
+    desired_generation = Column(Integer, nullable=False, default=1, server_default="1")
+    execution_generation = Column(Integer, nullable=True)
+    execution_source_revision = Column(String, nullable=True)
+    execution_trigger_type = Column(String, nullable=True)
+    force_requested = Column(Boolean, nullable=False, default=False, server_default="false")
+    execution_force = Column(Boolean, nullable=False, default=False, server_default="false")
     status = Column(String, nullable=False)
     scheduled_for = Column(DateTime(timezone=True), nullable=False)
     attempt_count = Column(Integer, nullable=False, server_default="0")
@@ -631,6 +649,7 @@ Index(
     AutoSyncJob.item_id,
     unique=True,
     postgresql_where=AutoSyncJob.status.in_(("pending", "scheduled", "running", "retry_wait")),
+    sqlite_where=AutoSyncJob.status.in_(("pending", "scheduled", "running", "retry_wait")),
 )
 Index("ix_design_processing_items_state", DesignProcessingItem.state)
 Index(

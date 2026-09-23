@@ -6,11 +6,15 @@ from fastapi import APIRouter, Body, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from ..auth import CurrentUser, get_current_user, require_csrf_token
+from ..config import settings
 from ..db import get_db
 from ..models import Task, TaskSnapshot, TaskFile, UserMondayLink
 from ..monday_client import can_read_item
+from ..services.auto_sync import enqueue_user_refresh
+from ..services.db_retry import run_transaction_with_retry
 from ..services.auto_sync_purge import mark_expired_task_restoring, record_meaningful_access
 from ..services.sync_pipeline import run_sync_pipeline, run_sync_pipeline_background
+from ..services.sync_asset_reuse import public_task_context
 from ..schemas import (
     TaskSyncRequest,
     TaskSyncResponse,
@@ -77,6 +81,20 @@ def sync_task(
     background_tasks: BackgroundTasks = None,
 ):
     task = require_task_access(externalTaskKey, db, current_user)
+    if task.board_id == str(settings.auto_sync_board_id):
+        account_id, board_id, item_id = task.account_id, task.board_id, task.item_id
+
+        def enqueue() -> TaskSyncResponse:
+            queued_task, _ = enqueue_user_refresh(
+                db, account_id=account_id, board_id=board_id, item_id=item_id,
+                trigger_type="manual", force=payload.force if payload else False,
+            )
+            response = TaskSyncResponse(status="queued", snapshotVersion=queued_task.latest_snapshot_version)
+            db.commit()
+            return response
+
+        return run_transaction_with_retry(db, enqueue, operation_name="enqueue manual task refresh")
+
     record_meaningful_access(db, task)
     mark_expired_task_restoring(db, task)
 
@@ -137,7 +155,7 @@ def task_summary(
     return TaskSummaryResponse(
         externalTaskKey=task.external_task_key,
         snapshotVersion=snapshot.snapshot_version if snapshot else None,
-        taskContext=snapshot.task_context_json if snapshot else None,
+        taskContext=public_task_context(snapshot.task_context_json) if snapshot else None,
         status=task.status,
         updatedAt=task.updated_at,
         # Include sync status for frontend polling

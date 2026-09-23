@@ -181,22 +181,37 @@ def _delete_storage_objects(
     )
     deleted_count = 0
     failed_count = 0
+    objects: dict[tuple[str, str], list[TaskFile]] = {}
 
     for file_record in files:
         if file_record.storage_status != "stored":
             file_record.deleted_at = now
             file_record.delete_error = None
             continue
+        objects.setdefault((file_record.bucket, file_record.object_path), []).append(file_record)
+
+    for (bucket, object_path), references in objects.items():
+        retained_reference = db.query(TaskFile.id).filter(
+            TaskFile.bucket == bucket,
+            TaskFile.object_path == object_path,
+            TaskFile.external_task_key != task.external_task_key,
+            TaskFile.storage_status == "stored",
+            TaskFile.deleted_at.is_(None),
+        ).first()
         try:
-            remove_storage_object(file_record.bucket, file_record.object_path)
+            if retained_reference is None:
+                remove_storage_object(bucket, object_path)
         except Exception as storage_error:
             failed_count += 1
-            file_record.delete_error = str(storage_error)[:1000]
+            for file_record in references:
+                file_record.delete_error = str(storage_error)[:1000]
             logger.exception("Failed to delete Storage object for task %s", task.external_task_key)
         else:
-            deleted_count += 1
-            file_record.deleted_at = now
-            file_record.delete_error = None
+            if retained_reference is None:
+                deleted_count += 1
+            for file_record in references:
+                file_record.deleted_at = now
+                file_record.delete_error = None
 
     return deleted_count, failed_count
 

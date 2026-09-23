@@ -411,6 +411,10 @@ def ingest_asset(
                     f"storage limit of {max_object_bytes} bytes"
                 ),
             )
+        object_path = build_object_path(
+            task.account_id, task.board_id, task.item_id, snapshot.snapshot_version,
+            f"{asset_id}/{downloaded.sha256}", filename,
+        )
         with open(downloaded.temp_path, "rb") as f:
             try:
                 upload_with_retry(
@@ -587,7 +591,7 @@ def ingest_derived_attachment_bytes(
         task.board_id,
         task.item_id,
         snapshot.snapshot_version,
-        asset_id,
+        f"{asset_id}/{sha}",
         safe_name,
     )
     mime_type = mime_type or (mimetypes.guess_type(safe_name)[0] or "application/octet-stream")
