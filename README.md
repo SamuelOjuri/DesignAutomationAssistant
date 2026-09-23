@@ -112,6 +112,16 @@ explicit reconciliation CLI does not consult `AUTO_SYNC_RECONCILIATION_ENABLED`;
 that flag alone neither schedules nor stops this command. Per-item failures return
 a nonzero exit status while keeping successfully committed progress.
 
+Completed-transition metadata lookups that return `404: monday item not found`
+are reported as `source_unavailable` warnings, not errors. The summary includes a
+`source_unavailable` count (also included in `skipped`); these warnings alone do
+not fail the CLI. They do not prove deletion: snapshots, stored files, task state,
+and retention dates remain unchanged. Non-dry runs save the attempted check but
+preserve the previous successful-check time, then retry through normal fair
+rotation. A visible item resumes normal group reconciliation automatically.
+Authentication, rate-limit, other API errors, and progress-write failures remain
+errors. This handling does not change active-group reconciliation or ingestion.
+
 Tune cadence and batch size for the required freshness target: a stable population
 of 1,000 candidates at 100 inspections every five minutes needs roughly 50 minutes
 for a full sweep, plus execution time. An invocation succeeding is not proof of
@@ -125,8 +135,8 @@ not completed ingestion; also monitor the durable job backlog and failures.
 `auto_sync.refresh_decision` logs carry trigger, action, reason, task key, desired
 and indexed revisions, job ID, and desired/execution generations. Reasons include
 `fresh`, `stale`, `missing`, `missing_snapshot`, `restore`, `failed`, `stuck`,
-`already_queued`, `source_revision_unknown`, `freshness_unavailable`, `force`, and
-`newer_request_during_execution`, plus policy reasons for excluded items. These
+`already_queued`, `source_revision_unknown`, `freshness_unavailable`,
+`source_unavailable`, `force`, and `newer_request_during_execution`, plus policy reasons for excluded items. These
 decision events may precede transaction commit or be repeated on retry; use job
 state and committed check rows for durable outcomes. They contain no tokens or
 source contents. The CLI enables INFO logging; API/worker logging must retain

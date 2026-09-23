@@ -60,6 +60,7 @@ class ReconciliationResult:
     never_checked: int = 0
     oldest_checked_at: Optional[datetime] = None
     max_check_age_seconds: Optional[float] = None
+    source_unavailable: int = 0
 
 
 def _ordered_active_group_ids(policy: AutoSyncPolicy) -> list[str]:
@@ -96,7 +97,7 @@ def _record_check(
         board_id=board_id, item_id=item_id, scope=scope,
         last_attempted_at=now, last_outcome=outcome, last_reason=reason,
     )
-    if outcome != "error":
+    if outcome not in {"error", "source_unavailable"}:
         values["last_checked_at"] = now
     insert = postgres_insert if db.get_bind().dialect.name == "postgresql" else sqlite_insert
     statement = insert(AutoSyncReconciliationCheck).values(**values)
@@ -427,10 +428,40 @@ def detect_completed_transitions_once(
     completed_retained = 0
     skipped = 0
     errors = 0
+    source_unavailable = 0
 
     for task in tasks:
         try:
-            item = fetch_item_metadata(token, task.item_id)
+            try:
+                item = fetch_item_metadata(token, task.item_id)
+            except HTTPException as exc:
+                if exc.status_code != 404 or exc.detail != "monday item not found":
+                    raise
+                if not dry_run:
+                    _record_check(
+                        db, board_id=policy.board_id, item_id=task.item_id, scope="completed_transition",
+                        outcome="source_unavailable", reason="source_unavailable",
+                    )
+                    db.commit()
+                source_unavailable += 1
+                skipped += 1
+                logger.warning(
+                    "Completed-transition source unavailable for task %s; retaining stored data (dry_run=%s)",
+                    task.external_task_key, dry_run,
+                    extra={"event": "auto_sync.source_unavailable", "external_task_key": task.external_task_key,
+                           "board_id": policy.board_id, "item_id": task.item_id, "dry_run": dry_run},
+                )
+                log_refresh_decision(
+                    external_task_key=task.external_task_key, trigger_type="reconciliation",
+                    action="source_unavailable", reason="source_unavailable",
+                    indexed_source_revision=task.last_indexed_source_revision,
+                )
+                item_results.append(ReconciliationItemResult(
+                    item_id=task.item_id, group_id=task.source_group_id,
+                    external_task_key=task.external_task_key, action="source_unavailable",
+                    reason="source_unavailable", refresh_reason="source_unavailable",
+                ))
+                continue
             item["account_id"] = task.account_id
             metadata = item_metadata_from_monday_item(item, fallback_account_id=task.account_id)
             decision = policy.classify_group(metadata.board_id, metadata.group_id)
@@ -517,6 +548,7 @@ def detect_completed_transitions_once(
         skipped=skipped,
         completed_retained=completed_retained,
         errors=errors,
+        source_unavailable=source_unavailable,
         items=tuple(item_results),
         **_coverage(db, board_id=policy.board_id, scope="completed_transition", item_ids=candidate_ids, dry_run=dry_run),
     )

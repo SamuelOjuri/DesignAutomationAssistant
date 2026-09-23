@@ -15,7 +15,7 @@ from backend.app.auth import CurrentUser
 from backend.app import monday_client
 from backend.app.config import settings
 from backend.app.db import Base
-from backend.app.models import AppUser, AutoSyncJob, AutoSyncReconciliationCheck, HandoffCode, Task, TaskSnapshot, UserMondayLink
+from backend.app.models import AppUser, AutoSyncJob, AutoSyncReconciliationCheck, HandoffCode, Task, TaskFile, TaskSnapshot, UserMondayLink
 from backend.app.routes import monday_handoff, tasks
 from backend.app.schemas import HandoffResolveRequest, TaskSyncRequest
 from backend.app.services import auto_sync_reconciliation, auto_sync_worker
@@ -106,6 +106,81 @@ def test_reconciliation_cli_fails_when_any_item_failed(monkeypatch, scope):
         ),
     )
     assert auto_sync_reconciliation.main() == 1
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize("previous_success", [False, True])
+def test_completed_transition_source_unavailable_preserves_data(
+    db_session, monkeypatch, caplog, dry_run, previous_success,
+):
+    task = _task("missing-item", revision="rev-1")
+    snapshot = TaskSnapshot(
+        id=uuid.uuid4(), external_task_key=task.external_task_key,
+        snapshot_version="rev-1", task_context_json={"id": task.item_id},
+    )
+    stored_file = TaskFile(
+        id=uuid.uuid4(), external_task_key=task.external_task_key, snapshot_id=snapshot.id,
+        kind="attachment_pdf", monday_asset_id="asset-1", bucket="private",
+        object_path="retained/document.pdf", storage_status="stored",
+    )
+    db_session.add_all([task, snapshot, stored_file])
+    earlier = datetime.now(timezone.utc) - timedelta(days=1)
+    if previous_success:
+        db_session.add(AutoSyncReconciliationCheck(
+            board_id=task.board_id, item_id=task.item_id, scope="completed_transition",
+            last_attempted_at=earlier, last_checked_at=earlier,
+            last_outcome="still_active", last_reason="active_group",
+        ))
+    db_session.commit()
+    task_before = {column.name: getattr(task, column.name) for column in Task.__table__.columns}
+    snapshot_before = {column.name: getattr(snapshot, column.name) for column in TaskSnapshot.__table__.columns}
+    file_before = {column.name: getattr(stored_file, column.name) for column in TaskFile.__table__.columns}
+    caplog.set_level(logging.INFO, logger="backend.app.services.auto_sync")
+    monkeypatch.setattr(monday_client, "fetch_current_account_id", lambda token: "acct")
+    monkeypatch.setattr(monday_client, "monday_graphql_request", lambda *args, **kwargs: {"data": {"items": []}})
+
+    result = detect_completed_transitions_once(
+        db_session, dry_run=dry_run, access_token="service-token", policy=_policy(),
+    )
+
+    assert result.errors == 0
+    assert result.source_unavailable == 1
+    assert result.scanned == result.skipped == 1
+    assert result.completed_retained == result.queued == 0
+    assert result.items[0].action == result.items[0].reason == "source_unavailable"
+    assert result.items[0].refresh_reason == "source_unavailable"
+    db_session.refresh(task)
+    db_session.refresh(snapshot)
+    db_session.refresh(stored_file)
+    assert {column.name: getattr(task, column.name) for column in Task.__table__.columns} == task_before
+    assert {column.name: getattr(snapshot, column.name) for column in TaskSnapshot.__table__.columns} == snapshot_before
+    assert {column.name: getattr(stored_file, column.name) for column in TaskFile.__table__.columns} == file_before
+    assert db_session.query(AutoSyncJob).count() == 0
+    check = db_session.query(AutoSyncReconciliationCheck).populate_existing().one_or_none()
+    if dry_run and not previous_success:
+        assert check is None
+    else:
+        assert check.last_outcome == ("still_active" if dry_run else "source_unavailable")
+        assert check.last_reason == ("active_group" if dry_run else "source_unavailable")
+        assert check.last_checked_at == (earlier.replace(tzinfo=None) if previous_success else None)
+        if dry_run:
+            assert check.last_attempted_at == earlier.replace(tzinfo=None)
+        else:
+            assert check.last_attempted_at > earlier.replace(tzinfo=None)
+    assert result.never_checked == int(not previous_success)
+    warning = next(record for record in caplog.records if getattr(record, "event", None) == "auto_sync.source_unavailable")
+    assert warning.levelno == logging.WARNING
+    assert warning.external_task_key == task.external_task_key
+    assert warning.dry_run == dry_run
+    assert warning.exc_info is None
+    decision = next(record for record in caplog.records if getattr(record, "event", None) == "auto_sync.refresh_decision")
+    assert decision.refresh_action == decision.refresh_reason == "source_unavailable"
+    assert "service-token" not in caplog.text
+    monkeypatch.setattr("sys.argv", ["auto_sync_reconciliation"])
+    monkeypatch.setattr(auto_sync_reconciliation, "_run_from_new_session", lambda args: (
+        auto_sync_reconciliation.ReconciliationResult(dry_run=dry_run, board_id=task.board_id), result,
+    ))
+    assert auto_sync_reconciliation.main() == 0
 
 
 def _handoff_fixture(db_session, *, task: Task, snapshot_revision: str | None = None) -> None:
@@ -675,6 +750,115 @@ def test_completed_transition_checks_rotate_past_still_active_tasks(db_session, 
     assert checked == ["1", "2", "3"]
     assert result.candidate_count == 3
     assert result.never_checked == 0
+
+
+@pytest.mark.parametrize("restored_group,expected_action", [
+    ("topics", "still_active"), ("group_mkpbb3tx", "completed_retained"),
+])
+def test_completed_transition_source_unavailable_rotates_and_recovers(
+    db_session, monkeypatch, restored_group, expected_action,
+):
+    db_session.add_all([_task(item_id, revision="rev-1") for item_id in ("1", "2")])
+    db_session.commit()
+    checked = []
+
+    def metadata(token, item_id):
+        checked.append(item_id)
+        if len(checked) == 1:
+            raise HTTPException(status_code=404, detail="monday item not found")
+        return {
+            "id": item_id, "account_id": "acct", "board": {"id": "1882196103"},
+            "group": {"id": restored_group if item_id == "1" else "topics"},
+        }
+
+    monkeypatch.setattr(auto_sync_reconciliation, "fetch_item_metadata", metadata)
+    started = datetime.now(timezone.utc)
+    results = []
+    for iteration in range(3):
+        monkeypatch.setattr(
+            auto_sync_reconciliation, "utc_now",
+            lambda checked_at=started + timedelta(minutes=iteration): checked_at,
+        )
+        results.append(detect_completed_transitions_once(
+            db_session, dry_run=False, access_token="token", policy=_policy(), limit=1,
+        ))
+
+    assert checked == ["1", "2", "1"]
+    assert [result.items[0].action for result in results] == ["source_unavailable", "still_active", expected_action]
+    assert [result.source_unavailable for result in results] == [1, 0, 0]
+    assert all(result.errors == 0 for result in results)
+    check = db_session.get(AutoSyncReconciliationCheck, ("1882196103", "1", "completed_transition"))
+    assert check.last_outcome == expected_action
+    assert check.last_checked_at == (started + timedelta(minutes=2)).replace(tzinfo=None)
+    task = db_session.get(Task, "acct:1882196103:1")
+    assert task.auto_sync_state == ("active" if expected_action == "still_active" else "completed_retained")
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize("failure", [
+    HTTPException(status_code=401, detail="Unauthorized"),
+    HTTPException(status_code=403, detail="Forbidden"),
+    HTTPException(status_code=404, detail="monday API error (404)"),
+    HTTPException(status_code=429, detail="Rate limited"),
+    HTTPException(status_code=502, detail="monday API error (502)"),
+    RuntimeError("Unexpected failure"),
+], ids=["unauthorized", "forbidden", "unrelated_404", "rate_limit", "upstream", "unexpected"])
+def test_completed_transition_source_unavailable_does_not_hide_errors(
+    db_session, monkeypatch, dry_run, failure,
+):
+    db_session.add_all([_task(item_id, revision="rev-1") for item_id in ("1", "2")])
+    db_session.commit()
+    monkeypatch.setattr(monday_client, "fetch_current_account_id", lambda token: "acct")
+
+    def graphql(token, query, variables, **kwargs):
+        if variables["itemIds"] == ["1"]:
+            return {"data": {"items": []}}
+        raise failure
+
+    monkeypatch.setattr(monday_client, "monday_graphql_request", graphql)
+    result = detect_completed_transitions_once(
+        db_session, dry_run=dry_run, access_token="service-token", policy=_policy(),
+    )
+
+    assert result.source_unavailable == result.errors == result.skipped == 1
+    assert result.scanned == 2
+    assert [item.action for item in result.items] == ["source_unavailable", "error"]
+    assert result.never_checked == 2
+    if dry_run:
+        assert db_session.query(AutoSyncReconciliationCheck).count() == 0
+    else:
+        check = db_session.get(AutoSyncReconciliationCheck, ("1882196103", "2", "completed_transition"))
+        assert check.last_outcome == "error"
+        assert check.last_checked_at is None
+    monkeypatch.setattr("sys.argv", ["auto_sync_reconciliation"])
+    monkeypatch.setattr(auto_sync_reconciliation, "_run_from_new_session", lambda args: (
+        auto_sync_reconciliation.ReconciliationResult(dry_run=dry_run, board_id="1882196103"), result,
+    ))
+    assert auto_sync_reconciliation.main() == 1
+
+
+def test_completed_transition_source_unavailable_progress_failure_is_error(db_session, monkeypatch):
+    db_session.add(_task("1", revision="rev-1"))
+    db_session.commit()
+    monkeypatch.setattr(monday_client, "fetch_current_account_id", lambda token: "acct")
+    monkeypatch.setattr(monday_client, "monday_graphql_request", lambda *args, **kwargs: {"data": {"items": []}})
+    record_check = auto_sync_reconciliation._record_check
+
+    def fail_unavailable_record(db, **kwargs):
+        record_check(db, **kwargs)
+        if kwargs["outcome"] == "source_unavailable":
+            raise RuntimeError("Progress write failed")
+
+    monkeypatch.setattr(auto_sync_reconciliation, "_record_check", fail_unavailable_record)
+    result = detect_completed_transitions_once(
+        db_session, dry_run=False, access_token="token", policy=_policy(),
+    )
+
+    assert result.errors == 1
+    assert result.source_unavailable == result.skipped == 0
+    check = db_session.get(AutoSyncReconciliationCheck, ("1882196103", "1", "completed_transition"))
+    assert check.last_outcome == "error"
+    assert check.last_checked_at is None
 
 
 def test_completed_transition_detection_marks_indexed_active_task_retained(db_session, monkeypatch):
