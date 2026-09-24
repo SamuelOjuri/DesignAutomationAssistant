@@ -750,22 +750,6 @@ export default function TaskPage() {
       )}
 
       <div className="mt-8 space-y-4">
-        {isAwaitingFirstToken && (
-          <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-            <div className="flex items-center gap-3">
-              <MessageSquare aria-hidden="true" className="h-4 w-4 text-primary" strokeWidth={1.75} />
-              <h3 className="text-sm font-semibold text-foreground">Assistant</h3>
-            </div>
-            <div className="mt-4 flex items-center gap-2 rounded-md bg-secondary/70 p-4 text-sm text-muted-foreground">
-              Thinking
-              <span className="inline-flex items-center gap-1">
-                <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce" />
-                <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:100ms]" />
-                <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:200ms]" />
-              </span>
-            </div>
-          </div>
-        )}
         {messages.map((m, i) => (
           <div
             key={i}
@@ -844,6 +828,22 @@ export default function TaskPage() {
             )}
           </div>
         ))}
+        {isAwaitingFirstToken && (
+          <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+            <div className="flex items-center gap-3">
+              <MessageSquare aria-hidden="true" className="h-4 w-4 text-primary" strokeWidth={1.75} />
+              <h3 className="text-sm font-semibold text-foreground">Assistant</h3>
+            </div>
+            <div className="mt-4 flex items-center gap-2 rounded-md bg-secondary/70 p-4 text-sm text-muted-foreground">
+              Thinking
+              <span className="inline-flex items-center gap-1">
+                <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce" />
+                <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:100ms]" />
+                <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:200ms]" />
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-8 flex gap-2">
