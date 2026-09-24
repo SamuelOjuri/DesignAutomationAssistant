@@ -435,8 +435,7 @@ def test_synthesis_requires_project_wide_coverage_qualification():
 
     assert answer == (
         "A bounded answer.\n\n"
-        "This is a partial project-wide review based on the available project "
-        "evidence; other relevant records may not be represented."
+        "This review covers only the available project records; other records may add details."
     )
     assert citations == []
     assert "only when retrieval_plan.corpus_wide_requested is true" in str(
@@ -445,7 +444,7 @@ def test_synthesis_requires_project_wide_coverage_qualification():
     assert json.loads(generated[0]["contents"])["retrieval_plan"][
         "corpus_wide_requested"
     ] is True
-    assert "partial project-wide review" in chat._fallback_answer_from_sources(
+    assert "This review covers only the available project records" in chat._fallback_answer_from_sources(
         None,
         [],
         corpus_wide_requested=True,
