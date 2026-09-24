@@ -672,7 +672,7 @@ export default function TaskPage() {
           )}
           {csvParams.length > 0 && (
             <div className="mt-4">
-              <div className="text-sm font-semibold">Design Parameters</div>
+              <div className="text-sm font-semibold">Source Email Metadata</div>
               <div className="mt-2 space-y-3">
                 {csvParams.map((csv, idx) => (
                   <div key={csv.assetId ?? `${csv.filename ?? "csv"}-${idx}`} className="rounded-md border border-border bg-background p-3">
