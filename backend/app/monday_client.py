@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from .config import settings
+from .services.monday_metadata_fields import COLUMN_IDS
 
 MONDAY_API_URL = "https://api.monday.com/v2"
 MONDAY_FILE_API_URL = "https://api.monday.com/v2/file"
@@ -451,6 +452,45 @@ def fetch_current_account_id(access_token: str) -> str:
         raise HTTPException(status_code=502, detail="monday account id not found")
     return str(account_id)
 
+CRM_VALUE_FRAGMENTS = """
+      ... on BoardRelationValue {
+        display_value
+        linked_item_ids
+        linked_items { id name board { id } }
+      }
+      ... on DropdownValue { values { id label } }
+      ... on MirrorValue {
+        display_value
+        mirrored_items {
+          linked_item { id }
+          mirrored_value { ... on TextValue { text } }
+        }
+      }
+"""
+
+MONDAY_METADATA_QUERY = """
+query ($itemIds: [ID!], $columnIds: [String!]) {
+  items(ids: $itemIds) {
+    id state name updated_at
+    board { id }
+    group { id title }
+    column_values(ids: $columnIds) {
+      id type text column { title }
+""" + CRM_VALUE_FRAGMENTS + """
+    }
+  }
+}
+"""
+
+
+def fetch_monday_metadata(access_token: str, item_id: str) -> dict[str, Any]:
+    payload = monday_graphql_request(
+        access_token, MONDAY_METADATA_QUERY,
+        {"itemIds": [str(item_id)], "columnIds": sorted(COLUMN_IDS)}, timeout=20,
+    )
+    return _extract_single_read_item(payload, context="Monday metadata")
+
+
 ASSET_QUERY = """
 query ($itemIds: [ID!]) {
   items(ids: $itemIds) {
@@ -489,7 +529,7 @@ query ($itemIds: [ID!]) {
     }
   }
 }
-"""
+""".replace("... on MirrorValue { display_value }", CRM_VALUE_FRAGMENTS)
 
 def fetch_item_with_assets(access_token: str, item_id: str) -> dict[str, Any]:
     payload = monday_graphql_request(
@@ -717,6 +757,11 @@ query ($itemIds: [ID!]) {
     }
 }
 """
+
+
+SOURCE_REVISION_INPUTS_QUERY = SOURCE_REVISION_INPUTS_QUERY.replace(
+    "... on MirrorValue { display_value }", CRM_VALUE_FRAGMENTS,
+)
 
 
 def fetch_current_source_revision_inputs(

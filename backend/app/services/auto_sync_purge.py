@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import SessionLocal
-from ..models import Task, TaskChunk, TaskFile, TaskSnapshot
+from ..models import Task, TaskChunk, TaskFile, TaskSnapshot, TaskMondayMetadata, MondayMetadataLink
 from ..supabase_client import supabase
 from .auto_sync import utc_now
 from .auto_sync_policy import AutoSyncPolicy, policy_from_settings
@@ -217,6 +217,8 @@ def _delete_storage_objects(
 
 
 def _clean_database_rows(db: Session, task: Task) -> tuple[int, int, int]:
+    db.query(MondayMetadataLink).filter_by(external_task_key=task.external_task_key).delete(synchronize_session=False)
+    db.query(TaskMondayMetadata).filter_by(external_task_key=task.external_task_key).delete(synchronize_session=False)
     file_ids = [
         row[0]
         for row in db.query(TaskFile.id)

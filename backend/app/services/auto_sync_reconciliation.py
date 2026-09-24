@@ -30,6 +30,7 @@ from .auto_sync import (
     utc_now,
 )
 from .auto_sync_policy import ACTIVE_JOB_STATUSES, AutoSyncPolicy, policy_from_settings
+from .monday_metadata import enqueue_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -314,10 +315,12 @@ def reconcile_active_items_once(
                 job_id = str(queue_result.job.id) if queue_result.job is not None and queue_result.job.id else None
                 action = f"queued_{reconciliation_reason}" if queue_result.job is not None else reconciliation_reason
                 if queue_result.job is None:
-                    action = reconciliation_reason = "fresh"
+                    action = reconciliation_reason = "metadata_queued" if queue_result.metadata_queued else "fresh"
             else:
                 job_id = None
                 action = reconciliation_reason
+                if decision.should_queue_sync and task is not None:
+                    enqueue_metadata(db, task, immediate=True, only_if_idle=True)
 
             _record_check(
                 db, board_id=policy.board_id, item_id=item_id, scope="active",

@@ -78,6 +78,10 @@ recovery. Migration SQL can be inspected without a database connection using
 
 ## Fair reconciliation and refresh reasons
 
+The current CRM fields and their additional worker/deployment requirements are documented
+in [MondayMetadata.md](backend/MondayMetadata.md). Apply migration `0015_monday_metadata`
+before deploying this version of the API or workers.
+
 Apply migration `0014_reconciliation_checks` before deploying the updated
 reconciliation command: `python -m alembic -c backend/alembic.ini upgrade head`.
 It adds `auto_sync_reconciliation_checks`; no existing progress is inferred from

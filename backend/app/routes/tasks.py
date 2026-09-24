@@ -3,6 +3,7 @@ from typing import Optional, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from ..auth import CurrentUser, get_current_user, require_csrf_token
@@ -14,7 +15,7 @@ from ..services.auto_sync import enqueue_user_refresh
 from ..services.db_retry import run_transaction_with_retry
 from ..services.auto_sync_purge import mark_expired_task_restoring, record_meaningful_access
 from ..services.sync_pipeline import run_sync_pipeline, run_sync_pipeline_background
-from ..services.sync_asset_reuse import public_task_context
+from ..services.monday_metadata import resolve_task_context, current_columns_text
 from ..schemas import (
     TaskSyncRequest,
     TaskSyncResponse,
@@ -148,14 +149,14 @@ def task_summary(
             TaskSnapshot.external_task_key == task.external_task_key,
             TaskSnapshot.ingestion_status == "complete",
         )
-        .order_by(TaskSnapshot.created_at.desc())
+        .order_by(TaskSnapshot.created_at.desc(), TaskSnapshot.completed_at.desc().nulls_last(), TaskSnapshot.id.desc())
         .first()
     )
 
     return TaskSummaryResponse(
         externalTaskKey=task.external_task_key,
         snapshotVersion=snapshot.snapshot_version if snapshot else None,
-        taskContext=public_task_context(snapshot.task_context_json) if snapshot else None,
+        taskContext=resolve_task_context(db, task.external_task_key, snapshot.task_context_json if snapshot else None),
         status=task.status,
         updatedAt=task.updated_at,
         # Include sync status for frontend polling
@@ -164,6 +165,21 @@ def task_summary(
         syncCompletedAt=task.sync_completed_at,
         syncError=task.sync_error,
     )
+
+
+@router.get("/{externalTaskKey}/monday-columns", response_class=PlainTextResponse)
+def monday_columns(
+    externalTaskKey: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    task = require_task_access(externalTaskKey, db, current_user)
+    context = resolve_task_context(db, task.external_task_key, None)
+    if not context or not context["monday_metadata"]["revision"]:
+        raise HTTPException(status_code=404, detail="Monday details have not been refreshed yet")
+    return PlainTextResponse(current_columns_text(context), headers={
+        "Cache-Control": "no-store", "Content-Disposition": 'inline; filename="monday_columns.txt"',
+    })
 
 
 @router.get("/{externalTaskKey}/sources", response_model=TaskSourcesResponse)
@@ -180,7 +196,7 @@ def task_sources(
             TaskSnapshot.external_task_key == task.external_task_key,
             TaskSnapshot.ingestion_status == "complete",
         )
-        .order_by(TaskSnapshot.created_at.desc())
+        .order_by(TaskSnapshot.created_at.desc(), TaskSnapshot.completed_at.desc().nulls_last(), TaskSnapshot.id.desc())
         .first()
     )
 
@@ -196,6 +212,9 @@ def task_sources(
         .order_by(TaskFile.created_at.asc())
         .all()
     )
+    live_context = resolve_task_context(db, task.external_task_key, None)
+    if live_context and live_context["monday_metadata"]["revision"]:
+        files = [file for file in files if file.kind != "monday_columns"]
 
     return TaskSourcesResponse(
         snapshotVersion=snapshot.snapshot_version,

@@ -7,6 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test:task-polling": "node --test tests/task-polling.test.mjs",
     "lint": "next lint"
   },
   "dependencies": {

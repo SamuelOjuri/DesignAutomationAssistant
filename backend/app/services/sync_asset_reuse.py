@@ -53,7 +53,7 @@ class AssetResultReuse:
                 TaskSnapshot.ingestion_status == "complete",
                 TaskSnapshot.id != snapshot.id,
             )
-            .order_by(TaskSnapshot.created_at.desc(), TaskSnapshot.id.desc())
+            .order_by(TaskSnapshot.created_at.desc(), TaskSnapshot.completed_at.desc().nulls_last(), TaskSnapshot.id.desc())
             .first()
         )
         previous_context = self.previous.task_context_json if self.previous is not None else {}

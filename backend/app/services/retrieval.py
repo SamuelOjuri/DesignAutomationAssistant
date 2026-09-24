@@ -9,9 +9,9 @@ from google.genai import types
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import TaskSnapshot, TaskFile, TaskChunk
+from ..models import TaskSnapshot, TaskFile, TaskChunk, TaskMondayMetadata
 from .llm_interface import create_gemini_client
-from .sync_asset_reuse import public_task_context
+from .monday_metadata import resolve_task_context
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def _latest_snapshot(db: Session, external_task_key: str) -> Optional[TaskSnapsh
             TaskSnapshot.external_task_key == external_task_key,
             TaskSnapshot.ingestion_status == "complete",
         )
-        .order_by(TaskSnapshot.created_at.desc())
+        .order_by(TaskSnapshot.created_at.desc(), TaskSnapshot.completed_at.desc().nulls_last(), TaskSnapshot.id.desc())
         .first()
     )
 
@@ -38,7 +38,7 @@ def get_task_context(db: Session, external_task_key: str) -> Optional[Dict[str, 
     Fetch latest task snapshot and return its task_context_json.
     """
     snapshot = _latest_snapshot(db, external_task_key)
-    return public_task_context(snapshot.task_context_json) if snapshot else None
+    return resolve_task_context(db, external_task_key, snapshot.task_context_json if snapshot else None)
 
 
 def _search_snapshot_for_embedding(
@@ -56,6 +56,13 @@ def _search_snapshot_for_embedding(
         .join(TaskFile, TaskChunk.file_id == TaskFile.id)
         .filter(TaskFile.external_task_key == external_task_key)
         .filter(TaskFile.snapshot_id == snapshot_id)
+        .filter(
+            (TaskFile.kind != "monday_columns")
+            | ~db.query(TaskMondayMetadata.external_task_key).filter(
+                TaskMondayMetadata.external_task_key == external_task_key,
+                TaskMondayMetadata.revision.is_not(None),
+            ).exists()
+        )
         .order_by(distance.asc())
         .limit(k)
         .all()

@@ -22,6 +22,8 @@ from .auto_sync_policy import (
 )
 from .db_retry import AutoSyncConcurrencyError
 from .storage_ingest import compute_snapshot_version
+from .monday_metadata import enqueue_metadata, cancel_metadata
+from .monday_metadata_fields import only_crm_fields_changed
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,7 @@ class QueueResult:
     decision: AutoSyncDecision
     created_task: bool = False
     created_job: bool = False
+    metadata_queued: bool = False
 
 
 def get_monday_ingestion_access_token() -> str:
@@ -387,6 +390,8 @@ def enqueue_user_refresh(
             raise AutoSyncConcurrencyError("Task was created concurrently") from exc
     record_meaningful_access(db, task)
     mark_expired_task_restoring(db, task)
+    if policy_from_settings().classify_group(task.board_id, task.source_group_id).should_queue_sync:
+        enqueue_metadata(db, task, immediate=True)
     job, _ = coalesce_auto_sync_job(
         db, task, trigger_type=trigger_type,
         desired_source_revision=desired_source_revision,
@@ -494,6 +499,23 @@ def apply_auto_sync_policy_for_item(
             active_job_lookup_complete=True,
         )
 
+    metadata_queued = False
+    if task is not None and task.board_id == str(settings.auto_sync_board_id) and decision.lifecycle_state != "active":
+        cancel_metadata(db, task)
+    if decision.should_queue_sync and task is not None and task.board_id == str(settings.auto_sync_board_id):
+        enqueue_metadata(db, task, immediate=schedule_immediately, only_if_idle=trigger_type in {"reconciliation", "backfill"})
+        metadata_queued = True
+        if not active_jobs and task.sync_status != "failed":
+            previous = db.query(TaskSnapshot).filter_by(
+                external_task_key=task.external_task_key, ingestion_status="complete",
+            ).order_by(TaskSnapshot.created_at.desc(), TaskSnapshot.completed_at.desc().nulls_last(), TaskSnapshot.id.desc()).first()
+            if previous is not None and only_crm_fields_changed(previous.task_context_json, item):
+                log_refresh_decision(
+                    external_task_key=task.external_task_key, trigger_type=trigger_type,
+                    action="metadata_queued", reason="crm_fields_changed",
+                )
+                return QueueResult(task=task, job=None, decision=decision, metadata_queued=True)
+
     if (
         decision.should_queue_sync
         and task is not None
@@ -514,7 +536,7 @@ def apply_auto_sync_policy_for_item(
             external_task_key=task.external_task_key, trigger_type=trigger_type, action="skipped", reason="fresh",
             desired_source_revision=desired_source_revision, indexed_source_revision=task.last_indexed_source_revision,
         )
-        return QueueResult(task=task, job=None, decision=decision, created_task=created_task)
+        return QueueResult(task=task, job=None, decision=decision, created_task=created_task, metadata_queued=metadata_queued)
 
     if decision.should_queue_sync and task is not None:
         job, created_job = coalesce_auto_sync_job(
@@ -535,4 +557,4 @@ def apply_auto_sync_policy_for_item(
             action="lifecycle_only", reason=decision.reason, desired_source_revision=desired_source_revision,
         )
 
-    return QueueResult(task=task, job=job, decision=decision, created_task=created_task, created_job=created_job)
+    return QueueResult(task=task, job=job, decision=decision, created_task=created_task, created_job=created_job, metadata_queued=metadata_queued)

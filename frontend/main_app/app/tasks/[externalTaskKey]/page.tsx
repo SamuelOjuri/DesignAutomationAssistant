@@ -6,6 +6,7 @@ import { ClipboardList, Files, MessageSquare, UserRound } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
+import { startTaskPolling } from "@/lib/task-polling";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -42,6 +43,14 @@ type TaskContext = {
   name?: string | null;
   column_values?: ColumnValue[];
   csv_params?: Array<CsvParamKeyValue | CsvParamTable>;
+  monday_metadata?: {
+    revision: string | null;
+    checkedAt: string | null;
+    changedAt: string | null;
+    refreshPending: boolean;
+    refreshError: string | null;
+    fields: Array<{ columnId: string; title: string; displayValue: string; state: "set" | "empty" }>;
+  };
   // Keep any other fields from monday item JSON
   [key: string]: any;
 };
@@ -100,6 +109,7 @@ const CSRF_COOKIE_NAME = "daa_csrf";
 
 // --- Summary helpers ---
 const VALIDATED_COLUMN_TITLES = new Set([
+  "Accounts",
   "Priority",
   "Designer",
   "Time tracking",
@@ -114,6 +124,14 @@ const VALIDATED_COLUMN_TITLES = new Set([
   "Hour Completed",
   "Date Sort",
 ]);
+
+const CRM_FIELDS = [
+  ["board_relation_mm3c4g5x", "Accounts"],
+  ["dropdown_mkpb98es", "New Enq / Amend"],
+  ["board_relation_mkpbm5np", "TP Ref"],
+  ["lookup_mkpb44am", "Project Name"],
+  ["dropdown_mkpbafca", "Zip Code"],
+] as const;
 
 const Markdown = ({ children }: { children: string }) => (
   <div className="task-markdown max-w-none text-sm leading-6">
@@ -238,6 +256,15 @@ export default function TaskPage() {
   const [sourcesError, setSourcesError] = useState<string | null>(null);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [isLoadingSources, setIsLoadingSources] = useState(false);
+  const [refreshCount, setRefreshCount] = useState(0);
+  const sourceVersionRef = useRef<string | null>(null);
+  const mondayMetadata = summary?.taskContext?.monday_metadata;
+
+  useEffect(() => {
+    setSummary(null);
+    setSources(null);
+    sourceVersionRef.current = null;
+  }, [externalTaskKey]);
 
   // --- Derived values for summary ---
   const validatedColumns = useMemo(() => {
@@ -252,6 +279,7 @@ export default function TaskPage() {
   }, [summary]);
 
   const mondayProject = useMemo(() => {
+    if (summary?.taskContext?.monday_metadata?.revision) return "";
     const cols = summary?.taskContext?.column_values ?? [];
     const columnValue = findColumnValue(cols, [
       "Project",
@@ -271,9 +299,17 @@ export default function TaskPage() {
   }, [sources, summary]);
 
   const summaryFields = useMemo(() => {
-    if (!mondayProject) return validatedColumns;
-    return [{ title: "Monday Project", value: mondayProject }, ...validatedColumns];
-  }, [mondayProject, validatedColumns]);
+    const columns = summary?.taskContext?.column_values ?? [];
+    const crm = CRM_FIELDS.map(([id, title]) => {
+      const field = mondayMetadata?.fields.find((entry) => entry.columnId === id);
+      const legacy = columns.find((col) => col.id === id);
+      return { title, value: field
+        ? field.displayValue || "Not set"
+        : (legacy ? formatColumnValue(legacy) : "") || "Not yet checked" };
+    });
+    const other = validatedColumns.filter((col) => !CRM_FIELDS.some(([, title]) => title === col.title));
+    return [...crm, ...(mondayProject ? [{ title: "Monday Project", value: mondayProject }] : []), ...other];
+  }, [mondayProject, validatedColumns, mondayMetadata, summary]);
 
   const csvParams = useMemo(() => {
     return summary?.taskContext?.csv_params ?? [];
@@ -354,10 +390,9 @@ export default function TaskPage() {
   }, []);
 
   // --- Fetch summary and sources helpers ---
-  const fetchSummary = useCallback(async (): Promise<TaskSummaryResponse | null> => {
+  const fetchSummary = useCallback(async (signal: AbortSignal, silent = false): Promise<TaskSummaryResponse | null> => {
     if (!externalTaskKey) return null;
-    setIsLoadingSummary(true);
-    setSummaryError(null);
+    if (!silent) setIsLoadingSummary(true);
     try {
       if (!baseUrl) {
         setSummaryError("FASTAPI base URL is not configured.");
@@ -368,6 +403,7 @@ export default function TaskPage() {
         {
           credentials: "include",
           cache: "no-store",
+          signal,
         }
       );
       if (!response.ok) {
@@ -375,54 +411,66 @@ export default function TaskPage() {
         return null;
       }
       const data = (await response.json()) as TaskSummaryResponse;
+      if (signal.aborted) return null;
+      setSummaryError(null);
       setSummary(data);
       return data;
     } catch (e: any) {
+      if (signal.aborted) return null;
       setSummaryError(`Summary error: ${String(e)}`);
       return null;
     } finally {
-      setIsLoadingSummary(false);
+      if (!signal.aborted) setIsLoadingSummary(false);
     }
   }, [baseUrl, externalTaskKey]);
 
-  const fetchSources = useCallback(async () => {
-    if (!externalTaskKey) return;
+  const fetchSources = useCallback(async (signal: AbortSignal): Promise<boolean> => {
+    if (!externalTaskKey) return false;
     setIsLoadingSources(true);
     setSourcesError(null);
     try {
       if (!baseUrl) {
         setSourcesError("FASTAPI base URL is not configured.");
-        return;
+        return false;
       }
       const response = await fetch(
         `${baseUrl}/api/tasks/${externalTaskKey}/sources`,
         {
           credentials: "include",
           cache: "no-store",
+          signal,
         }
       );
       if (!response.ok) {
         setSourcesError(`Sources failed (${response.status})`);
-        return;
+        return false;
       }
       const data = (await response.json()) as TaskSourcesResponse;
+      if (signal.aborted) return false;
       setSources(data);
+      return true;
     } catch (e: any) {
+      if (signal.aborted) return false;
       setSourcesError(`Sources error: ${String(e)}`);
+      return false;
     } finally {
-      setIsLoadingSources(false);
+      if (!signal.aborted) setIsLoadingSources(false);
     }
   }, [baseUrl, externalTaskKey]);
 
-  const refreshTaskData = useCallback(async () => {
-    await Promise.all([fetchSummary(), fetchSources()]);
-  }, [fetchSummary, fetchSources]);
-
   useEffect(() => {
-    if (externalTaskKey) {
-      void refreshTaskData();
-    }
-  }, [externalTaskKey, refreshTaskData]);
+    if (!externalTaskKey) return;
+    return startTaskPolling(async (signal, first) => {
+      const data = await fetchSummary(signal, !first);
+      if (data && !signal.aborted) {
+        if (data.syncStatus === "completed" || data.syncStatus === "failed") setSyncStatus(null);
+        const sourceVersion = `${externalTaskKey}:${data.snapshotVersion}:${Boolean(data.taskContext?.monday_metadata?.revision)}`;
+        if (sourceVersionRef.current !== sourceVersion && await fetchSources(signal)) {
+          sourceVersionRef.current = sourceVersion;
+        }
+      }
+    }, (error) => setSummaryError(`Refresh error: ${String(error)}`));
+  }, [externalTaskKey, fetchSummary, fetchSources, refreshCount]);
 
   const sendMessage = useCallback(async () => {
     if (!input.trim() || isStreaming || !externalTaskKey) return;
@@ -487,91 +535,6 @@ export default function TaskPage() {
     abortRef.current?.abort();
   }, []);
 
-  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-  const pollTokenRef = useRef(0);
-
-  const pollForSnapshotChange = useCallback(
-    async (previousVersion: string | null) => {
-      const token = ++pollTokenRef.current;
-      const timeoutMs = 5 * 60_000; // 5 minutes
-      const intervalMs = 3_000;
-      const slowIntervalMs = 12_000; // slower polling after timeout
-      const start = Date.now();
-
-      const isCancelled = () => pollTokenRef.current !== token;
-
-      const handleCompletion = async () => {
-        await fetchSources();
-        setSyncStatus(null); // Clear the ephemeral status message
-        return true;
-      };
-
-      while (Date.now() - start < timeoutMs) {
-        if (isCancelled()) return false;
-
-        const data = await fetchSummary();
-        const nextVersion = data?.snapshotVersion ?? null;
-        const currentSyncStatus = data?.syncStatus;
-
-        if (currentSyncStatus === "completed" || currentSyncStatus === "failed") {
-          return handleCompletion();
-        }
-
-        if (nextVersion && nextVersion !== previousVersion) {
-          await fetchSources();
-          return true;
-        }
-
-        await delay(intervalMs);
-      }
-
-      // Final refresh on timeout
-      if (!isCancelled()) {
-        const finalData = await fetchSummary();
-        const finalStatus = finalData?.syncStatus;
-
-        if (finalStatus === "completed" || finalStatus === "failed") {
-          return handleCompletion();
-        }
-
-        // If still syncing, keep polling at a slower interval
-        while (!isCancelled() && (finalStatus === "syncing" || finalStatus === "queued")) {
-          await delay(slowIntervalMs);
-
-          const data = await fetchSummary();
-          const nextVersion = data?.snapshotVersion ?? null;
-          const currentSyncStatus = data?.syncStatus;
-
-          if (currentSyncStatus === "completed" || currentSyncStatus === "failed") {
-            return handleCompletion();
-          }
-
-          if (nextVersion && nextVersion !== previousVersion) {
-            await fetchSources();
-            return true;
-          }
-        }
-      }
-
-      return false;
-    },
-    [fetchSummary, fetchSources]
-  );
-
-  // cancel pending poll on unmount
-  useEffect(() => {
-    return () => {
-      pollTokenRef.current += 1;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (summary?.syncStatus === "syncing" || summary?.syncStatus === "queued") {
-      void pollForSnapshotChange(summary.snapshotVersion ?? null);
-    }
-  }, [pollForSnapshotChange, summary?.snapshotVersion, summary?.syncStatus]);
-
   const syncTask = useCallback(async () => {
     if (!externalTaskKey) return;
 
@@ -600,14 +563,12 @@ export default function TaskPage() {
         return;
       }
 
-      const previousVersion = summary?.snapshotVersion ?? null;
-
       setSyncStatus("Sync queued. Waiting for updates...");
-      void pollForSnapshotChange(previousVersion);
+      setRefreshCount((count) => count + 1);
     } catch (e: any) {
       setSyncStatus(`Sync error: ${String(e)}`);
     }
-  }, [baseUrl, externalTaskKey, pollForSnapshotChange, summary?.snapshotVersion]);
+  }, [baseUrl, externalTaskKey]);
 
   useEffect(() => {
     return () => abortRef.current?.abort();
@@ -656,7 +617,18 @@ export default function TaskPage() {
             <ClipboardList aria-hidden="true" className="h-4 w-4 text-primary" strokeWidth={1.75} />
             <div className="text-sm font-semibold text-foreground">Summary</div>
           </div>
-          {!hasSnapshot ? (
+          {mondayMetadata && (
+            <div className="mt-3 space-y-1 text-xs text-muted-foreground" aria-live="polite">
+              <p>{mondayMetadata.checkedAt
+                ? `Monday details last checked ${new Date(mondayMetadata.checkedAt).toLocaleString()}`
+                : "Monday details have not been checked yet."}
+                {mondayMetadata.refreshPending && !mondayMetadata.refreshError ? " · Refresh pending" : ""}
+              </p>
+              {mondayMetadata.refreshError && <p role="status">{mondayMetadata.refreshError} Showing the last available values.</p>}
+              {mondayMetadata.revision && <a className="underline" href={`${baseUrl}/api/tasks/${externalTaskKey}/monday-columns`} target="_blank" rel="noreferrer">View current Monday details</a>}
+            </div>
+          )}
+          {!hasSnapshot && !mondayMetadata?.revision ? (
             <p className="mt-2 text-sm text-muted-foreground">Task data not yet synced.</p>
           ) : summaryFields.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">No validated columns found.</p>

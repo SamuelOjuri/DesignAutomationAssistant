@@ -1077,6 +1077,7 @@ def _run_sync_pipeline(
     def _build_column_text(item: Dict[str, Any]) -> str:
         # Pick only the columns you want for RAG
         ALLOWED_TITLES = {
+            "Accounts",
             "Priority",
             "Designer",
             "Time tracking",

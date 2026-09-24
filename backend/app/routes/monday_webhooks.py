@@ -26,6 +26,8 @@ from ..services.auto_sync import (
     utc_now,
 )
 from ..services.auto_sync_policy import policy_from_settings
+from ..services.monday_metadata import enqueue_linked_dependents
+from ..services.monday_metadata_fields import LINKED_BOARD_IDS, PROJECT_NAME_COLUMN_ID
 from ..services.db_retry import is_retryable_auto_sync_error, run_transaction_with_retry
 from ..services.design_processing_inputs import (
     EMAIL_COLUMN_ID,
@@ -446,6 +448,8 @@ def _mark_dispatch_failed(
 def _auto_sync_outcome(result: QueueResult) -> str:
     if result.job is not None:
         return "queued" if result.created_job else "coalesced"
+    if result.metadata_queued:
+        return "queued"
     if result.decision.lifecycle_state == "excluded":
         return "excluded"
     if result.decision.reason == "auto_sync_disabled":
@@ -462,6 +466,19 @@ def _dispatch_auto_sync(
 ) -> None:
     policy = policy_from_settings()
     now = utc_now()
+    if normalized.board_id in LINKED_BOARD_IDS and normalized.item_id:
+        source_event = (
+            normalized.column_id in {"name", PROJECT_NAME_COLUMN_ID}
+            or _normalized_event_type(normalized) in DESIGN_NAME_EVENT_TYPES | {
+                "item_archived", "item_deleted", "item_restored", "archive_pulse", "delete_pulse",
+            }
+        )
+        count = enqueue_linked_dependents(db, normalized.board_id, normalized.item_id) if source_event else 0
+        _complete_dispatch(
+            dispatch, outcome="queued" if count else "ignored", job_id=None,
+            result_json={"reason": "linked_metadata_change", "dependentTasksQueued": count}, now=now,
+        )
+        return
     if normalized.board_id != policy.board_id:
         _complete_dispatch(
             dispatch,
@@ -502,6 +519,7 @@ def _dispatch_auto_sync(
                 result.task.external_task_key if result.task is not None else None
             ),
             "createdJob": result.created_job,
+            "metadataQueued": result.metadata_queued,
         },
         now=now,
     )

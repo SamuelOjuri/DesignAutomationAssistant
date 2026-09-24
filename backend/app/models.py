@@ -107,6 +107,35 @@ class Task(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class TaskMondayMetadata(Base):
+    """Current CRM values and a coalescing, leased refresh request per task."""
+
+    __tablename__ = "task_monday_metadata"
+
+    external_task_key = Column(String, ForeignKey("tasks.external_task_key", ondelete="CASCADE"), primary_key=True)
+    fields_json = Column(JSON, nullable=True)
+    revision = Column(String, nullable=True)
+    checked_at = Column(DateTime(timezone=True), nullable=True)
+    changed_at = Column(DateTime(timezone=True), nullable=True)
+    requested_generation = Column(Integer, nullable=False, default=0, server_default="0")
+    completed_generation = Column(Integer, nullable=False, default=0, server_default="0")
+    scheduled_for = Column(DateTime(timezone=True), nullable=True, index=True)
+    lease_token = Column(String, nullable=True)
+    lease_until = Column(DateTime(timezone=True), nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
+    last_error = Column(Text, nullable=True)
+
+
+class MondayMetadataLink(Base):
+    __tablename__ = "monday_metadata_links"
+    __table_args__ = (Index("ix_monday_metadata_link_source", "linked_board_id", "linked_item_id"),)
+
+    external_task_key = Column(String, ForeignKey("tasks.external_task_key", ondelete="CASCADE"), primary_key=True)
+    column_id = Column(String, primary_key=True)
+    linked_board_id = Column(String, primary_key=True)
+    linked_item_id = Column(String, primary_key=True)
+
+
 class AutoSyncReconciliationCheck(Base):
     __tablename__ = "auto_sync_reconciliation_checks"
 
