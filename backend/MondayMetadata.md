@@ -71,6 +71,51 @@ as last checked; it is deleted with project data on retention expiry. Reopening 
 task schedules a fresh read. Archived/unreadable linked items that cannot be resolved
 produce a retry and preserve last known values rather than an invented empty value.
 
+## Holding-item archival and restoration
+
+Lifecycle reads include Monday's `state`. An item with `state: archived` can still
+report Hub B as its group; state takes precedence over group membership. A confirmed
+archival sets the stored task to `auto_sync_state=archived` and
+`auto_sync_enabled=false`. A confirmed `state: deleted` receives equivalent handling
+with `auto_sync_state=deleted`. An empty/unavailable item response does not establish
+either state and continues to produce `source_unavailable` without changing stored data.
+Missing or unsupported state values cannot activate a task.
+
+Confirmed inactive source items cancel scheduled/running document jobs and metadata
+requests, invalidate metadata leases, and clear `purge_after`. Existing snapshots,
+files, current metadata, dependencies, and retention holds remain stored. Archival
+does not start completed-project retention or trigger data deletion. An external
+document operation already in progress can finish; cancelling its job prevents the
+worker from finalizing that job or scheduling a successor. Manual sync requests on
+known archived/deleted tasks return HTTP 409 until restoration is observed.
+
+The existing `completed_transition` reconciliation scope now covers tracked active
+tasks even before ingestion completes, plus archived/deleted tasks. It records
+`archived` / `item_archived` when appropriate and revisits inactive tasks to detect
+restoration after missed webhooks. Restoration to an eligible active group reenables
+auto-sync and schedules fresh metadata and an ordinary document refresh when needed.
+Excluded/completed/unmanaged groups do not start automatic ingestion. When global
+auto-sync is disabled, restoration is recorded as `reactivation_disabled` and automatic
+work remains disabled. The command reports `archived` and `reactivated` counts.
+
+This correction needs **no new migration**: the existing task lifecycle field is a
+string. Deploy the matching API, ingestion worker, metadata worker, and reconciliation
+code. Keep holding-board archive/delete/restore webhooks configured. Then run the
+normal reconciliation command with `--completed-transitions` to repair previously
+misclassified tasks. For the three confirmed archived items, targeted commands are:
+
+```bash
+python -m backend.app.services.auto_sync_reconciliation --skip-active --completed-transitions --completed-item-id 3076716400
+python -m backend.app.services.auto_sync_reconciliation --skip-active --completed-transitions --completed-item-id 3116941506
+python -m backend.app.services.auto_sync_reconciliation --skip-active --completed-transitions --completed-item-id 3181967879
+```
+
+Add `--dry-run` to preview without changing database records. Successful repair should
+show `archived`, disabled auto-sync, no pending metadata/document work, and no purge
+deadline; retained project data should remain intact. These commands read Monday and
+update only the application database. Keep subsequent lifecycle sweeps running so
+restoration can be detected. This code change does not itself update production rows.
+
 ## Read-only API validation / Postman
 
 Generate the exact request body used by the implementation:

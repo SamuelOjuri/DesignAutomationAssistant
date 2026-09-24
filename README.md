@@ -99,7 +99,13 @@ Progress is persisted per board/item and scope. Successful checks and their queu
 decisions commit together. Failed checks advance rotation but retain any previous
 successful-check time, so one failing or inaccessible item cannot monopolize the
 batch. Completed-transition checks have separate progress and rotate past tasks
-that remain active. `--dry-run` writes neither jobs nor check progress. Overlapping
+that remain active. They also inspect tracked tasks whose ingestion is incomplete and
+revisit confirmed archived/deleted tasks to detect restoration. Monday item `state`
+takes precedence over its retained group: archival disables automatic work, cancels
+jobs, and preserves stored data without starting a purge deadline. Restoration to an
+eligible active group reenables refreshes. See the archival rollout commands in
+[MondayMetadata.md](backend/MondayMetadata.md); this correction needs no new migration.
+`--dry-run` writes neither jobs nor check progress. Overlapping
 invocations can duplicate checks; use one scheduler and disable overlapping runs.
 
 Run from the repository root every five minutes (scheduler expression

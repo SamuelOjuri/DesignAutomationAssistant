@@ -15,6 +15,7 @@ from ..models import AutoSyncJob, Task, TaskSnapshot
 from ..monday_client import fetch_current_source_revision_inputs
 from .auto_sync_policy import (
     ACTIVE_JOB_STATUSES,
+    INACTIVE_SOURCE_STATES,
     AutoSyncDecision,
     AutoSyncPolicy,
     build_external_task_key,
@@ -36,6 +37,7 @@ class ItemMetadata:
     group_id: Optional[str]
     group_title: Optional[str]
     external_task_key: str
+    source_state: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -179,6 +181,7 @@ def item_metadata_from_monday_item(
         group_id=str(group_id) if group_id is not None else None,
         group_title=str(group_title) if group_title is not None else None,
         external_task_key=build_external_task_key(account_id, board_id, item_id),
+        source_state=item.get("state"),
     )
 
 
@@ -388,9 +391,11 @@ def enqueue_user_refresh(
                 db.flush([task])
         except IntegrityError as exc:
             raise AutoSyncConcurrencyError("Task was created concurrently") from exc
+    if task.auto_sync_state in INACTIVE_SOURCE_STATES:
+        raise HTTPException(status_code=409, detail="Restore the Monday item before requesting a sync")
     record_meaningful_access(db, task)
     mark_expired_task_restoring(db, task)
-    if policy_from_settings().classify_group(task.board_id, task.source_group_id).should_queue_sync:
+    if task.auto_sync_state == "active" and task.auto_sync_enabled and policy_from_settings().classify_group(task.board_id, task.source_group_id).should_queue_sync:
         enqueue_metadata(db, task, immediate=True)
     job, _ = coalesce_auto_sync_job(
         db, task, trigger_type=trigger_type,
@@ -443,7 +448,7 @@ def apply_auto_sync_policy_for_item(
     now = now or utc_now()
     policy = policy or policy_from_settings()
     metadata = item_metadata_from_monday_item(item, fallback_account_id=fallback_account_id)
-    decision = policy.classify_group(metadata.board_id, metadata.group_id)
+    decision = policy.classify_item(metadata.board_id, metadata.group_id, metadata.source_state)
 
     if not decision.should_track_task:
         log_refresh_decision(
@@ -487,6 +492,21 @@ def apply_auto_sync_policy_for_item(
             task.completed_at = now
         task.purge_after = policy.purge_after_for(task.completed_at)
         task.updated_at = now
+    elif decision.lifecycle_state in INACTIVE_SOURCE_STATES:
+        task.auto_sync_state = decision.lifecycle_state
+        task.auto_sync_enabled = False
+        task.source_group_id = metadata.group_id
+        task.source_group_title = metadata.group_title
+        # Source archival/deletion does not start or continue completed retention.
+        # Preserve snapshots, files, metadata, and any existing retention hold.
+        task.purge_after = None
+        task.updated_at = now
+        if task.sync_status in {"queued", "syncing"}:
+            task.sync_status = "completed"
+            task.sync_finished_at = now
+            task.sync_completed_at = now
+            task.sync_error = None
+            task.last_sync_result = "skipped"
 
     if decision.should_cancel_active_jobs:
         cancel_active_auto_sync_jobs(

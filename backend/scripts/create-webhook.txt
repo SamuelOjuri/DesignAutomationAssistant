@@ -57,3 +57,73 @@ mutation CreateNameChangeWebhook($boardId: ID!, $url: String!) {
   "boardId": "1882196103",
   "url": "https://YOUR-BACKEND-DOMAIN/api/monday/webhooks?token=YOUR_SHARED_SECRET"
 }
+
+
+-- =====================================================
+
+mutation CreateMissingMetadataWebhooks($url: String!) {
+  holdingAccounts: create_webhook(
+    board_id: "1882196103", url: $url, event: change_specific_column_value,
+    config: "{\"columnId\":\"board_relation_mm3c4g5x\"}"
+  ) { id board_id event config }
+
+  holdingEnquiryType: create_webhook(
+    board_id: "1882196103", url: $url, event: change_specific_column_value,
+    config: "{\"columnId\":\"dropdown_mkpb98es\"}"
+  ) { id board_id event config }
+
+  holdingTpRef: create_webhook(
+    board_id: "1882196103", url: $url, event: change_specific_column_value,
+    config: "{\"columnId\":\"board_relation_mkpbm5np\"}"
+  ) { id board_id event config }
+
+  holdingZipCode: create_webhook(
+    board_id: "1882196103", url: $url, event: change_specific_column_value,
+    config: "{\"columnId\":\"dropdown_mkpbafca\"}"
+  ) { id board_id event config }
+
+  accountsRenamed: create_webhook(
+    board_id: "1654217230", url: $url, event: change_name
+  ) { id board_id event config }
+
+  accountsArchived: create_webhook(
+    board_id: "1654217230", url: $url, event: item_archived
+  ) { id board_id event config }
+
+  accountsDeleted: create_webhook(
+    board_id: "1654217230", url: $url, event: item_deleted
+  ) { id board_id event config }
+
+  accountsRestored: create_webhook(
+    board_id: "1654217230", url: $url, event: item_restored
+  ) { id board_id event config }
+
+  projectsArchived: create_webhook(
+    board_id: "1825117125", url: $url, event: item_archived
+  ) { id board_id event config }
+
+  projectsRestored: create_webhook(
+    board_id: "1825117125", url: $url, event: item_restored
+  ) { id board_id event config }
+}
+
+
+{
+  "url": "https://design-automation-assistant-api.onrender.com/api/monday/webhooks?token=REPLACE_WITH_URL_ENCODED_SHARED_SECRET"
+}
+
+-- ============================================
+
+query AuditWebhooks {
+  holding: webhooks(board_id: "1882196103", app_webhooks_only: false) {
+    id board_id event config
+  }
+  accounts: webhooks(board_id: "1654217230", app_webhooks_only: false) {
+    id board_id event config
+  }
+  projects: webhooks(board_id: "1825117125", app_webhooks_only: false) {
+    id board_id event config
+  }
+}
+
+-- =======================

@@ -78,6 +78,7 @@ def test_webhook_locks_job_before_task(postgres_session_factory):
         "account_id": "acct",
         "board": {"id": "board"},
         "group": {"id": "active", "title": "Active"},
+        "state": "active",
     }
 
     setup = Session()

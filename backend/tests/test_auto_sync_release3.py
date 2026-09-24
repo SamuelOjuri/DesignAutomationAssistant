@@ -480,6 +480,7 @@ def test_active_reconciliation_queues_missing_stale_failed_and_stuck_items(db_se
     monkeypatch.setattr(
         "backend.app.services.auto_sync_reconciliation.fetch_current_source_revision_inputs",
         lambda token, item_id, *, account_id=None: {
+            "state": "active",
             "id": item_id,
             "account_id": account_id,
             "board": {"id": "1882196103"},
@@ -533,7 +534,7 @@ def test_active_reconciliation_rotates_across_all_groups_and_restarts(db_session
     def fetch_item(token, item_id, *, account_id=None):
         checked.append(item_id)
         return {
-            "id": item_id, "account_id": account_id, "board": {"id": policy.board_id},
+            "id": item_id, "state": "active", "account_id": account_id, "board": {"id": policy.board_id},
             "group": {"id": "later" if item_id in groups["later"] else "topics"},
             "updated_at": "2026-09-23T12:00:00Z", "assets": [],
         }
@@ -569,7 +570,7 @@ def reconciliation_source(monkeypatch):
         if item_id in source.failures:
             raise RuntimeError("Source unavailable")
         return {
-            "id": item_id, "account_id": account_id, "board": {"id": "1882196103"},
+            "id": item_id, "state": "active", "account_id": account_id, "board": {"id": "1882196103"},
             "group": {"id": "topics"}, "updated_at": "2026-09-23T12:00:00Z", "assets": [],
         }
 
@@ -739,7 +740,7 @@ def test_completed_transition_checks_rotate_past_still_active_tasks(db_session, 
 
     def metadata(token, item_id):
         checked.append(item_id)
-        return {"id": item_id, "account_id": "acct", "board": {"id": "1882196103"}, "group": {"id": "topics"}}
+        return {"id": item_id, "state": "active", "account_id": "acct", "board": {"id": "1882196103"}, "group": {"id": "topics"}}
 
     monkeypatch.setattr(auto_sync_reconciliation, "fetch_item_metadata", metadata)
     for _ in range(3):
@@ -767,7 +768,7 @@ def test_completed_transition_source_unavailable_rotates_and_recovers(
         if len(checked) == 1:
             raise HTTPException(status_code=404, detail="monday item not found")
         return {
-            "id": item_id, "account_id": "acct", "board": {"id": "1882196103"},
+            "id": item_id, "state": "active", "account_id": "acct", "board": {"id": "1882196103"},
             "group": {"id": restored_group if item_id == "1" else "topics"},
         }
 
@@ -873,6 +874,7 @@ def test_completed_transition_detection_marks_indexed_active_task_retained(db_se
             "account_id": "acct",
             "board": {"id": "1882196103"},
             "group": {"id": "group_mkpbb3tx", "title": "Completed Folder"},
+            "state": "active",
         },
     )
 

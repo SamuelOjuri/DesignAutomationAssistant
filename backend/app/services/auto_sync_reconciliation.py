@@ -29,7 +29,7 @@ from .auto_sync import (
     log_refresh_decision,
     utc_now,
 )
-from .auto_sync_policy import ACTIVE_JOB_STATUSES, AutoSyncPolicy, policy_from_settings
+from .auto_sync_policy import ACTIVE_JOB_STATUSES, INACTIVE_SOURCE_STATES, AutoSyncPolicy, policy_from_settings
 from .monday_metadata import enqueue_metadata
 
 logger = logging.getLogger(__name__)
@@ -62,6 +62,8 @@ class ReconciliationResult:
     oldest_checked_at: Optional[datetime] = None
     max_check_age_seconds: Optional[float] = None
     source_unavailable: int = 0
+    archived: int = 0
+    reactivated: int = 0
 
 
 def _ordered_active_group_ids(policy: AutoSyncPolicy) -> list[str]:
@@ -189,7 +191,7 @@ def _active_reconciliation_reason(
     if task is None:
         return "missing"
     job = _active_job(db, task)
-    if task.auto_sync_state == "expired":
+    if task.auto_sync_state in {"expired", *INACTIVE_SOURCE_STATES}:
         return "restore"
     if task.sync_status == "failed":
         return "failed"
@@ -252,7 +254,7 @@ def reconcile_active_items_once(
             item = fetch_current_source_revision_inputs(token, item_id, account_id=account_id)
             desired_source_revision = compute_desired_source_revision(item)
             metadata = item_metadata_from_monday_item(item, fallback_account_id=account_id)
-            decision = policy.classify_group(metadata.board_id, metadata.group_id)
+            decision = policy.classify_item(metadata.board_id, metadata.group_id, metadata.source_state)
             task = db.get(Task, metadata.external_task_key)
             reconciliation_reason = _active_reconciliation_reason(
                 db,
@@ -321,6 +323,12 @@ def reconcile_active_items_once(
                 action = reconciliation_reason
                 if decision.should_queue_sync and task is not None:
                     enqueue_metadata(db, task, immediate=True, only_if_idle=True)
+                elif decision.should_track_task and decision.lifecycle_state != "active":
+                    apply_auto_sync_policy_for_item(
+                        db, item, trigger_type="reconciliation", policy=policy,
+                        fallback_account_id=account_id,
+                    )
+                    action = decision.lifecycle_state or reconciliation_reason
 
             _record_check(
                 db, board_id=policy.board_id, item_id=item_id, scope="active",
@@ -409,12 +417,9 @@ def detect_completed_transitions_once(
         ))
         .filter(
             Task.board_id == policy.board_id,
-            Task.auto_sync_state == "active",
-            Task.sync_status == "completed",
-            or_(
-                Task.last_indexed_source_revision.isnot(None),
-                Task.latest_snapshot_version.isnot(None),
-            ),
+            # Include queued/unindexed tasks so archival cancels their work, and
+            # revisit inactive sources so restoration survives missed webhooks.
+            Task.auto_sync_state.in_(("active", *INACTIVE_SOURCE_STATES)),
         )
         .order_by(AutoSyncReconciliationCheck.last_attempted_at.asc().nullsfirst(), Task.item_id.asc())
     )
@@ -432,6 +437,8 @@ def detect_completed_transitions_once(
     skipped = 0
     errors = 0
     source_unavailable = 0
+    archived = 0
+    reactivated = 0
 
     for task in tasks:
         try:
@@ -467,9 +474,17 @@ def detect_completed_transitions_once(
                 continue
             item["account_id"] = task.account_id
             metadata = item_metadata_from_monday_item(item, fallback_account_id=task.account_id)
-            decision = policy.classify_group(metadata.board_id, metadata.group_id)
+            decision = policy.classify_item(metadata.board_id, metadata.group_id, metadata.source_state)
 
-            if decision.lifecycle_state == "completed_retained":
+            if decision.lifecycle_state in INACTIVE_SOURCE_STATES:
+                action = f"would_mark_{decision.lifecycle_state}" if dry_run else decision.lifecycle_state
+                if not dry_run:
+                    apply_auto_sync_policy_for_item(
+                        db, item, trigger_type="reconciliation", policy=policy,
+                        fallback_account_id=task.account_id,
+                    )
+                archived += int(decision.lifecycle_state == "archived")
+            elif decision.lifecycle_state == "completed_retained":
                 action = "would_mark_completed_retained" if dry_run else "completed_retained"
                 if not dry_run:
                     apply_auto_sync_policy_for_item(
@@ -492,7 +507,19 @@ def detect_completed_transitions_once(
                         fallback_account_id=task.account_id,
                     )
             elif decision.lifecycle_state == "active":
-                action = "still_active"
+                if task.auto_sync_state in INACTIVE_SOURCE_STATES and decision.should_queue_sync:
+                    action = "would_reactivate" if dry_run else "reactivated"
+                    if not dry_run:
+                        apply_auto_sync_policy_for_item(
+                            db, item, trigger_type="reconciliation", policy=policy,
+                            schedule_immediately=True, fallback_account_id=task.account_id,
+                            refresh_reason="restore",
+                        )
+                    reactivated += 1
+                elif task.auto_sync_state in INACTIVE_SOURCE_STATES:
+                    action = "reactivation_disabled"
+                else:
+                    action = "still_active"
             else:
                 action = "ignored"
 
@@ -552,6 +579,8 @@ def detect_completed_transitions_once(
         completed_retained=completed_retained,
         errors=errors,
         source_unavailable=source_unavailable,
+        archived=archived,
+        reactivated=reactivated,
         items=tuple(item_results),
         **_coverage(db, board_id=policy.board_id, scope="completed_transition", item_ids=candidate_ids, dry_run=dry_run),
     )
@@ -603,7 +632,7 @@ def main() -> int:
     parser.add_argument(
         "--completed-transitions",
         action="store_true",
-        help="Also inspect indexed active tasks for moves into the completed group",
+        help="Also check tracked active/archived/deleted tasks for lifecycle changes and restoration",
     )
     parser.add_argument(
         "--completed-limit",

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..models import MondayMetadataLink, Task, TaskMondayMetadata
 from ..monday_client import fetch_current_account_id, fetch_monday_metadata
-from .auto_sync_policy import policy_from_settings
+from .auto_sync_policy import INACTIVE_SOURCE_STATES, policy_from_settings
 from .monday_metadata_fields import (
     COLUMN_IDS, COLUMN_TITLES, LINKED_BOARD_IDS, MetadataReadError,
     metadata_revision, normalize_fields,
@@ -122,10 +122,17 @@ def execute_refresh(db: Session, claim: tuple[str, str, int], access_token: str)
         if str(item.get("id")) != item_id or str((item.get("board") or {}).get("id")) != board_id:
             raise MetadataReadError("Monday returned an unexpected task identity")
         group_id = (item.get("group") or {}).get("id")
-        if item.get("state") not in {"active", "archived", "deleted"} or not group_id:
+        if item.get("state") not in {"active", "archived", "deleted"} or (item["state"] == "active" and not group_id):
             raise MetadataReadError("Monday task lifecycle is unavailable")
-        eligible = item["state"] == "active" and policy_from_settings().classify_group(board_id, group_id).should_queue_sync
+        eligible = policy_from_settings().classify_item(board_id, group_id, item["state"]).should_queue_sync
         fields = normalize_fields(item) if eligible else None
+        if item["state"] in INACTIVE_SOURCE_STATES:
+            # Archival also cancels document work. Acquire its job locks before
+            # Task/metadata, matching the orchestrator. Import locally to avoid
+            # the orchestrator/metadata module dependency cycle.
+            from .auto_sync import apply_auto_sync_policy_for_item, lock_auto_sync_state
+
+            lock_auto_sync_state(db, board_id=board_id, item_id=item_id, external_task_key=task_key)
         # Match the orchestrator's Task -> metadata lock order. Inserting linked
         # dependencies takes a foreign-key lock on Task, so locking metadata first
         # could deadlock with an incoming event that already holds the Task lock.
@@ -149,6 +156,10 @@ def execute_refresh(db: Session, claim: tuple[str, str, int], access_token: str)
         if record.requested_generation != generation:
             db.commit()
             return "superseded"
+        if item["state"] in INACTIVE_SOURCE_STATES:
+            apply_auto_sync_policy_for_item(
+                db, item, trigger_type="metadata", fallback_account_id=current_task.account_id,
+            )
         now = utc_now()
         if fields is not None:
             revision = metadata_revision(fields)

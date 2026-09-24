@@ -794,6 +794,7 @@ def test_active_backfill_dry_run_lists_only_configured_active_groups(db_session,
 
     def fake_fetch_revision_inputs(token, item_id, *, account_id=None):
         return {
+            "state": "active",
             "id": item_id,
             "updated_at": f"2026-07-01T12:00:0{item_id}Z",
             "account_id": account_id,
@@ -845,6 +846,7 @@ def test_active_backfill_queues_small_batch_immediately(db_session, monkeypatch)
 
     def fake_fetch_revision_inputs(token, item_id, *, account_id=None):
         return {
+            "state": "active",
             "id": item_id,
             "updated_at": f"2026-07-01T12:00:0{item_id}Z",
             "account_id": account_id,
@@ -896,6 +898,7 @@ def test_active_backfill_skips_already_indexed_revision(db_session, monkeypatch)
         "id": "1",
         "updated_at": "2026-07-01T12:00:01Z",
         "account_id": "acct",
+        "state": "active",
         "board": {"id": "1882196103"},
         "group": {"id": "topics", "title": "Hub A - Outstanding"},
         "assets": [],

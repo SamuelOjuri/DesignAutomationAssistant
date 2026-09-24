@@ -72,7 +72,7 @@ def _dry_run_result(
     account_id: str,
 ) -> BackfillItemResult:
     metadata = item_metadata_from_monday_item(item, fallback_account_id=account_id)
-    decision = policy.classify_group(metadata.board_id, metadata.group_id)
+    decision = policy.classify_item(metadata.board_id, metadata.group_id, metadata.source_state)
     external_task_key = build_external_task_key(metadata.account_id, metadata.board_id, metadata.item_id)
 
     existing_task = db.get(Task, external_task_key)

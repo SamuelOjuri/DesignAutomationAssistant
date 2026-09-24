@@ -90,6 +90,7 @@ def _webhook_payload(*, trigger_uuid: str = "trigger-1", item_id: str = "item-1"
 
 def _monday_item(*, item_id: str = "item-1", group_id: str = "topics", group_title: str = "Hub A") -> dict:
     return {
+        "state": "active",
         "id": item_id,
         "account_id": "acct",
         "board": {"id": "1882196103", "name": "Design queue"},
@@ -99,6 +100,33 @@ def _monday_item(*, item_id: str = "item-1", group_id: str = "topics", group_tit
         "updates": [],
         "column_values": [],
     }
+
+
+def test_archive_and_restore_webhooks_use_current_item_state(client, db_session, monkeypatch):
+    item = _monday_item(group_id="group_mkpbs35c", group_title="Hub B - Outstanding")
+    monkeypatch.setattr(monday_webhooks, "get_monday_ingestion_access_token", lambda: "service-token")
+    monkeypatch.setattr(monday_webhooks, "fetch_current_source_revision_inputs", lambda *args: dict(item))
+    def send(trigger, event_type):
+        payload = _webhook_payload(trigger_uuid=trigger)
+        payload["event"]["type"] = event_type
+        return client.post("/api/monday/webhooks", json=payload, headers=_auth_headers())
+    assert send("initial", "create_item").status_code == 200
+    task = db_session.query(Task).one()
+    original_job = db_session.query(AutoSyncJob).one()
+    item["state"] = "archived"
+    response = send("archive", "item_archived")
+    assert response.status_code == 200 and response.json()["status"] == "cancelled"
+    db_session.refresh(task)
+    db_session.refresh(original_job)
+    assert task.auto_sync_state == "archived" and not task.auto_sync_enabled
+    assert original_job.status == "cancelled"
+    item["state"] = "active"
+    # A late archive notification must use the current restored state.
+    response = send("late-archive", "item_archived")
+    assert response.status_code == 200 and response.json()["status"] == "queued"
+    db_session.refresh(task)
+    assert task.auto_sync_state == "active" and task.auto_sync_enabled
+    assert db_session.query(AutoSyncJob).filter_by(status="scheduled").count() == 1
 
 
 class FakeDeadlockError(Exception):

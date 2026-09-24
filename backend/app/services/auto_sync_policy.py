@@ -9,8 +9,10 @@ from ..config import settings
 
 EXECUTION_STATES = ("queued", "syncing", "completed", "failed")
 SYNC_RESULTS = ("done", "unchanged", "skipped", "failed")
+INACTIVE_SOURCE_STATES = ("archived", "deleted")
 LIFECYCLE_STATES = (
     "active",
+    *INACTIVE_SOURCE_STATES,
     "completed_retained",
     "purge_pending",
     "storage_deleting",
@@ -54,6 +56,20 @@ class AutoSyncPolicy:
     retention_days: int
     debounce_seconds: int
     backfill_batch_size: int
+
+    def classify_item(self, board_id: str, group_id: Optional[str], state: Optional[str]) -> AutoSyncDecision:
+        """Monday retains group IDs on archived items; state takes precedence."""
+        if str(board_id) != self.board_id:
+            return self.classify_group(board_id, group_id)
+        if state in INACTIVE_SOURCE_STATES:
+            return AutoSyncDecision(
+                board_id=str(board_id), group_id=str(group_id) if group_id is not None else None,
+                lifecycle_state=state, should_track_task=True, should_queue_sync=False,
+                should_cancel_active_jobs=True, reason=f"item_{state}", requires_existing_index=True,
+            )
+        if state != "active":
+            raise ValueError("Monday item state is missing or unsupported")
+        return self.classify_group(board_id, group_id)
 
     def classify_group(self, board_id: str, group_id: Optional[str]) -> AutoSyncDecision:
         normalized_board_id = str(board_id)

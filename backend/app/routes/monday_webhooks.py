@@ -25,7 +25,7 @@ from ..services.auto_sync import (
     get_monday_ingestion_access_token,
     utc_now,
 )
-from ..services.auto_sync_policy import policy_from_settings
+from ..services.auto_sync_policy import INACTIVE_SOURCE_STATES, policy_from_settings
 from ..services.monday_metadata import enqueue_linked_dependents
 from ..services.monday_metadata_fields import LINKED_BOARD_IDS, PROJECT_NAME_COLUMN_ID
 from ..services.db_retry import is_retryable_auto_sync_error, run_transaction_with_retry
@@ -450,7 +450,9 @@ def _auto_sync_outcome(result: QueueResult) -> str:
         return "queued" if result.created_job else "coalesced"
     if result.metadata_queued:
         return "queued"
-    if result.decision.lifecycle_state == "excluded":
+    if result.decision.lifecycle_state in {"excluded", *INACTIVE_SOURCE_STATES}:
+        # The dispatch outcome has a database CHECK constraint. Keep its existing
+        # exclusion outcome; result_json.reason carries item_archived/item_deleted.
         return "excluded"
     if result.decision.reason == "auto_sync_disabled":
         return "disabled"

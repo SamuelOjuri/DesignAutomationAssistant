@@ -17,6 +17,7 @@ from ..config import settings
 from ..db import SessionLocal
 from ..models import AutoSyncJob, Task, TaskSnapshot
 from .auto_sync import coalesce_auto_sync_job, get_monday_ingestion_access_token, has_completed_snapshot, utc_now
+from .auto_sync_policy import INACTIVE_SOURCE_STATES
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,9 @@ def recover_stuck_jobs(
 
     for job in stuck_jobs:
         task = _task_for_job(db, job, for_update=True)
+        if task is not None and task.auto_sync_state in INACTIVE_SOURCE_STATES:
+            _cancel_inactive_job(job, task, now=now)
+            continue
         job.locked_at = None
         job.locked_by = None
         job.heartbeat_at = None
@@ -258,6 +262,10 @@ def claim_due_jobs(
     due_jobs = _with_row_locks(db, query).all()
 
     for job in due_jobs:
+        task = _task_for_job(db, job, for_update=True)
+        if task is not None and task.auto_sync_state in INACTIVE_SOURCE_STATES:
+            _cancel_inactive_job(job, task, now=now)
+            continue
         job.execution_generation = job.desired_generation
         job.execution_source_revision = job.desired_source_revision
         job.execution_trigger_type = job.trigger_type
@@ -270,14 +278,13 @@ def claim_due_jobs(
         job.started_at = now
         job.attempt_count = (job.attempt_count or 0) + 1
         job.updated_at = now
-        task = _task_for_job(db, job, for_update=True)
         if task is not None:
             job.external_task_key = task.external_task_key
             _mark_task_syncing(task, job, now)
 
     if due_jobs:
         db.commit()
-    return due_jobs
+    return [job for job in due_jobs if job.status == "running"]
 
 
 def heartbeat_job(
@@ -372,6 +379,11 @@ def _has_newer_request(job: AutoSyncJob) -> bool:
     return job.desired_generation > (job.execution_generation or 0)
 
 
+def _cancel_inactive_job(job: AutoSyncJob, task: Task, *, now: datetime) -> None:
+    _finish_job(job, status="cancelled", error=f"item_{task.auto_sync_state}", now=now)
+    _mark_task_completed(task, result="skipped", source_revision=None, now=now)
+
+
 def _schedule_successor(db: Session, job: AutoSyncJob, task: Task, *, now: datetime) -> None:
     db.flush()
     coalesce_auto_sync_job(
@@ -387,6 +399,9 @@ def _complete_execution(
     db: Session, job: AutoSyncJob, task: Task, *,
     result: str, source_revision: Optional[str], now: datetime,
 ) -> None:
+    if task.auto_sync_state in INACTIVE_SOURCE_STATES:
+        _cancel_inactive_job(job, task, now=now)
+        return
     _finish_job(job, status="skipped" if result == "skipped" else "completed", now=now)
     task.last_sync_trigger = job.execution_trigger_type or job.trigger_type
     _mark_task_completed(task, result=result, source_revision=source_revision, now=now)
@@ -512,6 +527,15 @@ def execute_claimed_job(
             _finish_job(job, status="failed", now=now, error="Task not found for auto-sync job")
             db.commit()
             return "failed"
+
+    if task.auto_sync_state in INACTIVE_SOURCE_STATES:
+        job, task = _lock_claimed_job_and_task(db, job_id, worker_id=worker_id)
+        if task is not None and task.auto_sync_state in INACTIVE_SOURCE_STATES:
+            _cancel_inactive_job(job, task, now=now)
+            db.commit()
+            return "skipped"
+        db.rollback()
+        return "not_claimed"
 
     if (
         not force and not job.execution_force
