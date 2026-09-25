@@ -123,7 +123,6 @@ const VALIDATED_COLUMN_TITLES = new Set([
   "Zip Code",
   "Date Completed",
   "Hour Completed",
-  "Date Sort",
 ]);
 
 const CRM_FIELDS = [
