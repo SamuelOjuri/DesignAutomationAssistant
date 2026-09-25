@@ -6,6 +6,7 @@ import { ClipboardList, Files, MessageSquare, UserRound } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { startTaskPolling } from "@/lib/task-polling";
 
 type ChatMessage = {
@@ -248,6 +249,8 @@ export default function TaskPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const sessionExpiredRef = useRef(false);
 
   // --- New state for summary and sources ---
   const [summary, setSummary] = useState<TaskSummaryResponse | null>(null);
@@ -337,8 +340,27 @@ export default function TaskPage() {
     return process.env.NEXT_PUBLIC_FASTAPI_BASE_URL?.replace(/\/$/, "") ?? "";
   }, []);
 
+  // Share one recovery message across every authenticated task request.
+  const handleUnauthorized = useCallback((response: Response) => {
+    if (response.status === 401 && !sessionExpiredRef.current) {
+      sessionExpiredRef.current = true;
+      setSessionExpired(true);
+      setSummaryError(null);
+      setSourcesError(null);
+      setSignedUrlError(null);
+      setSyncStatus(null);
+      setIsLoadingSummary(false);
+      setIsLoadingSources(false);
+      setIsStreaming(false);
+      abortRef.current?.abort();
+    }
+    // Ignore other in-flight responses once the session has expired, too.
+    return sessionExpiredRef.current;
+  }, []);
+
   const openSignedUrl = useCallback(
     async (fileId: string) => {
+      if (sessionExpiredRef.current) return;
       setSignedUrlError(null);
       const cached = signedUrls[fileId];
       if (cached) {
@@ -357,18 +379,21 @@ export default function TaskPage() {
           `${baseUrl}/api/tasks/${externalTaskKey}/files/${fileId}/signed-url`,
           { credentials: "include" }
         );
+        if (handleUnauthorized(response)) return;
         if (!response.ok) {
           setSignedUrlError(`Signed URL failed (${response.status})`);
           return;
         }
         const data = (await response.json()) as SignedUrlResponse;
+        if (sessionExpiredRef.current) return;
         setSignedUrls((prev) => ({ ...prev, [fileId]: data }));
         window.open(data.url, "_blank", "noopener,noreferrer");
       } catch (e: any) {
+        if (sessionExpiredRef.current) return;
         setSignedUrlError(`Signed URL error: ${String(e)}`);
       }
     },
-    [baseUrl, externalTaskKey, signedUrls]
+    [baseUrl, externalTaskKey, signedUrls, handleUnauthorized]
   );
 
   const appendAssistantChunk = useCallback((chunk: string, citations: Citation[] = []) => {
@@ -391,7 +416,7 @@ export default function TaskPage() {
 
   // --- Fetch summary and sources helpers ---
   const fetchSummary = useCallback(async (signal: AbortSignal, silent = false): Promise<TaskSummaryResponse | null> => {
-    if (!externalTaskKey) return null;
+    if (!externalTaskKey || sessionExpiredRef.current) return null;
     if (!silent) setIsLoadingSummary(true);
     try {
       if (!baseUrl) {
@@ -406,26 +431,27 @@ export default function TaskPage() {
           signal,
         }
       );
+      if (signal.aborted || handleUnauthorized(response)) return null;
       if (!response.ok) {
         setSummaryError(`Summary failed (${response.status})`);
         return null;
       }
       const data = (await response.json()) as TaskSummaryResponse;
-      if (signal.aborted) return null;
+      if (signal.aborted || sessionExpiredRef.current) return null;
       setSummaryError(null);
       setSummary(data);
       return data;
     } catch (e: any) {
-      if (signal.aborted) return null;
+      if (signal.aborted || sessionExpiredRef.current) return null;
       setSummaryError(`Summary error: ${String(e)}`);
       return null;
     } finally {
       if (!signal.aborted) setIsLoadingSummary(false);
     }
-  }, [baseUrl, externalTaskKey]);
+  }, [baseUrl, externalTaskKey, handleUnauthorized]);
 
   const fetchSources = useCallback(async (signal: AbortSignal): Promise<boolean> => {
-    if (!externalTaskKey) return false;
+    if (!externalTaskKey || sessionExpiredRef.current) return false;
     setIsLoadingSources(true);
     setSourcesError(null);
     try {
@@ -441,25 +467,26 @@ export default function TaskPage() {
           signal,
         }
       );
+      if (signal.aborted || handleUnauthorized(response)) return false;
       if (!response.ok) {
         setSourcesError(`Sources failed (${response.status})`);
         return false;
       }
       const data = (await response.json()) as TaskSourcesResponse;
-      if (signal.aborted) return false;
+      if (signal.aborted || sessionExpiredRef.current) return false;
       setSources(data);
       return true;
     } catch (e: any) {
-      if (signal.aborted) return false;
+      if (signal.aborted || sessionExpiredRef.current) return false;
       setSourcesError(`Sources error: ${String(e)}`);
       return false;
     } finally {
       if (!signal.aborted) setIsLoadingSources(false);
     }
-  }, [baseUrl, externalTaskKey]);
+  }, [baseUrl, externalTaskKey, handleUnauthorized]);
 
   useEffect(() => {
-    if (!externalTaskKey) return;
+    if (!externalTaskKey || sessionExpired) return;
     return startTaskPolling(async (signal, first) => {
       const data = await fetchSummary(signal, !first);
       if (data && !signal.aborted) {
@@ -470,10 +497,10 @@ export default function TaskPage() {
         }
       }
     }, (error) => setSummaryError(`Refresh error: ${String(error)}`));
-  }, [externalTaskKey, fetchSummary, fetchSources, refreshCount]);
+  }, [externalTaskKey, fetchSummary, fetchSources, refreshCount, sessionExpired]);
 
   const sendMessage = useCallback(async () => {
-    if (!input.trim() || isStreaming || !externalTaskKey) return;
+    if (!input.trim() || isStreaming || !externalTaskKey || sessionExpiredRef.current) return;
     const prompt = input.trim();
     setInput("");
 
@@ -507,6 +534,10 @@ export default function TaskPage() {
         signal: controller.signal,
       });
 
+      if (handleUnauthorized(response)) {
+        setInput((current) => current || prompt);
+        return;
+      }
       if (!response.ok) {
         appendAssistantChunk(`Error: ${response.status}`);
         setIsStreaming(false);
@@ -514,6 +545,7 @@ export default function TaskPage() {
       }
 
       const data = (await response.json()) as ChatCompleteResponse;
+      if (sessionExpiredRef.current) return;
       if (data.content) {
         appendAssistantChunk(data.content, data.citations || []);
       } else {
@@ -522,21 +554,23 @@ export default function TaskPage() {
         );
       }
     } catch (e: any) {
-      if (e?.name !== "AbortError") {
+      if (sessionExpiredRef.current) {
+        setInput((current) => current || prompt);
+      } else if (e?.name !== "AbortError") {
         appendAssistantChunk(`Error: ${String(e)}`);
       }
     } finally {
       setIsStreaming(false);
       abortRef.current = null;
     }
-  }, [appendAssistantChunk, baseUrl, input, isStreaming, messages, externalTaskKey]);
+  }, [appendAssistantChunk, baseUrl, input, isStreaming, messages, externalTaskKey, handleUnauthorized]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
   }, []);
 
   const syncTask = useCallback(async () => {
-    if (!externalTaskKey) return;
+    if (!externalTaskKey || sessionExpiredRef.current) return;
 
     if (!baseUrl) {
       setSyncStatus("FASTAPI base URL is not configured.");
@@ -558,6 +592,7 @@ export default function TaskPage() {
         }
       );
 
+      if (handleUnauthorized(response)) return;
       if (!response.ok) {
         setSyncStatus(`Sync failed (${response.status})`);
         return;
@@ -566,9 +601,10 @@ export default function TaskPage() {
       setSyncStatus("Sync queued. Waiting for updates...");
       setRefreshCount((count) => count + 1);
     } catch (e: any) {
+      if (sessionExpiredRef.current) return;
       setSyncStatus(`Sync error: ${String(e)}`);
     }
-  }, [baseUrl, externalTaskKey]);
+  }, [baseUrl, externalTaskKey, handleUnauthorized]);
 
   useEffect(() => {
     return () => abortRef.current?.abort();
@@ -595,11 +631,22 @@ export default function TaskPage() {
         </div>
         <button
           onClick={syncTask}
-          className="inline-flex items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          disabled={sessionExpired}
+          className="inline-flex items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
         >
           Sync task
         </button>
       </div>
+
+      {sessionExpired && (
+        <Alert className="mt-5 border-primary/30 bg-card" aria-labelledby="session-expired-title">
+          <AlertTitle id="session-expired-title">Your session has expired</AlertTitle>
+          <AlertDescription>
+            To continue, reopen this task from Monday CRM and authorise again if prompted.
+            {input.trim() && <p className="mt-2">You can copy your unsent question below before leaving this tab.</p>}
+          </AlertDescription>
+        </Alert>
+      )}
 
       {summary?.syncStatus && (
         <p className="mt-3 inline-flex rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-foreground">
@@ -625,7 +672,7 @@ export default function TaskPage() {
                 {mondayMetadata.refreshPending && !mondayMetadata.refreshError ? " · Refresh pending" : ""}
               </p>
               {mondayMetadata.refreshError && <p role="status">{mondayMetadata.refreshError} Showing the last available values.</p>}
-              {mondayMetadata.revision && <a className="underline" href={`${baseUrl}/api/tasks/${externalTaskKey}/monday-columns`} target="_blank" rel="noreferrer">View current Monday details</a>}
+              {mondayMetadata.revision && !sessionExpired && <a className="underline" href={`${baseUrl}/api/tasks/${externalTaskKey}/monday-columns`} target="_blank" rel="noreferrer">View current Monday details</a>}
             </div>
           )}
           {!hasSnapshot && !mondayMetadata?.revision ? (
@@ -727,7 +774,8 @@ export default function TaskPage() {
                     {file.downloadAvailable ? (
                       <button
                         onClick={() => openSignedUrl(file.id)}
-                        className="inline-flex items-center justify-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary"
+                        disabled={sessionExpired}
+                        className="inline-flex items-center justify-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         View / Download
                       </button>
@@ -813,8 +861,9 @@ export default function TaskPage() {
                           <button
                             type="button"
                             onClick={() => openSignedUrl(citation.fileId as string)}
+                            disabled={sessionExpired}
                             aria-label={`View source ${citation.sourceId || citation.filename || citationIndex + 1}`}
-                            className="inline-flex shrink-0 items-center justify-center self-start rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            className="inline-flex shrink-0 items-center justify-center self-start rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             View source
                           </button>
@@ -851,6 +900,7 @@ export default function TaskPage() {
           className="min-h-[96px] w-full rounded-lg border border-input bg-card px-4 py-3 text-sm shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
           placeholder="Ask a question about this task..."
           value={input}
+          readOnly={sessionExpired}
           onChange={(e) => setInput(e.target.value)}
         />
       </div>
@@ -858,7 +908,7 @@ export default function TaskPage() {
       <div className="mt-2 flex items-center gap-2">
         <button
           onClick={sendMessage}
-          disabled={isStreaming || !input.trim()}
+          disabled={sessionExpired || isStreaming || !input.trim()}
           aria-busy={isStreaming}
           className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
