@@ -122,6 +122,17 @@ explicit reconciliation CLI does not consult `AUTO_SYNC_RECONCILIATION_ENABLED`;
 that flag alone neither schedules nor stops this command. Per-item failures return
 a nonzero exit status while keeping successfully committed progress.
 
+Monday requests use up to four attempts for transient HTTP failures. Read queries
+also retry recognized transient GraphQL errors, including rate/complexity limits
+and temporary API blocks. Retries wait at least the `Retry-After` or
+`retry_in_seconds` delay supplied by Monday, falling back to exponential backoff.
+A requested delay over 120 seconds is surfaced as a transient failure for a later
+job/run rather than sleeping indefinitely or retrying before the limit resets.
+Permanent, unknown, mixed permanent/transient, and mutation GraphQL errors are not
+automatically replayed. Logs retain HTTP status, error codes, request IDs, retry
+delays, and retry attempts; upstream messages, response bodies, and credentials
+are omitted. Exhausted retries still produce a failed reconciliation run.
+
 Completed-transition metadata lookups that return `404: monday item not found`
 are reported as `source_unavailable` warnings, not errors. The summary includes a
 `source_unavailable` count (also included in `skipped`); these warnings alone do

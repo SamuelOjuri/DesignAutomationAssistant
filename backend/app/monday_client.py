@@ -1,7 +1,11 @@
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
+from email.utils import parsedate_to_datetime
 import json
+import logging
+import math
 from pathlib import PurePath
+import re
 from typing import Any, Mapping, Optional, Sequence
 
 import jwt
@@ -17,6 +21,15 @@ MONDAY_FILE_API_URL = "https://api.monday.com/v2/file"
 MONDAY_OAUTH_URL = "https://auth.monday.com/oauth2/authorize"
 MONDAY_TOKEN_URL = "https://auth.monday.com/oauth2/token"
 TRANSIENT_MONDAY_STATUS_CODES = {429, 500, 502, 503, 504}
+# Longer delays must be handled by a subsequent job, not an early retry or an
+# unbounded sleep inside a web request/worker. Keep the existing four-attempt cap.
+MAX_MONDAY_RETRY_DELAY_SECONDS = 120
+TRANSIENT_MONDAY_GRAPHQL_CODES = {
+    "apitemporarilyblocked", "complexitybudgetexhausted", "maxconcurrencyexceeded",
+    "concurrencylimitexceeded", "ipratelimitexceeded", "ratelimitexceeded",
+    "minutelimitrateexceeded", "internalservererror", "serviceunavailable",
+}
+logger = logging.getLogger(__name__)
 DESIGN_PROCESSING_SCALAR_COLUMN_IDS = frozenset(
     {"date_mkpb23av", "hour_mkpbb3j1", "dropdown_mkpbafca"}
 )
@@ -28,8 +41,10 @@ class TransientMondayAPIError(HTTPException):
         upstream_status_code: Optional[int] = None,
         *,
         detail: Optional[str] = None,
+        retry_after_seconds: Optional[float] = None,
     ):
         self.upstream_status_code = upstream_status_code
+        self.retry_after_seconds = retry_after_seconds
         if detail is None:
             detail = f"monday API error ({upstream_status_code})"
         super().__init__(status_code=502, detail=detail)
@@ -79,13 +94,116 @@ def _require_decimal_identifier(value: str, *, field_name: str) -> str:
 
 
 def _is_transient_monday_error(exc: BaseException) -> bool:
+    if isinstance(exc, TransientMondayAPIError):
+        return (
+            exc.retry_after_seconds is None
+            or exc.retry_after_seconds <= MAX_MONDAY_RETRY_DELAY_SECONDS
+        )
     return isinstance(
         exc,
         (
-            TransientMondayAPIError,
             requests.exceptions.ConnectionError,
             requests.exceptions.Timeout,
         ),
+    )
+
+
+def _nonnegative_seconds(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    try:
+        seconds = float(value)
+    except (ValueError, OverflowError):
+        return None
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
+
+
+def _graphql_errors(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    errors = payload.get("errors")
+    if errors:
+        if not isinstance(errors, list):
+            errors = [errors]
+        return [error if isinstance(error, Mapping) else {} for error in errors]
+    # Older Monday responses use top-level error_code/error_data fields.
+    return [payload] if payload.get("error_code") else []
+
+
+def _error_extensions(error: Mapping[str, Any]) -> Mapping[str, Any]:
+    extensions = error.get("extensions")
+    return extensions if isinstance(extensions, Mapping) else {}
+
+
+def _graphql_error_code(error: Mapping[str, Any]) -> Any:
+    return _error_extensions(error).get("code") or error.get("error_code") or error.get("code")
+
+
+def _monday_retry_after(response: requests.Response, payload: Mapping[str, Any]) -> Optional[float]:
+    delays = []
+    header = getattr(response, "headers", {}).get("Retry-After")
+    seconds = _nonnegative_seconds(header)
+    if seconds is None and isinstance(header, str):
+        try:
+            retry_at = parsedate_to_datetime(header)
+            if retry_at.tzinfo is not None:
+                seconds = max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            pass
+    if seconds is not None:
+        delays.append(seconds)
+    for error in [payload, *_graphql_errors(payload)]:
+        for container in (error, _error_extensions(error)):
+            error_data = container.get("error_data")
+            for source in (container, error_data if isinstance(error_data, Mapping) else {}):
+                seconds = _nonnegative_seconds(source.get("retry_in_seconds"))
+                if seconds is not None:
+                    delays.append(seconds)
+    # A response can contain multiple limits; never retry before any of them reset.
+    return max(delays, default=None)
+
+
+def _safe_error_identifier(value: Any, access_token: str) -> Optional[str]:
+    # Log only bounded machine identifiers, never upstream messages/error_data,
+    # which can echo credentials, query variables, or customer content.
+    if not isinstance(value, str) or (access_token and access_token in value):
+        return None
+    return value if re.fullmatch(r"[A-Za-z0-9_.: -]{1,120}", value) else None
+
+
+def _is_transient_graphql_error(error: Mapping[str, Any], retry_after: Optional[float]) -> bool:
+    code = _graphql_error_code(error)
+    normalized = re.sub(r"[^a-z0-9]", "", code.lower()) if isinstance(code, str) else ""
+    if normalized in TRANSIENT_MONDAY_GRAPHQL_CODES:
+        return True
+    # ComplexityException can also mean an oversized individual query, which
+    # waiting cannot fix. Only retry it when Monday supplies a reset delay.
+    if normalized == "complexityexception":
+        return retry_after is not None
+    if normalized:
+        return False
+    status = _error_extensions(error).get("status_code")
+    return isinstance(status, int) and status in TRANSIENT_MONDAY_STATUS_CODES
+
+
+def _is_read_query(query: str) -> bool:
+    # Conservatively recognize a leading query/shorthand operation. GraphQL
+    # mutation errors may accompany partial writes and must not be replayed.
+    leading = re.sub(r"\A(?:[\s,\ufeff]|#[^\r\n]*(?:\r?\n|$))*", "", query)
+    return leading.startswith("{") or re.match(r"query\b", leading) is not None
+
+
+_monday_retry_backoff = wait_exponential(multiplier=1, min=2, max=15)
+
+
+def _wait_for_monday_retry(retry_state) -> float:
+    exc = retry_state.outcome.exception()
+    return max(_monday_retry_backoff(retry_state), getattr(exc, "retry_after_seconds", None) or 0)
+
+
+def _log_monday_retry(retry_state) -> None:
+    logger.warning(
+        "Retrying monday request after attempt=%s wait_seconds=%s error_type=%s",
+        retry_state.attempt_number, retry_state.next_action.sleep,
+        type(retry_state.outcome.exception()).__name__,
     )
 
 
@@ -98,8 +216,9 @@ def monday_headers(access_token: str) -> dict[str, str]:
 
 @retry(
     stop=stop_after_attempt(4),
-    wait=wait_exponential(multiplier=1, min=2, max=15),
+    wait=_wait_for_monday_retry,
     retry=retry_if_exception(_is_transient_monday_error),
+    before_sleep=_log_monday_retry,
     reraise=True,
 )
 def _post_monday_graphql(
@@ -115,8 +234,46 @@ def _post_monday_graphql(
         headers=monday_headers(access_token),
         timeout=timeout,
     )
-    if resp.status_code in TRANSIENT_MONDAY_STATUS_CODES:
-        raise TransientMondayAPIError(resp.status_code)
+    # Keep OAuth's allow_unauthorized behavior in monday_graphql_request.
+    if resp.status_code == 401:
+        return resp
+    try:
+        payload = resp.json()
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, Mapping):
+        payload = {}
+    errors = _graphql_errors(payload)
+    if not resp.ok or errors:
+        retry_after = _monday_retry_after(resp, payload)
+        codes = [
+            code for error in errors
+            if (code := _safe_error_identifier(_graphql_error_code(error), access_token))
+        ][:5]
+        request_id = _safe_error_identifier(
+            _error_extensions(payload).get("request_id") or payload.get("request_id")
+            or getattr(resp, "headers", {}).get("X-Request-ID"), access_token,
+        )
+        detail = "monday GraphQL error" if resp.ok else f"monday API error ({resp.status_code})"
+        if codes:
+            detail += f"; codes={','.join(dict.fromkeys(codes))}"
+        if request_id:
+            detail += f"; request_id={request_id}"
+        if retry_after is not None:
+            detail += f"; retry_after_seconds={retry_after:g}"
+        logger.warning(
+            "%s", detail,
+            extra={"event": "monday.api_error", "upstream_status_code": resp.status_code,
+                   "error_codes": codes, "request_id": request_id, "retry_after_seconds": retry_after},
+        )
+        if resp.status_code in TRANSIENT_MONDAY_STATUS_CODES or (
+            resp.ok and errors and _is_read_query(query)
+            and all(_is_transient_graphql_error(error, retry_after) for error in errors)
+        ):
+            raise TransientMondayAPIError(
+                resp.status_code, detail=detail, retry_after_seconds=retry_after,
+            )
+        raise HTTPException(status_code=502, detail=detail)
     return resp
 
 
@@ -151,10 +308,7 @@ def monday_graphql_request(
     if not resp.ok:
         raise HTTPException(status_code=502, detail=f"monday API error ({resp.status_code})")
 
-    payload = resp.json()
-    if payload.get("errors"):
-        raise HTTPException(status_code=502, detail="monday GraphQL error")
-    return payload
+    return resp.json()
 
 
 DESIGN_PROCESSING_COLUMN_UPDATE_MUTATION = """
