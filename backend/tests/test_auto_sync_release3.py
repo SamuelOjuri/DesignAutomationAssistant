@@ -733,12 +733,35 @@ def test_invalid_reconciliation_limits_do_not_call_monday(db_session, reconcilia
     assert reconciliation_source.page_sizes == []
 
 
+def test_completed_transition_sweep_uses_stored_accounts_without_account_queries(db_session, monkeypatch):
+    db_session.add_all([_task(item_id, revision="rev-1") for item_id in ("1", "2", "3")])
+    db_session.commit()
+    checked = []
+
+    def graphql(token, query, variables, **kwargs):
+        assert query == monday_client.ITEM_METADATA_QUERY
+        item_id = variables["itemIds"][0]
+        checked.append(item_id)
+        return {"data": {"items": [{
+            "id": item_id, "state": "active", "board": {"id": "1882196103"},
+            "group": {"id": "topics"},
+        }]}}
+
+    monkeypatch.setattr(monday_client, "monday_graphql_request", graphql)
+    result = detect_completed_transitions_once(
+        db_session, dry_run=False, access_token="token", policy=_policy(),
+    )
+    assert result.scanned == 3 and result.errors == 0
+    assert checked == ["1", "2", "3"]
+    assert [item.external_task_key for item in result.items] == [f"acct:1882196103:{item_id}" for item_id in checked]
+
+
 def test_completed_transition_checks_rotate_past_still_active_tasks(db_session, monkeypatch):
     db_session.add_all([_task(item_id, revision="rev-1") for item_id in ("1", "2", "3")])
     db_session.commit()
     checked = []
 
-    def metadata(token, item_id):
+    def metadata(token, item_id, *, account_id=None):
         checked.append(item_id)
         return {"id": item_id, "state": "active", "account_id": "acct", "board": {"id": "1882196103"}, "group": {"id": "topics"}}
 
@@ -763,7 +786,7 @@ def test_completed_transition_source_unavailable_rotates_and_recovers(
     db_session.commit()
     checked = []
 
-    def metadata(token, item_id):
+    def metadata(token, item_id, *, account_id=None):
         checked.append(item_id)
         if len(checked) == 1:
             raise HTTPException(status_code=404, detail="monday item not found")
@@ -869,7 +892,7 @@ def test_completed_transition_detection_marks_indexed_active_task_retained(db_se
 
     monkeypatch.setattr(
         "backend.app.services.auto_sync_reconciliation.fetch_item_metadata",
-        lambda token, item_id: {
+        lambda token, item_id, *, account_id=None: {
             "id": item_id,
             "account_id": "acct",
             "board": {"id": "1882196103"},

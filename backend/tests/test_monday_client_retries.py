@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
 from email.utils import format_datetime
 import json
 import logging
+from threading import Barrier, Event
 
 import pytest
 import requests
@@ -25,9 +27,17 @@ def graphql_error(code, **extensions):
 @pytest.fixture
 def client(monkeypatch):
     pending, calls, sleeps = [], [], []
+    now = [0.0]
+    monkeypatch.setattr(monday_client, "_monday_cooldowns", {})
+    monkeypatch.setattr(monday_client, "monotonic", lambda: now[0])
+    monkeypatch.setattr(monday_client.random, "uniform", lambda low, high: 0)
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        now[0] += seconds
 
     def post(*args, **kwargs):
-        calls.append(kwargs)
+        calls.append({**kwargs, "at": now[0]})
         result = pending.pop(0)
         if isinstance(result, Exception):
             raise result
@@ -36,7 +46,7 @@ def client(monkeypatch):
     monkeypatch.setattr(monday_client.requests, "post", post)
     monkeypatch.setattr(
         monday_client, "_post_monday_graphql",
-        monday_client._post_monday_graphql.retry_with(sleep=sleeps.append),
+        monday_client._post_monday_graphql.retry_with(sleep=sleep),
     )
     return pending, calls, sleeps
 
@@ -114,6 +124,8 @@ def test_graphql_delay_locations_and_legacy_errors(client, payload):
     {"errors": [graphql_error("InvalidArgumentException")]},
     {"errors": [graphql_error("UserUnauthorizedException", retry_in_seconds=10)]},
     {"errors": [graphql_error("ComplexityException")]},
+    {"errors": [graphql_error("ComplexityException", status_code=429)]},
+    {"errors": [graphql_error("RATE_LIMIT_EXCEEDED"), graphql_error("ComplexityException")]},
     {"errors": [graphql_error("DAILY_LIMIT_EXCEEDED", retry_in_seconds=60)]},
     {"errors": [graphql_error("UNKNOWN_ERROR")]},
     {"errors": [graphql_error("RATE_LIMIT_EXCEEDED"), graphql_error("InvalidColumnIdException")]},
@@ -158,14 +170,14 @@ def test_retry_exhaustion_retains_diagnostics_and_failure(client, http_status):
 
 
 @pytest.mark.parametrize("delay", ["", "invalid", "-1", "NaN", "Infinity", True, {}, 10**400])
-def test_invalid_delays_fall_back_to_exponential_backoff(client, delay):
+def test_invalid_rate_limit_delays_use_conservative_fallback(client, delay):
     pending, calls, sleeps = client
     pending.extend([
         response(429, {"retry_in_seconds": delay}, {"Retry-After": str(delay)}),
         response(),
     ])
     monday_client.monday_graphql_request("token", "query { ok }")
-    assert len(calls) == 2 and sleeps == [2]
+    assert len(calls) == 2 and sleeps == [30]
 
 
 def test_long_server_delay_surfaces_failure_without_retrying_early(client):
@@ -218,3 +230,160 @@ def test_authentication_failures_keep_existing_behavior(client, status, allow_un
             monday_client.monday_graphql_request("token", "query { me { id } }")
         assert exc_info.value.status_code == (403 if status == 401 else 502)
     assert len(calls) == 1 and sleeps == []
+
+
+@pytest.mark.parametrize("http_status", [200, 429])
+def test_exhausted_rate_limit_cools_down_the_next_item(client, http_status):
+    pending, calls, sleeps = client
+    pending.extend(response(http_status, {
+        "errors": [graphql_error("RATE_LIMIT_EXCEEDED")],
+    }) for _ in range(4))
+    pending.append(response(payload={"data": {"items": [{"id": "next"}]}}))
+
+    with pytest.raises(monday_client.TransientMondayAPIError):
+        monday_client.fetch_current_source_revision_inputs("token", "first", account_id="acct")
+    item = monday_client.fetch_item_metadata("token", "next", account_id="acct")
+
+    assert item["id"] == "next"
+    assert [call["at"] for call in calls] == [0, 30, 60, 90, 120]
+    assert sleeps == [30] * 4
+
+
+def test_long_cooldown_blocks_subsequent_requests_but_not_other_tokens(client, monkeypatch):
+    pending, calls, sleeps = client
+    pending.extend([response(429, {}, {"Retry-After": "3600"}), response(), response()])
+    for _ in range(2):
+        with pytest.raises(monday_client.TransientMondayAPIError) as exc_info:
+            monday_client.monday_graphql_request("first-token", "query { ok }")
+        assert exc_info.value.retry_after_seconds == 3600
+    assert len(calls) == 1 and sleeps == []
+
+    monday_client.monday_graphql_request("second-token", "query { ok }")
+    assert len(calls) == 2 and sleeps == []
+    # Another credential's success must not clear the first credential's limit.
+    with pytest.raises(monday_client.TransientMondayAPIError):
+        monday_client.monday_graphql_request("first-token", "query { ok }")
+    assert len(calls) == 2
+    monkeypatch.setattr(monday_client, "monotonic", lambda: 3601)
+    monday_client.monday_graphql_request("first-token", "query { ok }")
+    assert len(calls) == 3 and sleeps == []
+
+
+def test_fallback_jitter_and_non_json_rate_limit_diagnostics(client, monkeypatch, caplog):
+    pending, calls, sleeps = client
+    monkeypatch.setattr(monday_client.random, "uniform", lambda low, high: high)
+    error = response(429)
+    error._content = b"<html>customer-secret</html>"
+    pending.extend([error, response()])
+    with caplog.at_level(logging.WARNING):
+        monday_client.monday_graphql_request("token", "query { ok }")
+    assert sleeps == [35] and calls[1]["at"] == 35
+    assert "retry_delay_source=fallback" in caplog.text
+    assert "response_format=non_json" in caplog.text
+    assert "customer-secret" not in caplog.text
+
+
+@pytest.mark.parametrize("remaining,expected_delay", [(0, 38), (90, 5)])
+def test_quota_headers_identify_limit_and_only_exhausted_reset_extends_wait(
+    client, caplog, remaining, expected_delay,
+):
+    pending, _, sleeps = client
+    pending.extend([response(429, {}, {
+        "Retry-After": "5",
+        "RateLimit": f'"minuteRate";r={remaining};t=38, "complexityMinute";r=800000;t=60',
+        "RateLimit-Policy": '"minuteRate";q=100;w=60',
+    }), response()])
+    with caplog.at_level(logging.WARNING):
+        monday_client.monday_graphql_request("token", "query { ok }")
+    assert sleeps == [expected_delay]
+    record = next(record for record in caplog.records if getattr(record, "event", None) == "monday.api_error")
+    assert record.rate_limits["minuteRate"] == {"r": remaining, "t": 38, "q": 100, "w": 60}
+    assert record.retry_delay_source == "server"
+    assert 'rate_limits={"complexityMinute"' in caplog.text
+
+
+def test_quota_reset_header_used_when_retry_after_is_missing(client):
+    pending, _, sleeps = client
+    pending.extend([response(429, {}, {
+        "RateLimit": '"minuteRate";r=0;t=38, "complexityMinute";r=0;t=50',
+    }), response()])
+    monday_client.monday_graphql_request("token", "query { ok }")
+    assert sleeps == [50]
+
+
+def test_quota_diagnostics_discard_unknown_fields_and_untrusted_text(client, caplog):
+    pending, _, sleeps = client
+    pending.extend([response(429, {}, {
+        "RateLimit": '"customer-secret";r=0;t=1, "minuteRate";r=NaN;t=customer-secret;token=customer-secret',
+        "RateLimit-Policy": '"minuteRate";q=100;w=Infinity;qu="customer-secret"',
+    }), response()])
+    with caplog.at_level(logging.WARNING):
+        monday_client.monday_graphql_request("token", "query { ok }")
+    assert sleeps == [30]
+    assert "customer-secret" not in caplog.text and "NaN" not in caplog.text
+    record = next(record for record in caplog.records if getattr(record, "event", None) == "monday.api_error")
+    assert record.rate_limits == {"minuteRate": {"q": 100}}
+
+
+@pytest.mark.parametrize("known_account", [None, "acct"])
+def test_metadata_lookup_reuses_known_account_and_preserves_default(client, known_account):
+    pending, calls, _ = client
+    if known_account is None:
+        pending.append(response(payload={"data": {"me": {"account": {"id": "acct"}}}}))
+    pending.append(response(payload={"data": {"items": [{"id": "123", "state": "active"}]}}))
+    assert monday_client.fetch_item_metadata("token", "123", account_id=known_account) == {
+        "id": "123", "state": "active", "account_id": "acct",
+    }
+    assert len(calls) == (2 if known_account is None else 1)
+
+
+def test_graphql_429_without_error_code_uses_shared_fallback(client):
+    pending, calls, sleeps = client
+    pending.extend(response(payload={"errors": [{"extensions": {"status_code": 429}}]}) for _ in range(4))
+    pending.append(response())
+    with pytest.raises(monday_client.TransientMondayAPIError):
+        monday_client.monday_graphql_request("token", "query { first }")
+    monday_client.monday_graphql_request("token", "query { next }")
+    assert sleeps == [30] * 4 and calls[-1]["at"] == 120
+
+
+def test_server_errors_keep_short_backoff_without_cross_request_cooldown(client):
+    pending, calls, sleeps = client
+    pending.extend(response(503) for _ in range(4))
+    pending.append(response())
+    with pytest.raises(monday_client.TransientMondayAPIError):
+        monday_client.monday_graphql_request("token", "query { first }")
+    monday_client.monday_graphql_request("token", "query { next }")
+    assert sleeps == [2, 2, 4] and [call["at"] for call in calls] == [0, 2, 4, 8, 8]
+
+
+def test_concurrent_inflight_responses_cannot_shorten_shared_cooldown(client, monkeypatch):
+    ready = Barrier(2)
+    longer_finished = Event()
+    calls = []
+
+    def post(*args, **kwargs):
+        query = kwargs["json"]["query"]
+        calls.append(query)
+        ready.wait(timeout=5)
+        if query == "query { shorter }":
+            assert longer_finished.wait(timeout=5)
+            return response(429, {}, {"Retry-After": "1800"})
+        return response(429, {}, {"Retry-After": "3600"})
+
+    def request(query):
+        with pytest.raises(monday_client.TransientMondayAPIError):
+            monday_client.monday_graphql_request("token", query)
+        if query == "query { longer }":
+            longer_finished.set()
+
+    monkeypatch.setattr(monday_client.requests, "post", post)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        longer = executor.submit(request, "query { longer }")
+        shorter = executor.submit(request, "query { shorter }")
+        longer.result(timeout=10)
+        shorter.result(timeout=10)
+    with pytest.raises(monday_client.TransientMondayAPIError) as exc_info:
+        monday_client.monday_graphql_request("token", "query { next }")
+    assert exc_info.value.retry_after_seconds == 3600
+    assert len(calls) == 2

@@ -214,7 +214,7 @@ def test_monday_graphql_request_reports_transient_failure_after_retries(monkeypa
 
     assert isinstance(exc_info.value, HTTPException)
     assert exc_info.value.status_code == 502
-    assert exc_info.value.detail == "monday API error (502)"
+    assert exc_info.value.detail.startswith("monday API error (502)")
     assert exc_info.value.upstream_status_code == 502
     assert len(calls) == 2
 

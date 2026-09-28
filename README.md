@@ -137,6 +137,25 @@ automatically replayed. Logs retain HTTP status, error codes, request IDs, retry
 delays, and retry attempts; upstream messages, response bodies, and credentials
 are omitted. Exhausted retries still produce a failed reconciliation run.
 
+HTTP 429 and recognized GraphQL rate limits without a usable server delay now
+use a 30-second cooldown plus 0-5 seconds of jitter. The longest server delay
+still takes precedence, including reset times for exhausted quotas in Monday's
+`RateLimit` header. Other transient failures retain exponential backoff. A
+thread-safe cooldown is shared by GraphQL calls using the same credential in
+one process, so the next item or reconciliation phase cannot immediately bypass
+an exhausted request's cooldown. A remaining delay over 120 seconds fails
+without sending another request; successful progress and the nonzero exit on
+errors are preserved. Cooldowns are not shared across separate Render services
+or process restarts, so continue using one scheduler and avoid overlapping runs.
+
+Error logs include whether the delay came from Monday or the fallback, whether
+the response was JSON, and known numeric quota/reset fields from `RateLimit`
+and `RateLimit-Policy`. Raw headers and response bodies are not logged. See
+[Monday's rate-limit headers](https://developer.monday.com/api-reference/docs/rate-limits#rate-limit-headers).
+Completed-transition sweeps reuse each stored task's account ID, eliminating the
+extra account lookup previously sent for every item. Standalone metadata callers
+can still omit the account ID to resolve it through Monday.
+
 Completed-transition metadata lookups that return `404: monday item not found`
 are reported as `source_unavailable` warnings, not errors. The summary includes a
 `source_unavailable` count (also included in `skipped`); these warnings alone do

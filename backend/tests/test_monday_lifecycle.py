@@ -32,7 +32,7 @@ def retained_project(case):
 
 
 def lifecycle_check(case, monkeypatch, *, dry_run=False):
-    monkeypatch.setattr(reconciliation, "fetch_item_metadata", lambda *args: deepcopy(case.item))
+    monkeypatch.setattr(reconciliation, "fetch_item_metadata", lambda *args, **kwargs: deepcopy(case.item))
     return reconciliation.detect_completed_transitions_once(
         case.db, dry_run=dry_run, access_token="token", policy=policy_from_settings(),
     )

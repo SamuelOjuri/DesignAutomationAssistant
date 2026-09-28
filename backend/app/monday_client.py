@@ -1,11 +1,15 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
+import hashlib
 import json
 import logging
 import math
 from pathlib import PurePath
+import random
 import re
+from threading import Lock
+from time import monotonic
 from typing import Any, Mapping, Optional, Sequence
 
 import jwt
@@ -24,6 +28,12 @@ TRANSIENT_MONDAY_STATUS_CODES = {429, 500, 502, 503, 504}
 # Longer delays must be handled by a subsequent job, not an early retry or an
 # unbounded sleep inside a web request/worker. Keep the existing four-attempt cap.
 MAX_MONDAY_RETRY_DELAY_SECONDS = 120
+MONDAY_RATE_LIMIT_FALLBACK_SECONDS = 30
+MONDAY_RATE_LIMIT_JITTER_SECONDS = 5
+MONDAY_RATE_LIMIT_CODES = {
+    "complexitybudgetexhausted", "maxconcurrencyexceeded", "concurrencylimitexceeded",
+    "ipratelimitexceeded", "ratelimitexceeded", "minutelimitrateexceeded", "dailylimitexceeded",
+}
 TRANSIENT_MONDAY_GRAPHQL_CODES = {
     "apitemporarilyblocked", "complexitybudgetexhausted", "maxconcurrencyexceeded",
     "concurrencylimitexceeded", "ipratelimitexceeded", "ratelimitexceeded",
@@ -42,9 +52,11 @@ class TransientMondayAPIError(HTTPException):
         *,
         detail: Optional[str] = None,
         retry_after_seconds: Optional[float] = None,
+        rate_limited: bool = False,
     ):
         self.upstream_status_code = upstream_status_code
         self.retry_after_seconds = retry_after_seconds
+        self.rate_limited = rate_limited or upstream_status_code == 429
         if detail is None:
             detail = f"monday API error ({upstream_status_code})"
         super().__init__(status_code=502, detail=detail)
@@ -56,6 +68,53 @@ class MondayReadContractError(TransientMondayAPIError):
 
 class MondayWriteContractError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class _MondayCooldown:
+    until: float
+    upstream_status_code: int
+    detail: str
+
+
+# Shared by GraphQL callers/threads in this process, never across credentials.
+# Hash keys avoid retaining access tokens, and expired entries are discarded.
+_monday_cooldowns: dict[bytes, _MondayCooldown] = {}
+_monday_cooldown_lock = Lock()
+
+
+def _remember_monday_cooldown(access_token: str, delay: float, status: int, detail: str) -> None:
+    key = hashlib.sha256(access_token.encode()).digest()
+    with _monday_cooldown_lock:
+        now = monotonic()
+        for expired in [key for key, value in _monday_cooldowns.items() if value.until <= now]:
+            del _monday_cooldowns[expired]
+        current = _monday_cooldowns.get(key)
+        if current is None or current.until < now + delay:
+            _monday_cooldowns[key] = _MondayCooldown(now + delay, status, detail)
+
+
+def _check_monday_cooldown(access_token: str) -> None:
+    key = hashlib.sha256(access_token.encode()).digest()
+    with _monday_cooldown_lock:
+        cooldown = _monday_cooldowns.get(key)
+        if cooldown is None:
+            return
+        remaining = cooldown.until - monotonic()
+        if remaining <= 0:
+            del _monday_cooldowns[key]
+            return
+    # Tenacity performs bounded waiting; delays over the cap fail immediately
+    # without another upstream request, including on the next item in a sweep.
+    logger.warning(
+        "Monday request deferred by shared cooldown wait_seconds=%.3f upstream_status_code=%s",
+        remaining, cooldown.upstream_status_code,
+        extra={"event": "monday.cooldown", "retry_after_seconds": remaining},
+    )
+    raise TransientMondayAPIError(
+        cooldown.upstream_status_code, detail=cooldown.detail,
+        retry_after_seconds=remaining, rate_limited=True,
+    )
 
 
 def _require_design_scalar_columns(column_values: Mapping[str, Any]) -> None:
@@ -137,6 +196,27 @@ def _graphql_error_code(error: Mapping[str, Any]) -> Any:
     return _error_extensions(error).get("code") or error.get("error_code") or error.get("code")
 
 
+def _monday_rate_limits(response: requests.Response) -> dict[str, dict[str, float]]:
+    # Monday's structured headers: "minuteRate";r=0;t=38. Log only known
+    # policy names and numeric fields, never arbitrary header/body content.
+    limits: dict[str, dict[str, float]] = {}
+    for header_name, fields in (("RateLimit", {"r", "t"}), ("RateLimit-Policy", {"q", "w"})):
+        header = getattr(response, "headers", {}).get(header_name, "")
+        if not isinstance(header, str) or len(header) > 4096:
+            continue
+        for member in header.split(","):
+            parts = member.strip().split(";")
+            policy = parts[0].strip()
+            if policy not in {'"minuteRate"', '"concurrency"', '"complexityMinute"'}:
+                continue
+            for parameter in parts[1:]:
+                name, separator, value = parameter.strip().partition("=")
+                number = _nonnegative_seconds(value.strip()) if separator else None
+                if name in fields and number is not None:
+                    limits.setdefault(policy.strip('"'), {})[name] = number
+    return limits
+
+
 def _monday_retry_after(response: requests.Response, payload: Mapping[str, Any]) -> Optional[float]:
     delays = []
     header = getattr(response, "headers", {}).get("Retry-After")
@@ -157,6 +237,9 @@ def _monday_retry_after(response: requests.Response, payload: Mapping[str, Any])
                 seconds = _nonnegative_seconds(source.get("retry_in_seconds"))
                 if seconds is not None:
                     delays.append(seconds)
+    for limit in _monday_rate_limits(response).values():
+        if limit.get("r") == 0 and "t" in limit:
+            delays.append(limit["t"])
     # A response can contain multiple limits; never retry before any of them reset.
     return max(delays, default=None)
 
@@ -200,10 +283,11 @@ def _wait_for_monday_retry(retry_state) -> float:
 
 
 def _log_monday_retry(retry_state) -> None:
+    exc = retry_state.outcome.exception()
     logger.warning(
-        "Retrying monday request after attempt=%s wait_seconds=%s error_type=%s",
+        "Retrying monday request after attempt=%s wait_seconds=%s error_type=%s upstream_status_code=%s rate_limited=%s",
         retry_state.attempt_number, retry_state.next_action.sleep,
-        type(retry_state.outcome.exception()).__name__,
+        type(exc).__name__, getattr(exc, "upstream_status_code", None), getattr(exc, "rate_limited", False),
     )
 
 
@@ -228,6 +312,7 @@ def _post_monday_graphql(
     *,
     timeout: int,
 ) -> requests.Response:
+    _check_monday_cooldown(access_token)
     resp = requests.post(
         MONDAY_API_URL,
         json={"query": query, "variables": variables or {}},
@@ -237,15 +322,32 @@ def _post_monday_graphql(
     # Keep OAuth's allow_unauthorized behavior in monday_graphql_request.
     if resp.status_code == 401:
         return resp
+    response_format = "json"
     try:
         payload = resp.json()
     except ValueError:
         payload = {}
+        response_format = "non_json"
     if not isinstance(payload, Mapping):
         payload = {}
     errors = _graphql_errors(payload)
     if not resp.ok or errors:
-        retry_after = _monday_retry_after(resp, payload)
+        server_retry_after = _monday_retry_after(resp, payload)
+        retry_after = server_retry_after
+        rate_limits = _monday_rate_limits(resp)
+        normalized_codes = {
+            re.sub(r"[^a-z0-9]", "", code.lower())
+            for error in errors if isinstance(code := _graphql_error_code(error), str)
+        }
+        rate_limited = (
+            resp.status_code == 429 or bool(normalized_codes & MONDAY_RATE_LIMIT_CODES)
+            or ("complexityexception" in normalized_codes and retry_after is not None)
+            or any(_error_extensions(error).get("status_code") == 429 for error in errors)
+        )
+        delay_source = "server" if retry_after is not None else "none"
+        if rate_limited and retry_after is None:
+            retry_after = MONDAY_RATE_LIMIT_FALLBACK_SECONDS + random.uniform(0, MONDAY_RATE_LIMIT_JITTER_SECONDS)
+            delay_source = "fallback"
         codes = [
             code for error in errors
             if (code := _safe_error_identifier(_graphql_error_code(error), access_token))
@@ -261,17 +363,27 @@ def _post_monday_graphql(
             detail += f"; request_id={request_id}"
         if retry_after is not None:
             detail += f"; retry_after_seconds={retry_after:g}"
+        detail += f"; retry_delay_source={delay_source}; response_format={response_format}"
+        if rate_limits:
+            detail += f"; rate_limits={json.dumps(rate_limits, sort_keys=True)}"
         logger.warning(
             "%s", detail,
             extra={"event": "monday.api_error", "upstream_status_code": resp.status_code,
-                   "error_codes": codes, "request_id": request_id, "retry_after_seconds": retry_after},
+                   "error_codes": codes, "request_id": request_id, "retry_after_seconds": retry_after,
+                   "retry_delay_source": delay_source, "response_format": response_format,
+                   "rate_limits": rate_limits},
         )
+        if rate_limited:
+            _remember_monday_cooldown(access_token, retry_after, resp.status_code, detail)
         if resp.status_code in TRANSIENT_MONDAY_STATUS_CODES or (
             resp.ok and errors and _is_read_query(query)
-            and all(_is_transient_graphql_error(error, retry_after) for error in errors)
+            # A local fallback is not evidence that an oversized query's
+            # ComplexityException will recover; only server reset hints are.
+            and all(_is_transient_graphql_error(error, server_retry_after) for error in errors)
         ):
             raise TransientMondayAPIError(
                 resp.status_code, detail=detail, retry_after_seconds=retry_after,
+                rate_limited=rate_limited,
             )
         raise HTTPException(status_code=502, detail=detail)
     return resp
@@ -714,8 +826,11 @@ query ($itemIds: [ID!]) {
 """
 
 
-def fetch_item_metadata(access_token: str, item_id: str) -> dict[str, Any]:
-    account_id = fetch_current_account_id(access_token)
+def fetch_item_metadata(
+    access_token: str, item_id: str, *, account_id: Optional[str] = None,
+) -> dict[str, Any]:
+    if account_id is None:
+        account_id = fetch_current_account_id(access_token)
     payload = monday_graphql_request(
         access_token,
         ITEM_METADATA_QUERY,

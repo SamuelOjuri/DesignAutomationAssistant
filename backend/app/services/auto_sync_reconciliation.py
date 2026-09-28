@@ -443,7 +443,7 @@ def detect_completed_transitions_once(
     for task in tasks:
         try:
             try:
-                item = fetch_item_metadata(token, task.item_id)
+                item = fetch_item_metadata(token, task.item_id, account_id=task.account_id)
             except HTTPException as exc:
                 if exc.status_code != 404 or exc.detail != "monday item not found":
                     raise
