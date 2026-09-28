@@ -1,14 +1,18 @@
 from datetime import datetime, timedelta, timezone
+from html import escape
+import logging
 import secrets
-from urllib.parse import urlencode
+from time import monotonic
+from urllib.parse import quote, urlencode
 from urllib.parse import urlparse
 
 import jwt
 import requests
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from urllib3.util import Timeout
 
 from ..auth import (
     CurrentUser,
@@ -24,6 +28,7 @@ from ..models import AppUser, HandoffCode, UserMondayLink
 from ..monday_client import MONDAY_API_URL, MONDAY_OAUTH_URL, MONDAY_TOKEN_URL, monday_headers
 
 router = APIRouter(prefix="/auth/monday", tags=["monday-auth"])
+logger = logging.getLogger(__name__)
 
 def _redirect_uri() -> str:
     if settings.monday_oauth_redirect_uri:
@@ -100,22 +105,99 @@ def _oauth_url(state: str) -> str:
     return f"{MONDAY_OAUTH_URL}?{query}"
 
 
-def _monday_me(access_token: str) -> dict:
-    me_resp = requests.post(
+def _oauth_post(url: str, *, stage: str, timeout: Timeout, **kwargs) -> dict:
+    # Do not replay the authorization-code exchange after a read timeout:
+    # Monday may have consumed the code before the response was lost.
+    try:
+        response = requests.post(url, timeout=timeout, **kwargs)
+    except requests.exceptions.Timeout:
+        logger.warning("monday OAuth %s timed out", stage)
+        raise HTTPException(status_code=504, detail="Monday sign-in timed out. Please start sign-in again.") from None
+    except requests.exceptions.RequestException:
+        logger.warning("monday OAuth %s connection failed", stage)
+        raise HTTPException(status_code=502, detail="Could not reach Monday. Please start sign-in again.") from None
+
+    if not response.ok:
+        logger.warning("monday OAuth %s failed upstream_status=%s", stage, response.status_code)
+        raise HTTPException(status_code=502, detail="Monday could not complete sign-in. Please start sign-in again.")
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict) or payload.get("errors") or payload.get("error_code") or payload.get("error"):
+        # Raw bodies/exceptions can contain tokens or other private data.
+        logger.warning("monday OAuth %s returned an invalid or error response", stage)
+        raise HTTPException(status_code=502, detail="Monday returned an invalid sign-in response. Please start sign-in again.")
+    return payload
+
+
+def _exchange_monday_code(code: str) -> dict:
+    token_data = _oauth_post(
+        MONDAY_TOKEN_URL,
+        stage="token_exchange",
+        data={
+            "client_id": settings.monday_client_id,
+            "client_secret": settings.monday_client_secret,
+            "code": code,
+            "redirect_uri": _redirect_uri(),
+        },
+        # Netlify's proxy limit is 26s. Allow a slower token response while
+        # reserving time for the identity lookup and session persistence.
+        timeout=Timeout(total=18, connect=3, read=15),
+    )
+    if not isinstance(token_data.get("access_token"), str) or not token_data["access_token"].strip():
+        logger.warning("monday OAuth token_exchange returned no access token")
+        raise HTTPException(status_code=502, detail="Monday did not return an access token. Please start sign-in again.")
+    return token_data
+
+
+def _monday_me(access_token: str, *, timeout_seconds: float = 10) -> dict:
+    if timeout_seconds <= 0:
+        logger.warning("monday OAuth identity_lookup skipped: request budget exhausted")
+        raise HTTPException(status_code=504, detail="Monday sign-in timed out. Please start sign-in again.")
+    payload = _oauth_post(
         MONDAY_API_URL,
+        stage="identity_lookup",
         json={"query": "query { me { id name email account { id } } }"},
         headers=monday_headers(access_token),
-        timeout=10,
+        timeout=Timeout(total=timeout_seconds, connect=min(3, timeout_seconds)),
     )
-    if not me_resp.ok:
-        raise HTTPException(status_code=502, detail="monday me query failed")
-
-    me = me_resp.json().get("data", {}).get("me") or {}
-    monday_user_id = me.get("id")
-    monday_account_id = (me.get("account") or {}).get("id")
+    data = payload.get("data")
+    me = data.get("me") if isinstance(data, dict) else None
+    account = me.get("account") if isinstance(me, dict) else None
+    monday_user_id = me.get("id") if isinstance(me, dict) else None
+    monday_account_id = account.get("id") if isinstance(account, dict) else None
     if not monday_user_id or not monday_account_id:
+        logger.warning("monday OAuth identity_lookup returned no user/account identity")
         raise HTTPException(status_code=502, detail="monday me query missing id/account")
     return me
+
+
+def _oauth_failure_response(request: Request, state_payload: dict, exc: HTTPException):
+    headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+    if "text/html" not in request.headers.get("accept", ""):
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=headers)
+
+    if state_payload["mode"] == "monday_first":
+        handoff_code = quote(str(state_payload.get("handoff_code") or ""), safe="")
+        retry_url = _main_app_url(f"/monday-handoff/{handoff_code}")
+    else:
+        retry_url = _main_app_url("/connect-monday?") + urlencode({
+            "returnTo": _safe_return_to(state_payload.get("return_to"), "/?monday=connected"),
+        })
+    return HTMLResponse(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        "<title>Monday sign-in interrupted</title></head>"
+        "<body><main style=\"font-family:system-ui;max-width:32rem;margin:10vh auto;padding:1.5rem\">"
+        "<h1>Monday sign-in interrupted</h1>"
+        f"<p>{escape(str(exc.detail))}</p>"
+        f"<p><a href=\"{escape(retry_url, quote=True)}\">Try signing in again</a></p>"
+        "<p>If your sign-in link has expired, reopen the item from Monday.</p>"
+        "</main></body></html>",
+        status_code=exc.status_code,
+        headers=headers,
+    )
 
 
 def _ensure_app_user(
@@ -269,25 +351,13 @@ def monday_callback(
 
     state_payload = _parse_state(state)
 
-    token_resp = requests.post(
-        MONDAY_TOKEN_URL,
-        data={
-            "client_id": settings.monday_client_id,
-            "client_secret": settings.monday_client_secret,
-            "code": code,
-            "redirect_uri": _redirect_uri(),
-        },
-        timeout=10,
-    )
-    if not token_resp.ok:
-        raise HTTPException(status_code=502, detail="monday token exchange failed")
-
-    token_data = token_resp.json()
-    access_token = token_data.get("access_token")
-    if not access_token:
-        raise HTTPException(status_code=502, detail="monday token missing access_token")
-
-    me = _monday_me(access_token)
+    upstream_deadline = monotonic() + 23
+    try:
+        token_data = _exchange_monday_code(code)
+        access_token = token_data["access_token"]
+        me = _monday_me(access_token, timeout_seconds=min(10, upstream_deadline - monotonic()))
+    except HTTPException as exc:
+        return _oauth_failure_response(request, state_payload, exc)
     monday_user_id = str(me["id"])
     monday_account_id = str((me["account"] or {})["id"])
     monday_email = me.get("email")

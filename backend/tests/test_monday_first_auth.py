@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from html import unescape
+import re
 from urllib.parse import parse_qs, urlparse
 import uuid
 
 import jwt
 import pytest
+import requests
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -251,6 +254,181 @@ def test_monday_first_oauth_rejects_handoff_identity_mismatch(client, db_session
 
     assert response.status_code == 403
     assert db_session.query(AppUser).count() == 0
+    assert db_session.query(AppSession).count() == 0
+
+
+@pytest.mark.parametrize("stage", ["token", "me"])
+@pytest.mark.parametrize("failure,status", [
+    ("timeout", 504), ("connection", 502), ("http", 502),
+    ("non_json", 502), ("null", 502), ("list", 502),
+])
+def test_oauth_upstream_failures_are_handled_without_creating_session(
+    client, db_session, monkeypatch, caplog, stage, failure, status,
+):
+    _add_handoff_code(db_session)
+    state = _monday_first_state_from_login(client, "handoff-code")
+    calls = []
+
+    class InvalidJsonResponse(FakeResponse):
+        def json(self):
+            raise ValueError("private-upstream-body")
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        if stage == "me" and url == MONDAY_TOKEN_URL:
+            return FakeResponse({"access_token": "private-access-token"})
+        if failure == "timeout":
+            raise requests.exceptions.ReadTimeout("private-upstream-body")
+        if failure == "connection":
+            raise requests.exceptions.ConnectionError("private-upstream-body")
+        if failure == "http":
+            return FakeResponse({"error": "private-upstream-body"}, ok=False, status_code=503)
+        if failure == "non_json":
+            return InvalidJsonResponse({})
+        return FakeResponse(None if failure == "null" else [])
+
+    monkeypatch.setattr(monday_auth.requests, "post", fake_post)
+    response = _complete_monday_oauth(client, state)
+
+    assert response.status_code == status
+    assert "monday" in response.json()["detail"].lower()
+    assert calls == ([MONDAY_TOKEN_URL] if stage == "token" else [MONDAY_TOKEN_URL, MONDAY_API_URL])
+    assert db_session.query(AppUser).count() == 0
+    assert db_session.query(UserMondayLink).count() == 0
+    assert db_session.query(AppSession).count() == 0
+    assert "set-cookie" not in response.headers
+    assert db_session.get(HandoffCode, "handoff-code").used is False
+    assert "private-upstream-body" not in response.text + caplog.text
+    assert "private-access-token" not in response.text + caplog.text
+    assert ("token_exchange" if stage == "token" else "identity_lookup") in caplog.text
+    assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize("payload", [
+    {"data": None, "errors": [{"extensions": {"code": "API_TEMPORARILY_BLOCKED"}}]},
+    {"data": None},
+    {"data": []},
+    {"data": {"me": None}},
+    {"data": {"me": "invalid"}},
+    {"data": {"me": {"id": "monday-user", "account": "invalid"}}},
+    {"data": {"me": {"id": "monday-user", "account": {"id": "acct"}}}, "errors": [{"message": "private-upstream-body"}]},
+])
+def test_oauth_invalid_identity_response_does_not_crash_or_create_session(
+    client, db_session, monkeypatch, payload,
+):
+    _add_handoff_code(db_session)
+    state = _monday_first_state_from_login(client, "handoff-code")
+
+    def fake_post(url, **kwargs):
+        return FakeResponse({"access_token": "monday-token"} if url == MONDAY_TOKEN_URL else payload)
+
+    monkeypatch.setattr(monday_auth.requests, "post", fake_post)
+    response = _complete_monday_oauth(client, state)
+
+    assert response.status_code == 502
+    assert db_session.query(AppUser).count() == 0
+    assert db_session.query(AppSession).count() == 0
+    assert "set-cookie" not in response.headers
+    assert "private-upstream-body" not in response.text
+
+
+@pytest.mark.parametrize("mode", ["monday_first", "connect"])
+def test_browser_oauth_timeout_offers_fresh_sign_in_and_can_recover(client, db_session, monkeypatch, mode):
+    _add_handoff_code(db_session)
+    if mode == "monday_first":
+        state = _monday_first_state_from_login(client, "handoff-code")
+    else:
+        state = monday_auth._build_state({"mode": mode, "sub": str(uuid.uuid4()), "return_to": "/tasks/task-1"})
+    calls = []
+
+    def timed_out(url, **kwargs):
+        calls.append(url)
+        raise requests.exceptions.ReadTimeout("private-upstream-body")
+
+    monkeypatch.setattr(monday_auth.requests, "post", timed_out)
+    response = client.get(
+        "/auth/monday/callback",
+        params={"code": "old-oauth-code", "state": state},
+        headers={"Accept": "text/html,application/xhtml+xml"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 504
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert "Monday sign-in timed out" in response.text
+    assert "Try signing in again" in response.text
+    assert "old-oauth-code" not in response.text
+    assert "private-upstream-body" not in response.text
+    assert "set-cookie" not in response.headers
+    assert calls == [MONDAY_TOKEN_URL]
+    assert db_session.query(AppSession).count() == 0
+    retry_url = unescape(re.search(r'href="([^"]+)"', response.text).group(1))
+    if mode == "monday_first":
+        assert retry_url == "https://app.example.test/monday-handoff/handoff-code"
+        # The handoff page starts login again, obtaining a fresh authorization code.
+        state = _monday_first_state_from_login(client, "handoff-code")
+    else:
+        parsed = urlparse(retry_url)
+        assert parsed.netloc == "app.example.test"
+        assert parsed.path == "/connect-monday"
+        assert parse_qs(parsed.query) == {"returnTo": ["https://app.example.test/tasks/task-1"]}
+
+    _mock_monday_oauth(monkeypatch)
+    response = client.get(
+        "/auth/monday/callback", params={"code": "fresh-oauth-code", "state": state}, follow_redirects=False,
+    )
+    assert response.status_code == 307
+    assert db_session.query(AppUser).count() == 1
+    assert db_session.query(UserMondayLink).count() == 1
+    assert db_session.query(AppSession).count() == 1
+
+
+@pytest.mark.parametrize("token_duration,identity_budget", [(1, 10), (11, 10), (17, 6)])
+def test_oauth_allows_slower_token_response_with_room_for_identity_lookup(
+    client, db_session, monkeypatch, token_duration, identity_budget,
+):
+    _add_handoff_code(db_session)
+    state = _monday_first_state_from_login(client, "handoff-code")
+    _mock_monday_oauth(monkeypatch)
+    successful_post = monday_auth.requests.post
+    timeouts = []
+    now = [0.0]
+    monkeypatch.setattr(monday_auth, "monotonic", lambda: now[0])
+
+    def slow_token_post(url, **kwargs):
+        timeout = kwargs["timeout"]
+        timeouts.append(timeout.total)
+        # Model an 11-second response without sleeping. The old 10s timeout
+        # would fail; the new read allowance accepts it.
+        if url == MONDAY_TOKEN_URL and timeout.read_timeout <= 11:
+            raise requests.exceptions.ReadTimeout()
+        if url == MONDAY_TOKEN_URL:
+            now[0] += token_duration
+        assert timeout.connect_timeout <= 3
+        return successful_post(url, **kwargs)
+
+    monkeypatch.setattr(monday_auth.requests, "post", slow_token_post)
+    assert _complete_monday_oauth(client, state).status_code == 307
+    assert timeouts[1] == identity_budget
+    assert token_duration + timeouts[1] <= 23  # Leave headroom under Netlify's 26-second proxy limit.
+
+
+def test_oauth_does_not_start_identity_lookup_when_time_budget_is_exhausted(client, db_session, monkeypatch):
+    _add_handoff_code(db_session)
+    state = _monday_first_state_from_login(client, "handoff-code")
+    times = iter([0, 24])
+    monkeypatch.setattr(monday_auth, "monotonic", lambda: next(times))
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        return FakeResponse({"access_token": "monday-token"})
+
+    monkeypatch.setattr(monday_auth.requests, "post", fake_post)
+    response = _complete_monday_oauth(client, state)
+    assert response.status_code == 504
+    assert calls == [MONDAY_TOKEN_URL]
     assert db_session.query(AppSession).count() == 0
 
 

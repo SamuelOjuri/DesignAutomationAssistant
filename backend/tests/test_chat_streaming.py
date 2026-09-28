@@ -142,7 +142,7 @@ def test_response_starts_before_work_and_closes_producer_on_disconnect(spec_vers
     asyncio.run(run())
 
 
-def install_fake_pipeline(monkeypatch, *, document=None, finish=True, hang=False, planning_fails=False, retrieval_fails=False):
+def install_fake_pipeline(monkeypatch, *, document=None, finish=True, hang=False, planning_fails=False, retrieval_fails=False, search_queries=None):
     state = {"client_closed": False, "stream_closed": False, "retrieval": 0}
     evidence = [{"chunkId": "one", "filename": "roof.pdf", "section": "page:chunk:1", "snippet": "Roof evidence"}]
 
@@ -150,7 +150,7 @@ def install_fake_pipeline(monkeypatch, *, document=None, finish=True, hang=False
         async def generate_content(self, **kwargs):
             if planning_fails:
                 raise ValueError("Invalid plan")
-            return SimpleNamespace(parsed={"search_queries": ["roof"]})
+            return SimpleNamespace(parsed={"search_queries": ["roof"] if search_queries is None else search_queries})
 
         async def embed_content(self, **kwargs):
             return SimpleNamespace(embeddings=[SimpleNamespace(values=[1.0, 0.0])])
@@ -231,6 +231,25 @@ def test_retrieval_failure_still_allows_context_only_answer(monkeypatch):
         events = [event async for event in chat._chat_events(chat.ChatRequest(externalTaskKey="a:b:c", message="status"))]
         assert events[-1] == ("done", {"content": "Design Needed", "citations": [], "ok": True})
     asyncio.run(run())
+
+
+def test_context_only_answer_announces_generation_before_first_delta(monkeypatch):
+    state = install_fake_pipeline(
+        monkeypatch, search_queries=[],
+        document='{"answer":"Design Needed", "cited_chunk_ids":[]}',
+    )
+
+    async def run():
+        events = [event async for event in chat._chat_events(chat.ChatRequest(externalTaskKey="a:b:c", message="status"))]
+        first_delta = next(index for index, (name, _) in enumerate(events) if name == "delta")
+        assert events[:first_delta] == [
+            ("status", {"message": "Reading project details…"}),
+            ("status", {"message": "Generating response…"}),
+        ]
+        assert events[-1] == ("done", {"content": "Design Needed", "citations": [], "ok": True})
+
+    asyncio.run(run())
+    assert state["retrieval"] == 0
 
 
 def test_cancellation_closes_provider_stream_and_client_without_fallback(monkeypatch):
