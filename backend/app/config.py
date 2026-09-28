@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     chat_retrieval_candidates_per_query: int = Field(default=8, ge=1, le=8)
     chat_retrieval_max_evidence_chunks: int = Field(default=12, ge=1, le=12)
     chat_retrieval_max_chunks_per_file: int = Field(default=3, ge=1, le=3)
+    chat_stream_timeout_seconds: float = Field(default=180, ge=1, le=600)
+    chat_stream_probe_enabled: bool = False
 
     # Postgres
     database_url: str

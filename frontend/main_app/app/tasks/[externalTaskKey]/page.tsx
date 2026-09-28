@@ -8,11 +8,15 @@ import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { startTaskPolling } from "@/lib/task-polling";
+import { ChatStreamError, readChatStream, type ChatCitation } from "@/lib/chat-stream";
 
 type ChatMessage = {
+  id?: string;
   role: "user" | "assistant";
   content: string;
   citations?: Citation[];
+  status?: "streaming" | "complete" | "stopped" | "error";
+  notice?: string;
 };
 
 // --- Extended types for summary, sources, citations, etc. ---
@@ -86,23 +90,7 @@ type TaskSourcesResponse = {
   files: TaskSourceFile[];
 };
 
-// Extended Citation type
-type Citation = {
-  sourceId?: string | null;
-  filename?: string | null;
-  page?: number | null;
-  section?: string | null;
-  snippet?: string | null;
-  score?: number | null;
-  fileId?: string | null;
-  mondayAssetId?: string | null;
-};
-
-type ChatCompleteResponse = {
-  content: string;
-  citations?: Citation[];
-  ok?: boolean;
-};
+type Citation = ChatCitation;
 
 type SignedUrlResponse = { url: string; expiresAt: string };
 
@@ -246,6 +234,7 @@ export default function TaskPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [streamStatus, setStreamStatus] = useState("Preparing the answer…");
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -328,9 +317,6 @@ export default function TaskPage() {
   
   const visibleSources = sources?.files.filter((file) => !isImageFile(file)) ?? [];
 
-  const isAwaitingFirstToken =
-    isStreaming && (messages.length === 0 || messages[messages.length - 1].role !== "assistant");
-
   // --- State/handlers for sources signed url ---
   const [signedUrls, setSignedUrls] = useState<Record<string, SignedUrlResponse>>({});
   const [signedUrlError, setSignedUrlError] = useState<string | null>(null);
@@ -395,22 +381,8 @@ export default function TaskPage() {
     [baseUrl, externalTaskKey, signedUrls, handleUnauthorized]
   );
 
-  const appendAssistantChunk = useCallback((chunk: string, citations: Citation[] = []) => {
-    setMessages((prev) => {
-      if (prev.length === 0 || prev[prev.length - 1].role !== "assistant") {
-        return [...prev, { role: "assistant", content: chunk, citations }];
-      }
-      const updated = [...prev];
-      updated[updated.length - 1] = {
-        ...updated[updated.length - 1],
-        content: updated[updated.length - 1].content + chunk,
-        citations:
-          citations.length > 0
-            ? citations
-            : updated[updated.length - 1].citations,
-      };
-      return updated;
-    });
+  const updateAssistant = useCallback((id: string, update: (message: ChatMessage) => ChatMessage) => {
+    setMessages((prev) => prev.map((message) => message.id === id ? update(message) : message));
   }, []);
 
   // --- Fetch summary and sources helpers ---
@@ -499,32 +471,38 @@ export default function TaskPage() {
   }, [externalTaskKey, fetchSummary, fetchSources, refreshCount, sessionExpired]);
 
   const sendMessage = useCallback(async () => {
-    if (!input.trim() || isStreaming || !externalTaskKey || sessionExpiredRef.current) return;
+    if (!input.trim() || isStreaming || abortRef.current || !externalTaskKey || sessionExpiredRef.current) return;
     const prompt = input.trim();
+    const assistantId = crypto.randomUUID();
     setInput("");
-
-    setMessages((prev) => [...prev, { role: "user", content: prompt }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: prompt },
+      { id: assistantId, role: "assistant", content: "", status: "streaming" },
+    ]);
 
     if (!baseUrl) {
-      appendAssistantChunk("FASTAPI base URL is not configured.");
+      updateAssistant(assistantId, (message) => ({ ...message, status: "error", notice: "FASTAPI base URL is not configured." }));
       return;
     }
 
     setIsStreaming(true);
+    setStreamStatus("Preparing the answer…");
     const controller = new AbortController();
     abortRef.current = controller;
 
     try {
-      const response = await fetch(`${baseUrl}/api/chat/complete`, {
+      const response = await fetch(`${baseUrl}/api/chat/stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Accept: "text/event-stream",
           ...csrfHeaders(),
         },
         body: JSON.stringify({
           externalTaskKey: decodeURIComponent(externalTaskKey),
           message: prompt,
-          history: messages.map((m) => ({
+          history: messages.filter((m) => m.role === "user" || m.status === "complete").map((m) => ({
             role: m.role,
             content: m.content,
           })),
@@ -535,34 +513,49 @@ export default function TaskPage() {
 
       if (handleUnauthorized(response)) {
         setInput((current) => current || prompt);
+        updateAssistant(assistantId, (message) => ({ ...message, status: "error", notice: "Your session expired. Reopen this task from Monday." }));
         return;
       }
       if (!response.ok) {
-        appendAssistantChunk(`Error: ${response.status}`);
-        setIsStreaming(false);
-        return;
+        await response.body?.cancel();
+        throw new ChatStreamError(response.status === 403
+          ? "Access could not be verified. Reopen this task from Monday and try again."
+          : response.status === 504
+            ? "The server took too long to respond. Please try again."
+            : `Unable to start the response (${response.status}). Please try again.`);
       }
 
-      const data = (await response.json()) as ChatCompleteResponse;
-      if (sessionExpiredRef.current) return;
-      if (data.content) {
-        appendAssistantChunk(data.content, data.citations || []);
-      } else {
-        appendAssistantChunk(
-          "I found relevant sources, but no final answer was returned. Please try again."
-        );
-      }
+      await readChatStream(response, (event) => {
+        if (controller.signal.aborted || sessionExpiredRef.current) return;
+        if (event.type === "status") setStreamStatus(event.message);
+        if (event.type === "delta") {
+          updateAssistant(assistantId, (message) => ({ ...message, content: message.content + event.text }));
+        }
+        if (event.type === "done") {
+          updateAssistant(assistantId, (message) => ({
+            ...message, content: event.content, citations: event.citations, status: "complete",
+            notice: event.ok ? undefined : "The answer could not be completed. Available project details are shown instead.",
+          }));
+        }
+      }, controller.signal);
     } catch (e: any) {
       if (sessionExpiredRef.current) {
         setInput((current) => current || prompt);
-      } else if (e?.name !== "AbortError") {
-        appendAssistantChunk(`Error: ${String(e)}`);
       }
+      updateAssistant(assistantId, (message) => ({
+        ...message,
+        status: controller.signal.aborted ? "stopped" : "error",
+        notice: sessionExpiredRef.current ? "Your session expired. Reopen this task from Monday."
+          : controller.signal.aborted ? "Response stopped. Any text above is incomplete."
+          : e instanceof ChatStreamError ? e.message : "The response was interrupted. Please try again.",
+      }));
     } finally {
-      setIsStreaming(false);
-      abortRef.current = null;
+      if (abortRef.current === controller) {
+        setIsStreaming(false);
+        abortRef.current = null;
+      }
     }
-  }, [appendAssistantChunk, baseUrl, input, isStreaming, messages, externalTaskKey, handleUnauthorized]);
+  }, [updateAssistant, baseUrl, input, isStreaming, messages, externalTaskKey, handleUnauthorized]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
@@ -799,7 +792,7 @@ export default function TaskPage() {
       <div className="mt-8 space-y-4">
         {messages.map((m, i) => (
           <div
-            key={i}
+            key={m.id ?? i}
             className={`min-w-0 rounded-lg border border-border bg-card shadow-sm ${
               m.role === "user" ? "px-4 py-3" : "p-5"
             }`}
@@ -817,7 +810,13 @@ export default function TaskPage() {
             )}
             {m.role === "assistant" ? (
               <div className="mt-4 min-w-0 rounded-md bg-secondary/70 p-4">
-                <Markdown>{m.content}</Markdown>
+                {m.content ? <Markdown>{m.content}</Markdown> : m.status === "streaming" ? (
+                  <p role="status" className="animate-pulse text-muted-foreground">{streamStatus}</p>
+                ) : null}
+                {m.status === "streaming" && m.content && (
+                  <p role="status" className="mt-2 text-xs text-muted-foreground">Writing…</p>
+                )}
+                {m.notice && <p role="status" className="mt-2 text-sm text-muted-foreground">{m.notice}</p>}
               </div>
             ) : (
               <div className="whitespace-pre-wrap">{m.content}</div>
@@ -876,22 +875,6 @@ export default function TaskPage() {
             )}
           </div>
         ))}
-        {isAwaitingFirstToken && (
-          <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-            <div className="flex items-center gap-3">
-              <MessageSquare aria-hidden="true" className="h-4 w-4 text-primary" strokeWidth={1.75} />
-              <h3 className="text-sm font-semibold text-foreground">Assistant</h3>
-            </div>
-            <div className="mt-4 flex items-center gap-2 rounded-md bg-secondary/70 p-4 text-sm text-muted-foreground">
-              Thinking
-              <span className="inline-flex items-center gap-1">
-                <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce" />
-                <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:100ms]" />
-                <span className="h-1 w-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:200ms]" />
-              </span>
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="mt-8 flex gap-2">
@@ -911,7 +894,7 @@ export default function TaskPage() {
           aria-busy={isStreaming}
           className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {isStreaming ? "Thinking..." : "Send"}
+          {isStreaming ? "Responding…" : "Send"}
           {isStreaming && (
             <span className="h-3 w-3 animate-spin rounded-full border-2 border-background border-t-transparent" />
           )}

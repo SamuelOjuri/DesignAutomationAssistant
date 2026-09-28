@@ -438,9 +438,9 @@ def test_synthesis_requires_project_wide_coverage_qualification():
         "This review covers only the available project records; other records may add details."
     )
     assert citations == []
-    assert "only when retrieval_plan.corpus_wide_requested is true" in str(
+    assert "only mention project-wide coverage limits when retrieval_plan.corpus_wide_requested is true" in str(
         generated[0]["config"].system_instruction
-    )
+    ).casefold()
     assert json.loads(generated[0]["contents"])["retrieval_plan"][
         "corpus_wide_requested"
     ] is True

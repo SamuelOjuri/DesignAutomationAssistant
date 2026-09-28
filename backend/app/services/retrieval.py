@@ -209,6 +209,7 @@ def search_task_docs_batch(
     *,
     max_evidence_chunks: Optional[int] = None,
     max_chunks_per_file: Optional[int] = None,
+    query_embeddings: Optional[List[List[float]]] = None,
 ) -> List[Dict[str, Any]]:
     normalized_queries = []
     for query in queries:
@@ -232,21 +233,25 @@ def search_task_docs_batch(
         return []
 
     candidate_limit = min(k, settings.chat_retrieval_candidates_per_query)
-    client = create_gemini_client()
-    result = client.models.embed_content(
-        model="gemini-embedding-001",
-        contents=normalized_queries,
-        config=types.EmbedContentConfig(
-            output_dimensionality=1536,
-            task_type="RETRIEVAL_QUERY",
-        ),
-    )
+    if query_embeddings is None:
+        client = create_gemini_client()
+        result = client.models.embed_content(
+            model="gemini-embedding-001",
+            contents=normalized_queries,
+            config=types.EmbedContentConfig(
+                output_dimensionality=1536,
+                task_type="RETRIEVAL_QUERY",
+            ),
+        )
+        query_embeddings = [list(embedding.values) for embedding in result.embeddings]
+    if len(query_embeddings) != len(normalized_queries):
+        raise ValueError("Expected one embedding per retrieval query")
 
     candidates: List[Dict[str, Any]] = []
     for query_index, (query, embedding) in enumerate(
-        zip(normalized_queries, result.embeddings)
+        zip(normalized_queries, query_embeddings)
     ):
-        query_vec = _normalize(list(embedding.values))
+        query_vec = _normalize(embedding)
         candidates.extend(
             _search_snapshot_for_embedding(
                 db,

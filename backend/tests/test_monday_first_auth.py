@@ -14,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from backend.app.config import settings
 from backend.app.db import Base
-from backend.app.models import AppSession, AppUser, HandoffCode, TaskFile, TaskSnapshot, UserMondayLink
+from backend.app.models import AppSession, AppUser, HandoffCode, Task, TaskFile, TaskSnapshot, UserMondayLink
 from backend.app.routes import chat, monday_auth, monday_handoff, tasks
 from backend.app.monday_client import MONDAY_API_URL, MONDAY_TOKEN_URL
 
@@ -365,3 +365,75 @@ def test_cookie_session_resolves_handoff_and_authorizes_task_chat_and_signed_url
     )
     assert chat_response.status_code == 200
     assert chat_response.json()["content"] == "answer"
+
+
+@pytest.fixture()
+def streaming_user(client, db_session, monkeypatch):
+    _add_handoff_code(db_session)
+    state = _monday_first_state_from_login(client, "handoff-code")
+    _mock_monday_oauth(monkeypatch)
+    assert _complete_monday_oauth(client, state).status_code == 307
+    db_session.add(Task(external_task_key="acct:board-1:item-1", account_id="acct", board_id="board-1", item_id="item-1"))
+    db_session.commit()
+    monkeypatch.setattr(tasks, "can_read_item", lambda *args: True)
+    return {"externalTaskKey": "acct:board-1:item-1", "message": "hello"}
+
+
+def test_monday_first_session_streams_without_supabase_token(client, streaming_user, monkeypatch):
+    async def events(payload):
+        yield "status", {"message": "Preparing"}
+        yield "delta", {"text": "Hello"}
+        yield "done", {"content": "Hello", "citations": [], "ok": True}
+    monkeypatch.setattr(chat, "_chat_events", events)
+    response = client.post("/api/chat/stream", json=streaming_user, headers=_csrf_headers(client))
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "no-store" in response.headers["cache-control"]
+    assert "event: delta" in response.text and "event: done" in response.text
+    assert "authorization" not in response.request.headers
+    assert not any(name.startswith("sb-") for name in client.cookies)
+
+
+@pytest.mark.parametrize("failure,status", [("missing", 401), ("invalid", 401), ("expired", 401), ("revoked", 401), ("csrf", 403), ("missing_csrf", 403), ("denied", 403), ("account", 403)])
+def test_stream_rejects_access_before_generation(client, db_session, streaming_user, monkeypatch, failure, status):
+    headers = _csrf_headers(client)
+    if failure == "missing":
+        client.cookies.clear()
+    elif failure == "invalid":
+        client.cookies.clear()
+        client.cookies.set("daa_session", "invalid")
+    elif failure in {"expired", "revoked"}:
+        session = db_session.query(AppSession).one()
+        if failure == "expired":
+            session.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        else:
+            session.revoked_at = datetime.now(timezone.utc)
+        db_session.commit()
+    elif failure == "csrf":
+        headers = {"X-CSRF-Token": "wrong"}
+    elif failure == "missing_csrf":
+        headers = {}
+    elif failure == "denied":
+        monkeypatch.setattr(tasks, "can_read_item", lambda *args: False)
+    else:
+        db_session.query(UserMondayLink).delete()
+        db_session.commit()
+    monkeypatch.setattr(chat, "_chat_events", lambda *args: pytest.fail("Denied requests must not generate"))
+    response = client.post("/api/chat/stream", json=streaming_user, headers=headers)
+    assert response.status_code == status
+    assert response.headers["content-type"].startswith("application/json")
+    assert "event:" not in response.text
+
+
+def test_probe_is_disabled_by_default_and_checks_access_when_enabled(client, streaming_user, monkeypatch):
+    monkeypatch.setattr(chat.settings, "chat_stream_probe_enabled", False)
+    payload = {"externalTaskKey": streaming_user["externalTaskKey"], "durationSeconds": 1}
+    assert client.post("/api/chat/stream/probe", json=payload, headers=_csrf_headers(client)).status_code == 404
+    monkeypatch.setattr(chat.settings, "chat_stream_probe_enabled", True)
+    monkeypatch.setattr(tasks, "can_read_item", lambda *args: False)
+    assert client.post("/api/chat/stream/probe", json=payload, headers=_csrf_headers(client)).status_code == 403
+    monkeypatch.setattr(tasks, "can_read_item", lambda *args: True)
+    response = client.post("/api/chat/stream/probe", json=payload, headers=_csrf_headers(client))
+    assert response.status_code == 200
+    assert "event: done" in response.text
+    assert "Transport probe completed" in response.text

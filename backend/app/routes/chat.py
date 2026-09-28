@@ -1,19 +1,24 @@
+import asyncio
 import json
 import logging
 import re
+from contextlib import aclosing
+from functools import partial
 from time import perf_counter
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+import anyio
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from google.genai import Client, types
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..auth import CurrentUser, get_current_user, require_csrf_token
 from ..config import settings
-from ..db import get_db
+from ..db import SessionLocal, get_db
 from ..schemas import ChatRequest, ChatMessage, ChatCompleteResponse
 from ..services.auto_sync_purge import record_meaningful_access
+from ..services.chat_streaming import AnswerJsonStream, ChatStreamingResponse, event_stream
 from ..services.llm_interface import create_gemini_client
 from ..services.retrieval import get_task_context, search_task_docs_batch
 from .tasks import require_task_access
@@ -162,14 +167,8 @@ def _history_payload(
     return messages
 
 
-def _plan_retrieval(
-    client: Client,
-    *,
-    prompt: str,
-    history: Optional[List[ChatMessage]],
-    context: Any,
-) -> _RetrievalPlan:
-    planning_config = types.GenerateContentConfig(
+def _planning_config() -> types.GenerateContentConfig:
+    return types.GenerateContentConfig(
         temperature=0.1,
         response_mime_type="application/json",
         response_json_schema=_RetrievalPlan.model_json_schema(),
@@ -188,19 +187,20 @@ def _plan_retrieval(
             "Do not answer the question."
         ),
     )
-    response = client.models.generate_content(
-        model=settings.gemini_model,
-        contents=json.dumps(
-            {
-                "user_question": prompt,
-                "recent_history": _history_payload(history),
-                "task_context": context,
-            },
-            default=str,
-        ),
-        config=planning_config,
+
+
+def _planning_payload(prompt, history, context) -> str:
+    return json.dumps(
+        {
+            "user_question": prompt,
+            "recent_history": _history_payload(history),
+            "task_context": context,
+        },
+        default=str,
     )
 
+
+def _parse_plan(response: Any) -> _RetrievalPlan:
     parsed = getattr(response, "parsed", None)
     if isinstance(parsed, _RetrievalPlan):
         return parsed
@@ -211,6 +211,20 @@ def _plan_retrieval(
     if not response_text:
         raise ValueError("Retrieval planner returned no structured plan")
     return _RetrievalPlan.model_validate_json(response_text)
+
+
+def _plan_retrieval(
+    client: Client,
+    *,
+    prompt: str,
+    history: Optional[List[ChatMessage]],
+    context: Any,
+) -> _RetrievalPlan:
+    return _parse_plan(client.models.generate_content(
+        model=settings.gemini_model,
+        contents=_planning_payload(prompt, history, context),
+        config=_planning_config(),
+    ))
 
 
 def _synthesis_payload(
@@ -357,16 +371,8 @@ def _fallback_answer_from_sources(
     return "\n\n".join(lines)
 
 
-def _synthesize_answer(
-    client: Client,
-    *,
-    prompt: str,
-    history: Optional[List[ChatMessage]],
-    context: Any,
-    plan: _RetrievalPlan,
-    citations: List[Dict[str, Any]],
-) -> tuple[str, List[Dict[str, Any]]]:
-    synthesis_config = types.GenerateContentConfig(
+def _synthesis_config() -> types.GenerateContentConfig:
+    return types.GenerateContentConfig(
         temperature=0.2,
         response_mime_type="application/json",
         response_json_schema=_SynthesisResult.model_json_schema(),
@@ -432,6 +438,17 @@ def _synthesize_answer(
             "The client has also asked for the updated layout before the next review. [S2]"
         )
     )
+
+
+def _synthesize_answer(
+    client: Client,
+    *,
+    prompt: str,
+    history: Optional[List[ChatMessage]],
+    context: Any,
+    plan: _RetrievalPlan,
+    citations: List[Dict[str, Any]],
+) -> tuple[str, List[Dict[str, Any]]]:
     response = client.models.generate_content(
         model=settings.gemini_model,
         contents=_synthesis_payload(
@@ -441,7 +458,7 @@ def _synthesize_answer(
             plan=plan,
             citations=citations,
         ),
-        config=synthesis_config,
+        config=_synthesis_config(),
     )
     parsed = getattr(response, "parsed", None)
     if isinstance(parsed, _SynthesisResult):
@@ -455,6 +472,10 @@ def _synthesize_answer(
         except (ValueError, TypeError):
             result = _SynthesisResult(answer=response_text)
 
+    return _finalize_answer(result, plan, citations)
+
+
+def _finalize_answer(result, plan, citations):
     answer = result.answer.strip()
     if (
         plan.corpus_wide_requested
@@ -629,3 +650,202 @@ def chat_complete(
         citations=_citations_for_display(citations),
         ok=ok,
     )
+
+
+def _stream_db_read(operation, *args, **kwargs):
+    # A cancelled thread cannot be forcibly stopped. It owns and closes its own
+    # session, so response cleanup never closes a connection underneath it.
+    with SessionLocal() as db:
+        return operation(db, *args, **kwargs)
+
+
+async def _read_for_stream(operation, *args, **kwargs):
+    return await anyio.to_thread.run_sync(
+        partial(_stream_db_read, operation, *args, **kwargs),
+        abandon_on_cancel=True,
+    )
+
+
+def _validated_stream_answer(document, plan, citations):
+    result = _SynthesisResult.model_validate_json(document, strict=True)
+    if not result.answer.strip():
+        raise ValueError("Empty answer")
+    known_ids = {str(citation.get("chunkId")) for citation in citations if citation.get("chunkId")}
+    if not set(result.cited_chunk_ids) <= known_ids:
+        raise ValueError("Unknown cited chunk")
+    selected = _select_cited_evidence(citations, result.cited_chunk_ids)
+    selected_sources = {citation["sourceId"] for citation in selected}
+    # Accept grouped citations such as [S1, S2] as well as individual [S1].
+    inline_sources = {
+        source for group in re.findall(r"\[(S\d+(?:\s*,\s*S\d+)*)\]", result.answer)
+        for source in re.findall(r"S\d+", group)
+    }
+    if not inline_sources <= selected_sources:
+        raise ValueError("Unresolved inline citation")
+    return _finalize_answer(result, plan, citations)
+
+
+async def _chat_events(payload: ChatRequest):
+    total_started = perf_counter()
+    try:
+        yield "status", {"message": "Reading project details…"}
+        context = await _read_for_stream(get_task_context, payload.externalTaskKey)
+        # All provider I/O here is asynchronous; the stream deadline and browser
+        # cancellation can interrupt planning, embedding, or synthesis.
+        async with create_gemini_client(max_retries=2).aio as client:
+            planning_started = perf_counter()
+            try:
+                response = await client.models.generate_content(
+                    model=settings.gemini_model,
+                    contents=_planning_payload(payload.message, payload.history, context),
+                    config=_planning_config(),
+                )
+                proposed_plan = _parse_plan(response)
+            except Exception as exc:
+                logger.warning("chat: streaming planner failed (%s)", type(exc).__name__)
+                proposed_plan = None
+            finally:
+                logger.info("chat: streaming planning duration_ms=%.1f", (perf_counter() - planning_started) * 1000)
+            plan = _sanitize_retrieval_plan(proposed_plan, payload.message)
+            citations = []
+            if plan.search_queries:
+                yield "status", {"message": "Searching project documents…"}
+                retrieval_started = perf_counter()
+                try:
+                    embeddings = await client.models.embed_content(
+                        model="gemini-embedding-001",
+                        contents=plan.search_queries,
+                        config=types.EmbedContentConfig(output_dimensionality=1536, task_type="RETRIEVAL_QUERY"),
+                    )
+                    citations = await _read_for_stream(
+                        search_task_docs_batch,
+                        payload.externalTaskKey,
+                        plan.search_queries,
+                        k=settings.chat_retrieval_candidates_per_query,
+                        query_embeddings=[list(embedding.values) for embedding in embeddings.embeddings],
+                    )
+                except Exception as exc:
+                    logger.warning("chat: streaming retrieval failed (%s)", type(exc).__name__)
+                finally:
+                    logger.info("chat: streaming retrieval duration_ms=%.1f", (perf_counter() - retrieval_started) * 1000)
+
+            yield "status", {"message": "Writing the answer…"}
+            synthesis_started = perf_counter()
+            try:
+                parser = AnswerJsonStream()
+                finished = False
+                response_stream = await client.models.generate_content_stream(
+                    model=settings.gemini_model,
+                    contents=_synthesis_payload(
+                        prompt=payload.message, history=payload.history, context=context,
+                        plan=plan, citations=citations,
+                    ),
+                    config=_synthesis_config(),
+                )
+                async with aclosing(response_stream):
+                    async for chunk in response_stream:
+                        candidates = getattr(chunk, "candidates", None) or []
+                        text = ""
+                        for candidate in candidates[:1]:
+                            reason = getattr(candidate, "finish_reason", None)
+                            if reason:
+                                if reason != types.FinishReason.STOP:
+                                    raise ValueError("Model generation did not finish successfully")
+                                finished = True
+                            for part in getattr(getattr(candidate, "content", None), "parts", None) or []:
+                                if not getattr(part, "thought", False):
+                                    text += getattr(part, "text", None) or ""
+                        if text:
+                            delta = parser.feed(text)
+                            if delta:
+                                yield "delta", {"text": delta}
+                if not finished:
+                    raise ValueError("Model stream ended without completion")
+                answer, selected = _validated_stream_answer(parser.document, plan, citations)
+                result = ChatCompleteResponse(content=answer, citations=_citations_for_display(selected), ok=True)
+            except Exception as exc:
+                # Replace provisional content with an explicitly labelled,
+                # grounded fallback. Never display malformed/raw model JSON.
+                logger.warning("chat: streaming synthesis failed (%s)", type(exc).__name__)
+                selected = [citation for citation in citations if _clean_evidence_snippet(citation)][:3]
+                result = ChatCompleteResponse(
+                    content=_fallback_answer_from_sources(context, citations, corpus_wide_requested=plan.corpus_wide_requested),
+                    citations=_citations_for_display(selected),
+                    ok=False,
+                )
+            finally:
+                logger.info("chat: streaming synthesis duration_ms=%.1f", (perf_counter() - synthesis_started) * 1000)
+        # The client has been closed before the terminal event is emitted.
+        yield "done", result.model_dump()
+    finally:
+        logger.info("chat: streaming total duration_ms=%.1f", (perf_counter() - total_started) * 1000)
+
+
+def _stream_response(events, request: Request, timeout_seconds: float):
+    return ChatStreamingResponse(
+        event_stream(events, timeout_seconds=timeout_seconds, request=request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/chat/stream")
+def chat_stream(
+    payload: ChatRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+    _csrf: None = Depends(require_csrf_token),
+):
+    task = require_task_access(payload.externalTaskKey, db, current_user)
+    if payload.message.strip():
+        record_meaningful_access(db, task)
+        db.commit()
+    # No ORM objects enter the generator. Release the request connection before
+    # the stream starts; retrieval owns separate, short-lived sessions.
+    db.close()
+    return _stream_response(_chat_events(payload), request, settings.chat_stream_timeout_seconds)
+
+
+class _StreamProbeRequest(BaseModel):
+    externalTaskKey: str
+    durationSeconds: float = Field(default=120, ge=1, le=180)
+    initialDelaySeconds: float = Field(default=0, ge=0, le=60)
+    pauseAtSeconds: float | None = Field(default=None, ge=0, le=180)
+    pauseSeconds: float = Field(default=0, ge=0, le=60)
+
+
+async def _probe_events(payload: _StreamProbeRequest):
+    started = perf_counter()
+    yield "status", {"message": "Transport probe started"}
+    await asyncio.sleep(payload.initialDelaySeconds)
+    paused = False
+    sequence = 0
+    while perf_counter() - started < payload.durationSeconds:
+        elapsed = perf_counter() - started
+        if not paused and payload.pauseAtSeconds is not None and elapsed >= payload.pauseAtSeconds:
+            paused = True
+            await asyncio.sleep(payload.pauseSeconds)
+            continue
+        sequence += 1
+        yield "delta", {"text": f"{sequence}: {elapsed:.2f}s\n"}
+        await asyncio.sleep(min(1, max(0, payload.durationSeconds - (perf_counter() - started))))
+    yield "done", {"content": f"Transport probe completed after {perf_counter() - started:.2f}s.", "citations": [], "ok": True}
+
+
+@router.post("/chat/stream/probe")
+def chat_stream_probe(
+    payload: _StreamProbeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+    _csrf: None = Depends(require_csrf_token),
+):
+    if not settings.chat_stream_probe_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
+    require_task_access(payload.externalTaskKey, db, current_user)
+    db.close()
+    return _stream_response(_probe_events(payload), request, 250)

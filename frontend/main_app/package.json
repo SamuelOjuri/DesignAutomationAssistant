@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "test:task-polling": "node --test tests/task-polling.test.mjs",
+    "test:chat": "node --test tests/chat-stream.test.mjs tests/chat-relay.test.mjs",
     "lint": "next lint"
   },
   "dependencies": {

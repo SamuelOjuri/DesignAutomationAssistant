@@ -1,5 +1,9 @@
 # Design Automation Assistant
 
+Task chat supports authenticated response streaming through a native Netlify Edge
+relay. Deployment order, timeout settings, and the protected 120-second transport
+probe are documented in [ChatStreaming.md](backend/ChatStreaming.md).
+
 ## Incremental task sync
 
 Snapshot hashes still use Monday's `updated_at` and asset IDs. A different hash
