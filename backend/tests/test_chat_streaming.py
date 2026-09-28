@@ -196,6 +196,11 @@ def test_pipeline_streams_only_answer_and_finalises_public_citations(monkeypatch
     state = install_fake_pipeline(monkeypatch, planning_fails=True)
     async def run():
         events = [event async for event in chat._chat_events(chat.ChatRequest(externalTaskKey="a:b:c", message="roof"))]
+        assert [data["message"] for name, data in events if name == "status"] == [
+            "Reading project details…",
+            "Searching project documents…",
+            "Generating response…",
+        ]
         assert "".join(data["text"] for name, data in events if name == "delta") == "Roof £100. [S1]"
         name, result = events[-1]
         assert name == "done" and result["ok"] is True

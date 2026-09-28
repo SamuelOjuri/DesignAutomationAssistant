@@ -729,7 +729,7 @@ async def _chat_events(payload: ChatRequest):
                 finally:
                     logger.info("chat: streaming retrieval duration_ms=%.1f", (perf_counter() - retrieval_started) * 1000)
 
-            yield "status", {"message": "Writing the answer…"}
+                    yield "status", {"message": "Generating response…"}
             synthesis_started = perf_counter()
             try:
                 parser = AnswerJsonStream()

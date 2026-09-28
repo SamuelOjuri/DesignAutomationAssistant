@@ -234,7 +234,7 @@ export default function TaskPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
-  const [streamStatus, setStreamStatus] = useState("Preparing the answer…");
+  const [streamStatus, setStreamStatus] = useState("Preparing response…");
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -487,7 +487,7 @@ export default function TaskPage() {
     }
 
     setIsStreaming(true);
-    setStreamStatus("Preparing the answer…");
+    setStreamStatus("Preparing response…");
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -814,7 +814,7 @@ export default function TaskPage() {
                   <p role="status" className="animate-pulse text-muted-foreground">{streamStatus}</p>
                 ) : null}
                 {m.status === "streaming" && m.content && (
-                  <p role="status" className="mt-2 text-xs text-muted-foreground">Writing…</p>
+                  <p role="status" className="mt-2 text-xs text-muted-foreground">Generating response…</p>
                 )}
                 {m.notice && <p role="status" className="mt-2 text-sm text-muted-foreground">{m.notice}</p>}
               </div>
