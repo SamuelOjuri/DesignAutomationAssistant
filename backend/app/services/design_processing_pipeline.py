@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
+import json
 import os
 from typing import Any, Callable, Iterable, Mapping, Optional
 
@@ -13,6 +14,10 @@ from ..models import (
     DesignProcessingJob,
 )
 from .auto_sync import utc_now
+from ..config import settings
+from .design_processing_execution import run_interruptible_analysis
+from .design_processing_inputs import DesignProcessingTargetSnapshot
+from .design_processing_policy import design_scope_exclusion
 from .design_processing_artifacts import (
     DesignArtifactStorage,
     find_verified_rendered_artifacts,
@@ -56,7 +61,6 @@ from .design_processing_target import (
 from .legacy_enquiry.analysis import (
     LegacyAnalysisClient,
     LegacyAnalysisResult,
-    analyze_downloaded_email_assets,
 )
 from .legacy_enquiry.formatting import (
     format_date_for_monday,
@@ -228,6 +232,22 @@ def run_analysis_pipeline(
     downloader: Optional[AssetDownloader] = None,
     clock: Clock = utc_now,
 ) -> str:
+    def check_current():
+        current_item, current_job, _ = _lock_current_analysis(
+            db, job_id, worker_id=worker_id, execution_policy=execution_policy,
+        )
+        current_snapshot = assert_current_execution_target(
+            current_item, current_job, gateway=gateway,
+            pipeline_version=pipeline_version, expected_board_id=expected_board_id,
+            expected_group_id=expected_group_id, worker_id=worker_id,
+            execution_allowed=_execution_is_allowed(
+                "analysis", current_item.item_id, mode=mode,
+                allowlist_item_ids=allowlist_item_ids, execution_policy=execution_policy,
+            ),
+        )
+        db.rollback()  # Do not hold row locks during extraction or its cancellation poll.
+        return current_snapshot
+
     item, job, identity = _lock_current_analysis(
         db,
         job_id,
@@ -265,11 +285,13 @@ def run_analysis_pipeline(
             snapshot.email_assets,
             access_token,
             downloader=downloader,
+            check_current=check_current,
         )
         try:
-            extraction_result = analyze_downloaded_email_assets(
+            extraction_result = run_interruptible_analysis(
                 downloaded_assets,
                 client=analysis_client,
+                check_current=check_current,
             )
         finally:
             _remove_downloaded_files(downloaded_assets)
@@ -306,7 +328,7 @@ def run_analysis_pipeline(
         project_name = str(extraction.get("projectName") or "")
         db.commit()
         if project_name:
-            legacy_result = match_projects(project_name, gateway)
+            legacy_result = match_projects(project_name, _CheckedMatchingGateway(gateway, check_current))
         else:
             legacy_result = {
                 "exists": False,
@@ -317,6 +339,7 @@ def run_analysis_pipeline(
                 "error": "",
             }
         match_contract = build_matching_contract(project_name, legacy_result)
+        check_current()
 
         item, job, identity = _lock_current_analysis(
             db,
@@ -348,6 +371,8 @@ def run_analysis_pipeline(
     if not _has_identity(extraction, identity) or not _has_identity(matching, identity):
         raise RuntimeError("current analysis outputs are incomplete before rendering")
 
+    db.commit()
+    check_current()
     existing_artifacts = find_verified_rendered_artifacts(
         db,
         item,
@@ -371,6 +396,7 @@ def run_analysis_pipeline(
             report=report,
         )
         for rendered in rendered_artifacts:
+            check_current()
             persist_rendered_artifact(
                 db,
                 item,
@@ -380,8 +406,10 @@ def run_analysis_pipeline(
                 storage=artifact_storage,
                 now=clock(),
             )
+            db.commit()
     db.commit()
 
+    snapshot = check_current()  # Use current group/input, never the pre-extraction snapshot.
     item, job, identity = _lock_current_analysis(
         db,
         job_id,
@@ -419,6 +447,23 @@ def run_analysis_pipeline(
         )
     db.commit()
     return "analyzed"
+
+
+class _CheckedMatchingGateway:
+    def __init__(self, gateway, check_current):
+        self.gateway = gateway
+        self.check_current = check_current
+
+    def __getattr__(self, name):
+        method = getattr(self.gateway, name)
+
+        def checked(*args, **kwargs):
+            self.check_current()
+            result = method(*args, **kwargs)
+            self.check_current()
+            return result
+
+        return checked
 
 
 def _lock_current_publication(
@@ -548,6 +593,52 @@ def _append_item_warnings(
         if warning not in current:
             current.append(warning)
     item.warnings_json = current
+
+
+def preserve_active_group_values(
+    values: Mapping[str, Any],
+    snapshot: DesignProcessingTargetSnapshot,
+    *,
+    landing_group_id: str,
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Only demonstrably empty cells may be filled outside Landing Zone."""
+    if snapshot.group_id == str(landing_group_id):
+        return dict(values), ()
+    kept = {}
+    warnings = []
+    for column_id, proposed in values.items():
+        if column_id in snapshot.scalar_column_values and _empty_scalar_value(
+            column_id, snapshot.scalar_column_values[column_id],
+        ):
+            kept[column_id] = proposed
+        else:
+            warnings.append(f"{column_id} preserved in active group: existing or unreadable value")
+    return kept, tuple(warnings)
+
+
+def _empty_scalar_value(column_id: str, value: Any) -> bool:
+    if value is None or value == "":
+        return True
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            return False
+    if value is None or value == {}:
+        return True
+    if not isinstance(value, dict):
+        return False
+    allowed_keys = {
+        "date_mkpb23av": {"date", "time", "changed_at"},
+        "hour_mkpbb3j1": {"hour", "minute", "changed_at"},
+        "dropdown_mkpbafca": {"ids", "labels", "changed_at"},
+    }[column_id]
+    if set(value) - allowed_keys:
+        return False
+    cells = {key: cell for key, cell in value.items() if key != "changed_at"}
+    return bool(cells) and all(
+        cell is None or cell == "" or cell == [] for cell in cells.values()
+    )
 
 
 def _publish_one_artifact(
@@ -746,6 +837,25 @@ def cleanup_delete_pending_artifacts(
                 )
                 db.rollback()
                 continue
+            snapshot = gateway.fetch_target(artifact.item_id)
+            exclusion = design_scope_exclusion(
+                snapshot, expected_board_id=str(settings.design_processing_board_id),
+                landing_group_id=str(settings.design_processing_landing_group_id),
+                registered=True,
+            )
+            if exclusion is not None:
+                queue_design_processing_snapshot(
+                    db, snapshot, trigger_type="cleanup_scope_check", mode="enabled",
+                    pipeline_version=settings.design_processing_pipeline_version,
+                    expected_board_id=str(settings.design_processing_board_id),
+                    expected_group_id=str(settings.design_processing_landing_group_id),
+                    now=clock(),
+                )
+                db.commit()
+                log_design_processing_event(
+                    logger, "artifact_cleanup_blocked", item_id=artifact.item_id, reason=exclusion,
+                )
+                continue
             gateway.delete_design_file(
                 artifact.board_id,
                 artifact.item_id,
@@ -822,7 +932,7 @@ def run_publication_pipeline(
             job_id,
             worker_id=worker_id,
         )
-        assert_current_execution_target(
+        snapshot = assert_current_execution_target(
             item,
             job,
             gateway=gateway,
@@ -838,6 +948,10 @@ def run_publication_pipeline(
                 execution_policy=execution_policy,
             ),
         )
+        column_values, preserved_warnings = preserve_active_group_values(
+            column_values, snapshot, landing_group_id=expected_group_id,
+        )
+        warnings = (*warnings, *preserved_warnings)
         if column_values:
             gateway.update_design_owned_columns(
                 item.board_id,
@@ -915,6 +1029,11 @@ def run_publication_pipeline(
         )
     artifacts = _current_publication_artifacts(db, item, identity)
     completed_at = clock()
+    assert_current_execution_target(
+        item, job, gateway=gateway, pipeline_version=pipeline_version,
+        expected_board_id=expected_board_id, expected_group_id=expected_group_id,
+        worker_id=worker_id,
+    )
     complete_publication(
         item,
         job,

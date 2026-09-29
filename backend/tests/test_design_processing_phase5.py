@@ -655,6 +655,45 @@ def test_postgres_deadlock_retries_the_same_execution_attempt(
     assert db_session.query(DesignProcessingJob).one().attempt_count == 1
 
 
+@pytest.mark.parametrize("destination, completed", [("topics", False), ("completed", True)])
+def test_move_during_extraction_continues_only_in_active_groups(db_session, golden, monkeypatch, destination, completed):
+    monkeypatch.setattr(settings, "auto_sync_active_group_ids", "topics")
+    monkeypatch.setattr(settings, "auto_sync_completed_group_id", "completed")
+    golden_input, _ = golden
+    snapshot = _snapshot(golden_input)
+    _queue(db_session, snapshot)
+    gateway = FakeReadGateway(snapshot, golden_input)
+
+    class MovingClient(FakeLegacyClient):
+        def query_llm(self, context, query):
+            result = super().query_llm(context, query)
+            gateway.snapshot = replace(snapshot, group_id=destination)
+            return result
+
+    source_path = WORKSPACE_ROOT / golden_input["sourceEmail"]["path"]
+    result = run_worker_once(
+        db_session, worker_id="moving-worker", access_token="test-token", gateway=gateway,
+        analysis_client=MovingClient(golden_input), artifact_storage=MemoryArtifactStorage(),
+        downloader=FixtureDownloader(source_path), mode="enabled", claim_limit=1,
+        recover_leases=False, heartbeat_interval_seconds=0,
+    )
+    item = db_session.query(DesignProcessingItem).one()
+    jobs = db_session.query(DesignProcessingJob).order_by(DesignProcessingJob.created_at).all()
+    if completed:
+        assert result.cancelled == 1
+        assert item.state == "ineligible"
+        assert item.extracted_parameters_json is None
+        assert jobs[0].last_error == "completed_folder"
+        assert len(jobs) == 1
+        assert db_session.query(DesignProcessingArtifact).count() == 0
+    else:
+        assert result.analyzed == 1
+        assert item.latest_analyzed_input_revision == snapshot.input_revision
+        assert jobs[0].status == "completed"
+        assert jobs[1].status == "scheduled"
+        assert db_session.query(DesignProcessingArtifact).count() == 3
+
+
 def test_supersession_at_final_checkpoint_never_advances_analyzed_identity(
     db_session,
     golden,
@@ -697,7 +736,8 @@ def test_supersession_at_final_checkpoint_never_advances_analyzed_identity(
     assert len(
         [job for job in jobs if job.status in {"scheduled", "running", "retry_wait"}]
     ) == 1
-    assert len(artifacts) == 3
+    # Stop before the third artifact after detecting the changed source.
+    assert len(artifacts) == 2
     assert {artifact.input_revision for artifact in artifacts} == {"revision-a"}
     assert all(artifact.status == "rendered" for artifact in artifacts)
 

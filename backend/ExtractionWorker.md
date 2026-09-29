@@ -4,7 +4,8 @@ An existing Monday item becomes eligible when:
 
 - Monday item state is exactly `active`; archived, deleted, missing, malformed, and unknown states are ineligible.
 - Board is `1882196103`.  
-- Current group is Landing Zone, `group_mkpbd6vy`.  
+- Initial admission is in Landing Zone, `group_mkpbd6vy`. Once registered, processing can continue in the configured `AUTO_SYNC_ACTIVE_GROUP_IDS` on the same board. Unregistered active-group items are excluded.
+- `AUTO_SYNC_COMPLETED_GROUP_ID` always excludes the item, even if accidentally also configured as active. Cancel outstanding work and mark it ineligible; do not finish extraction or publication for completed items.
 - Item ‘`name`’ field (Field ID: ‘`name`’) has been filled by user (Human only; worker must never write or clear)  
 - Email column `file_mkpbm883` contains at least one supported `.eml` or `.msg` asset.  
 
@@ -26,6 +27,23 @@ The worker processes that same Monday item. It must never create a duplicate ite
 | Email | `file_mkpbm883` | Input only; never re-uploaded or cleared |
 
 All other columns, including Accounts, Priority, Status, Designer, and group membership, remain untouched.
+
+In active groups, the three scalar columns are fill-empty-only. Read current typed
+values immediately before writing; preserve populated values from any source and
+omit unreadable/missing response values. Midnight is populated. Each field is
+handled independently, including retries. No human-edit history is tracked, and
+an empty field may be filled even if it previously contained a value. This does
+not block file publication. AI Data remains email-derived; Monday values take
+precedence for the assistant. The read/write pair is not atomic against concurrent
+human edits. Landing Zone retains its existing scalar-write behaviour.
+
+Production email analysis executes in an interruptible child process. The parent
+checks current eligibility every five seconds while waiting, terminates extraction
+on cancellation, and rejects late results. Downloads, matching calls, artifact
+storage, each publication side effect and final completion also have checkpoints.
+Current eligibility is checked before deleting superseded files. Already accepted
+external requests cannot be recalled; no later steps proceed after cancellation
+is detected. Retain previously published files when an item is completed.
 
 **Exact Legacy Logic**
 
@@ -209,8 +227,8 @@ Extend the authenticated receiver in monday\_webhooks.py to dispatch independent
 1. Authenticate and deduplicate the webhook as it does today.  
 2. Fetch current item state once; do not trust an out-of-order payload’s group.  
 3. Keep Landing Zone excluded from `auto_sync_jobs` in config.py.  
-4. Dispatch Landing Zone readiness and input events to `design_processing_jobs`.  
-5. Coalesce `create_item`, move-to-Landing, Email-column, and item `name` events for the same item. A name change must wake an item that was waiting for its human-entered name.  
+4. Dispatch readiness and input events for Landing Zone admission and previously registered active-group items to `design_processing_jobs`.
+5. Coalesce creation, group-move, Email-column, and item `name` events for the same item. Moves to Completed Folder cancel work. A name change must wake an item that was waiting for its human-entered name.
 6. Ignore AI Data and Matched Projects changes for design processing.
 
 A create event may arrive before the name or Email asset is available. Queue it in the corresponding readiness stage, retry readiness without consuming normal failure attempts, and retain a periodic Landing Zone reconciliation command as a missed-webhook safety net.
@@ -246,9 +264,9 @@ For a publication execution:
 
 The AI Data CSV should retain all 21 parameter rows for schema compatibility, and the preview PDF should display the same ordered rows without changing their values. The worker must not infer New Enquiry or Amendment: `Reason for Change` is always `Reviewer decision required` with source `Business Rule`, and only the reviewer may record that decision in the human-owned New Enq / Amend column. Since no project is selected, every other parameter contains email-derived values only. Any default inserted by a business rule should have source `Business Rule`; it must not be represented as a human CRM decision.
 
-Implement one validation gate with two explicit modes. In readiness mode, `refresh_current_target()` re-fetches item state, board, group, item `name`, Email-column membership, and joined asset metadata from Monday, requires item state to be exactly `active`, recomputes the Email input revision, and updates the locked item’s latest desired identity; it does not require or assign execution identity. If the refreshed desired identity differs from published identity, it also moves the item out of `ready_for_review` in that transaction. In execution mode, `assert_current_execution_target()` performs the same Monday re-fetch and revision calculation, then locks the item and claimed job to verify active item state, board `1882196103`, Landing Zone group `group_mkpbd6vy`, a non-empty human name, at least one supported Email asset, current remote identity and stored desired identity both equal to immutable execution identity, the configured pipeline version equal to execution pipeline version, continued lease ownership, and that the current operational mode still permits the execution kind for this item. No other remote work may occur between a successful execution-mode gate and its guarded side effect.
+Use a shared validation gate in readiness and execution modes. Readiness refreshes current Monday state, board, group, name and Email assets, recomputes the desired identity and removes stale readiness. Execution additionally verifies the immutable execution identity, pipeline version, lease ownership and operational mode. Both modes allow Landing Zone or a configured active group for registered items, with Completed Folder taking precedence. Read the current scalar values in the same target query. No other remote work may occur between a successful execution gate and its guarded side effect.
 
-If the item is no longer active or has left Landing Zone, mark the job `cancelled` and the item `ineligible`. If input or pipeline identity is superseded, cancel and schedule a successor atomically. If readiness input disappears while the active item remains in Landing Zone, cancel the stale execution and schedule a readiness job. Because Monday mutations cannot participate in the database transaction, a change occurring after a successful gate can still cause a partial stale side effect; the next gate must stop later writes, the stale execution must never publish the final report or become `ready_for_review`, and the successor must repair worker-owned outputs.
+If the item is no longer active, enters Completed Folder or leaves the eligible board/groups, mark the job `cancelled` and the item `ineligible`. A move from Landing Zone into a configured active group preserves the execution and desired identity. If input or pipeline identity is superseded, cancel and schedule a successor atomically. If readiness input disappears in an eligible group, cancel the stale execution and schedule a readiness job. Monday mutations cannot participate in the database transaction: a change after a successful gate can cause a partial stale side effect. The next gate must stop later writes, and a final fresh gate must prevent the stale execution becoming `ready_for_review`.
 
 **Idempotent Monday Writes**
 
@@ -270,7 +288,7 @@ On a new execution identity, upload or adopt the replacements first. Only after 
 - `services/design_processing_artifacts.py`: durable artifact storage, publication adoption, and cleanup.  
 - `services/legacy_enquiry/`: framework-independent legacy extraction and matching code.  
 - `services/match_report.py`: report DTO and PDF rendering.  
-- `services/design_processing_reconciliation.py`: Landing Zone recovery scan.  
+- `services/design_processing_reconciliation.py`: activation-bounded Landing Zone admission and recovery of registered unfinished items across groups. Completed Folder candidates are excluded and cancelled.
 - `scripts/verify_legacy_enquiry_manifest.py`: offline legacy hash verification and fixture-generation prerequisite.  
 - monday\_client.py: queries, mutations, and multipart uploads.  
 - monday\_webhooks.py: dual-queue dispatch only.

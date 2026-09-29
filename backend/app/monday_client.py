@@ -1078,7 +1078,7 @@ query ($itemIds: [ID!]) {
             url
             public_url
         }
-        column_values(ids: ["file_mkpbm883"]) {
+        column_values(ids: ["file_mkpbm883", "date_mkpb23av", "hour_mkpbb3j1", "dropdown_mkpbafca"]) {
             id
             type
             value

@@ -17,6 +17,7 @@ from .design_processing_state import (
     execution_identity,
     update_desired_identity,
 )
+from .design_processing_policy import design_scope_exclusion
 
 
 TargetReadiness = Literal[
@@ -371,12 +372,10 @@ def _target_readiness(
     expected_board_id: str,
     expected_group_id: str,
 ) -> TargetReadiness:
-    if snapshot.item_state != "active":
-        return "ineligible"
-    if (
-        snapshot.board_id != str(expected_board_id)
-        or snapshot.group_id != str(expected_group_id)
-    ):
+    if design_scope_exclusion(
+        snapshot, expected_board_id=expected_board_id,
+        landing_group_id=expected_group_id, registered=True,
+    ) is not None:
         return "ineligible"
     if snapshot.missing_name:
         return "waiting_for_name"

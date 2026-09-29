@@ -220,7 +220,7 @@ def test_missing_supported_metadata_fails_but_missing_unsupported_metadata_is_ig
     assert target.missing_email is True
 
 
-def test_intake_query_fetches_only_the_email_column_and_required_asset_metadata(
+def test_intake_query_fetches_email_scalar_values_and_required_asset_metadata(
     monkeypatch,
 ):
     calls = []
@@ -237,7 +237,7 @@ def test_intake_query_fetches_only_the_email_column_and_required_asset_metadata(
     assert actual is expected
     assert calls[0][1] == {"itemIds": ["2657106977"]}
     assert "state" in calls[0][0]
-    assert 'column_values(ids: ["file_mkpbm883"])' in calls[0][0]
+    assert 'column_values(ids: ["file_mkpbm883", "date_mkpb23av", "hour_mkpbb3j1", "dropdown_mkpbafca"])' in calls[0][0]
     assert "updated_at" not in calls[0][0]
     assert "updates" not in calls[0][0]
 

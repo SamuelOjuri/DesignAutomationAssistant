@@ -1052,7 +1052,8 @@ def test_cleanup_failure_does_not_undo_successful_publication(db_session):
     )
 
 
-def test_cleanup_retries_after_reviewer_moves_item(db_session):
+def test_cleanup_retries_after_reviewer_moves_item(db_session, monkeypatch):
+    monkeypatch.setattr(settings, "auto_sync_active_group_ids", "reviewed")
     prior_identity = ProcessingIdentity(
         "c" * 64,
         settings.design_processing_pipeline_version,
@@ -1074,7 +1075,7 @@ def test_cleanup_retries_after_reviewer_moves_item(db_session):
     )
 
     assert (deleted, failed) == (3, 0)
-    assert len([event for event in gateway.events if event[0] == "gate"]) == gate_count
+    assert len([event for event in gateway.events if event[0] == "gate"]) == gate_count + 3
     assert all(
         db_session.get(DesignProcessingArtifact, artifact.id).status == "deleted"
         for artifact in prior

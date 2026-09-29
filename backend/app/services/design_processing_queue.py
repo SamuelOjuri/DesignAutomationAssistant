@@ -14,6 +14,7 @@ from ..models import (
     DesignProcessingJob,
 )
 from .design_processing_inputs import DesignProcessingTargetSnapshot
+from .design_processing_policy import design_scope_exclusion
 from .design_processing_state import (
     cancel_job,
     cancel_superseded_execution,
@@ -302,10 +303,11 @@ def queue_design_processing_snapshot(
         board_id=expected_board_id,
         item_id=snapshot.item_id,
     ).one_or_none()
-    if (
-        snapshot.board_id != str(expected_board_id)
-        or snapshot.group_id != str(expected_group_id)
-    ):
+    exclusion = design_scope_exclusion(
+        snapshot, expected_board_id=expected_board_id,
+        landing_group_id=expected_group_id, registered=stored_item is not None,
+    )
+    if exclusion is not None:
         if stored_item is None:
             return DesignProcessingQueueResult(
                 item=None,
@@ -331,7 +333,7 @@ def queue_design_processing_snapshot(
             cancel_job(
                 stored_item,
                 active_job,
-                reason="item is no longer in the design-processing Landing Zone",
+                reason=exclusion,
                 now=now,
                 item_state="ineligible",
             )

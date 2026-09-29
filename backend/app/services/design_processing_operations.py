@@ -20,6 +20,7 @@ from ..models import (
 )
 from .auto_sync import get_monday_ingestion_access_token, utc_now
 from .design_processing_locks import lock_design_processing_item_and_job
+from .design_processing_policy import design_scope_exclusion
 from .design_processing_observability import (
     collect_design_processing_metrics,
     log_design_processing_event,
@@ -97,6 +98,7 @@ def retry_failed_design_processing_job(
     mode: DesignProcessingMode,
     allowlist_item_ids: tuple[str, ...] | list[str] = (),
     now: Optional[datetime] = None,
+    gateway: Optional[DesignProcessingReadGateway] = None,
 ) -> FailedJobRetryResult:
     retry_at = now or utc_now()
     item, job = lock_design_processing_item_and_job(db, job_id)
@@ -104,6 +106,23 @@ def retry_failed_design_processing_job(
         raise ValueError(f"design-processing job {job_id} was not found")
     if item is None:
         raise ValueError(f"design-processing item for job {job_id} was not found")
+
+    snapshot = (gateway or _gateway()).fetch_target(item.item_id)
+    exclusion = design_scope_exclusion(
+        snapshot, expected_board_id=str(settings.design_processing_board_id),
+        landing_group_id=str(settings.design_processing_landing_group_id), registered=True,
+    )
+    if exclusion is not None:
+        queue_design_processing_snapshot(
+            db, snapshot, trigger_type="operator_retry", mode="enabled",
+            pipeline_version=settings.design_processing_pipeline_version,
+            expected_board_id=str(settings.design_processing_board_id),
+            expected_group_id=str(settings.design_processing_landing_group_id), now=retry_at,
+        )
+        db.commit()
+        return FailedJobRetryResult(
+            job_id=str(job.id), item_id=job.item_id, outcome="excluded", status=job.status,
+        )
 
     active = db.query(DesignProcessingJob).filter(
         DesignProcessingJob.board_id == job.board_id,

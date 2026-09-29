@@ -23,6 +23,7 @@ from .design_processing_artifacts import (
 )
 from .design_processing_locks import lock_design_processing_item_and_job
 from .design_processing_observability import log_design_processing_event
+from .design_processing_policy import design_scope_exclusion
 from .design_processing_pipeline import (
     AssetDownloader,
     ExecutionPolicy,
@@ -588,7 +589,10 @@ def _cancel_or_replace_mismatched_job(
         cancel_job(
             item,
             job,
-            reason="current Monday item is no longer eligible for design processing",
+            reason=design_scope_exclusion(
+                refreshed.snapshot, expected_board_id=str(settings.design_processing_board_id),
+                landing_group_id=str(settings.design_processing_landing_group_id), registered=True,
+            ) or "ineligible",
             now=now,
             item_state="ineligible",
         )
@@ -787,7 +791,10 @@ def execute_claimed_analysis_job(
                 cancel_job(
                     item,
                     job,
-                    reason="item is outside the design-processing Landing Zone",
+                    reason=design_scope_exclusion(
+                        refreshed.snapshot, expected_board_id=str(settings.design_processing_board_id),
+                        landing_group_id=str(settings.design_processing_landing_group_id), registered=True,
+                    ) or "ineligible",
                     now=execution_now,
                     item_state="ineligible",
                 )
@@ -941,6 +948,22 @@ def execute_claimed_analysis_job(
             )
     except Exception as exc:
         db.rollback()
+        # An external call can fail at the same time that the item is completed.
+        # Prefer cancellation to scheduling another attempt when that is known.
+        try:
+            current = gateway.fetch_target(str(job.item_id))
+            exclusion = design_scope_exclusion(
+                current, expected_board_id=str(settings.design_processing_board_id),
+                landing_group_id=str(settings.design_processing_landing_group_id), registered=True,
+            )
+            if exclusion is not None:
+                return _cancel_or_replace_mismatched_job(
+                    db, job_id, worker_id=worker_id, gateway=gateway,
+                    mode=mode, execution_policy=execution_policy, now=utc_now(),
+                )
+        except Exception:
+            db.rollback()
+            logger.warning("Could not check current eligibility after job %s failed", job_id)
         logger.exception("Design-processing job %s failed", job_id)
         return _record_execution_failure_safely(
             db,

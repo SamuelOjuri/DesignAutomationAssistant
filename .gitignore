@@ -31,6 +31,7 @@ desktop.ini
 node_modules/
 /tmp/excel_deps/
 /tmp/monday-metadata-pytest-*/
+/tmp/pytest-design-groups-*/
 dist/
 build/
 

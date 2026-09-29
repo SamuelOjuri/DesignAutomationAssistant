@@ -430,6 +430,7 @@ def cancel_job(
 
     job.status = "cancelled"
     job.last_error = reason
+    job.next_retry_at = None
     job.superseded_by_revision = superseded_by_revision
     job.completed_at = now
     _clear_lease(job)

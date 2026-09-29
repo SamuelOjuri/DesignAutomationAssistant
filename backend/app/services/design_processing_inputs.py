@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import PurePath
 from typing import Any, Callable, Mapping, Optional, Protocol, Sequence
+from ..config import settings
 
 
 EMAIL_COLUMN_ID = "file_mkpbm883"
+SCALAR_COLUMN_IDS = frozenset({"date_mkpb23av", "hour_mkpbb3j1", "dropdown_mkpbafca"})
 SUPPORTED_EMAIL_EXTENSIONS = frozenset({".eml", ".msg"})
 
 
@@ -45,6 +47,9 @@ class DesignProcessingTargetSnapshot:
     name: str
     email_assets: tuple[DesignEmailAsset, ...]
     input_revision: Optional[str]
+    # Missing entries are unreadable, not empty. Raw values retain malformed data
+    # so active-group publication can conservatively preserve it.
+    scalar_column_values: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def missing_name(self) -> bool:
@@ -112,6 +117,7 @@ def download_design_email_assets(
     downloader: Optional[
         Callable[[dict[str, Any], str], DownloadedAssetLike]
     ] = None,
+    check_current: Optional[Callable[[], object]] = None,
 ) -> tuple[DownloadedDesignEmailAsset, ...]:
     if downloader is None:
         from .storage_ingest import download_asset_to_temp
@@ -122,6 +128,8 @@ def download_design_email_assets(
     downloaded_temp_paths: list[str] = []
     try:
         for asset in sorted(assets, key=lambda value: (int(value.asset_id), value.filename)):
+            if check_current is not None:
+                check_current()
             asset_payload: dict[str, Any] = {
                 "id": asset.asset_id,
                 "name": asset.filename,
@@ -135,6 +143,8 @@ def download_design_email_assets(
             }
             downloaded = downloader(asset_payload, access_token)
             downloaded_temp_paths.append(downloaded.temp_path)
+            if check_current is not None:
+                check_current()
             if downloaded.size_bytes != asset.size:
                 raise DesignProcessingInputError(
                     f"Email asset {asset.asset_id} downloaded size does not match metadata"
@@ -180,6 +190,14 @@ def parse_design_processing_target(
     if name_value is not None and not isinstance(name_value, str):
         raise DesignProcessingInputError("item.name must be a string or null")
 
+    # Completion/archival must stop work even when Email assets were removed or
+    # their metadata has become unreadable. No extraction input is needed then.
+    if item_state != "active" or group_id == str(settings.auto_sync_completed_group_id):
+        return DesignProcessingTargetSnapshot(
+            board_id=board_id, item_id=item_id, group_id=group_id,
+            item_state=item_state, name=name_value or "", email_assets=(), input_revision=None,
+        )
+
     membership = _parse_email_membership(item)
     assets_by_id = _index_asset_metadata(item)
     email_assets: list[DesignEmailAsset] = []
@@ -222,6 +240,13 @@ def parse_design_processing_target(
         name=name_value or "",
         email_assets=ordered_assets,
         input_revision=input_revision,
+        scalar_column_values={
+            column["id"]: column["value"]
+            for column in item.get("column_values", [])
+            if isinstance(column, Mapping)
+            and column.get("id") in SCALAR_COLUMN_IDS
+            and "value" in column
+        },
     )
 
 

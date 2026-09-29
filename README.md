@@ -318,3 +318,54 @@ canonical JSON after the `design_processing_event=` prefix. The `metrics`
 command returns queue and item-state counts, readiness age/checks, attempt
 percentiles, lease health, supersessions, analyzed-not-published count,
 publication latency, artifact cleanup state, and webhook child outcomes.
+
+### Continuing design processing in active groups
+
+New design-processing items are admitted in Landing Zone. Once registered, they
+can finish analysis and publication in `AUTO_SYNC_ACTIVE_GROUP_IDS`, independently
+of the auto-sync enable switches. A group move alone does not change the email
+revision or repeat completed extraction. Items created directly in an active group
+without a design-processing record are not automatically admitted.
+
+`AUTO_SYNC_COMPLETED_GROUP_ID` takes precedence over the eligible groups. Moving
+there marks the item ineligible and cancels outstanding design work with reason
+`completed_folder`. Archived/deleted items and other boards/groups are also
+excluded. Retry, reconciliation, final publication and old-file cleanup all check
+current eligibility. Existing files are retained on completion. These are the
+design worker's rules; document ingestion and retention keep their separate policy.
+
+In active groups, Date Received, Hour Received and Zip Code are filled only when
+their current Monday value is demonstrably empty. Existing, missing-from-response
+or malformed values are omitted from the mutation. Midnight is a populated time.
+The values are read again immediately before a write, including retry attempts;
+reads and writes are not an atomic conditional update. Landing Zone retains its
+existing scalar-write behaviour. AI Data remains email-derived, with Monday
+values taking precedence in the assistant.
+
+Production extraction runs in a spawned child process. The parent checks current
+job/source eligibility every five seconds while waiting and terminates that
+process on cancellation; matching, artifact storage and publication also have
+checkpoints. Allow for the extra extraction-process memory in the worker service.
+Cancellation takes effect when detected; an external request already accepted
+cannot be recalled. Read failures stop further work rather than bypassing gates.
+
+Broad design reconciliation now also checks previously registered unfinished
+items outside Landing Zone, including old cancelled active items. Its activation
+timestamp bounds new admission, not recovery of existing records. `--limit`
+covers the combined candidates, ordered by recorded item update time (or creation
+time for new items); use a single non-overlapping scheduler. Completed items can
+be revisited for eligibility without resuming processing while still completed.
+Moving them back to an eligible group permits normal reconciliation again.
+
+Deploy matching API, design-worker and reconciliation code together. No migration
+or output-version bump is required. Previously rendered artifacts can be reused
+when both email revision and pipeline version match. For a known cancelled item,
+preview recovery, then enqueue it using the production configuration:
+
+```powershell
+python -m backend.app.services.design_processing_operations reconcile-item --item-id 3244851930 --dry-run
+python -m backend.app.services.design_processing_operations reconcile-item --item-id 3244851930
+```
+
+Run the design-processing regression tests, including
+`backend/tests/test_design_processing_active_groups.py`, before deployment.

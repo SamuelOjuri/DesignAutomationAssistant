@@ -210,12 +210,14 @@ def test_operator_failed_job_retry_is_idempotent(db_session):
         job.id,
         mode="shadow",
         now=now + timedelta(seconds=1),
+        gateway=SnapshotGateway(_snapshot()),
     )
     second = retry_failed_design_processing_job(
         db_session,
         job.id,
         mode="shadow",
         now=now + timedelta(seconds=2),
+        gateway=SnapshotGateway(_snapshot()),
     )
 
     persisted = db_session.get(DesignProcessingJob, job.id)
@@ -258,6 +260,7 @@ def test_operator_refuses_disallowed_publication_retry(db_session):
             db_session,
             job.id,
             mode="shadow",
+            gateway=SnapshotGateway(_snapshot()),
         )
 
     assert db_session.get(DesignProcessingJob, job.id).status == "failed"
@@ -266,6 +269,9 @@ def test_operator_refuses_disallowed_publication_retry(db_session):
 class CleanupGateway:
     def __init__(self):
         self.deleted = []
+
+    def fetch_target(self, item_id):
+        return _snapshot(item_id)
 
     def delete_design_file(self, board_id, item_id, column_id, asset_id):
         self.deleted.append((board_id, item_id, column_id, asset_id))

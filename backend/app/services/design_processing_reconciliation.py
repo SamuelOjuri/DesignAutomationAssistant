@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import SessionLocal
+from ..models import DesignProcessingItem
 from ..monday_client import MondayGroupItem, list_items_in_groups
 from .auto_sync import get_monday_ingestion_access_token, utc_now
 from .design_processing_observability import log_design_processing_event
@@ -150,8 +151,34 @@ def reconcile_landing_zone_once(
             board_id=board_id,
             group_id=group_id,
             activation_timestamp=_as_aware_utc(boundary),
-            limit=limit,
+            limit=None,
         )
+        # New admission is still Landing-only and activation-bounded. Previously
+        # admitted unfinished items must also be checked after moving to an
+        # active group (or Completed Folder), including older cancelled jobs.
+        tracked = db.query(DesignProcessingItem).filter(
+            DesignProcessingItem.board_id == board_id,
+            DesignProcessingItem.state != "ready_for_review",
+        ).all()
+        tracked_by_id = {item.item_id: item for item in tracked}
+        candidates_by_id = {candidate.item_id: candidate for candidate in candidates}
+        for item in tracked:
+            candidates_by_id.setdefault(item.item_id, MondayGroupItem(item.item_id, None))
+
+        def last_visit(candidate):
+            stored = tracked_by_id.get(candidate.item_id)
+            timestamp = stored.updated_at if stored is not None else _parse_created_at(
+                candidate.created_at, item_id=candidate.item_id,
+            )
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            return timestamp
+
+        candidates = sorted(candidates_by_id.values(), key=last_visit)
+        if limit is not None:
+            candidates = candidates[:limit]
+        selected = {candidate.item_id for candidate in candidates}
+        prefiltered_results = [result for result in prefiltered_results if result.item_id not in selected]
 
     results = list(prefiltered_results)
     queued = 0
@@ -176,6 +203,8 @@ def reconcile_landing_zone_once(
                     allowlist_item_ids=settings.design_processing_allowlist_item_ids,
                     now=reconciliation_now,
                 )
+                if queue_result.item is not None:
+                    queue_result.item.updated_at = reconciliation_now
                 db.flush()
                 job_id = (
                     str(queue_result.job.id)
@@ -253,7 +282,7 @@ def reconcile_landing_zone_once(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Reconcile Landing Zone items with design-processing jobs"
+        description="Reconcile Landing Zone admission and previously registered unfinished items"
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--item-id", default=None)
