@@ -391,6 +391,21 @@ def _sql_values(values: tuple[str, ...]) -> str:
     return ", ".join(f"'{value}'" for value in values)
 
 
+class DesignProcessingReconciliationCheck(Base):
+    """Lookup observations, independent of processing and retention state."""
+
+    __tablename__ = "design_processing_reconciliation_checks"
+
+    board_id = Column(String, primary_key=True)
+    item_id = Column(String, primary_key=True)
+    last_attempted_at = Column(DateTime(timezone=True), nullable=False)
+    last_checked_at = Column(DateTime(timezone=True), nullable=True)
+    last_outcome = Column(String, nullable=False)
+    last_reason = Column(String, nullable=False)
+    last_group_id = Column(String, nullable=True)
+    next_check_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class DesignProcessingItem(Base):
     __tablename__ = "design_processing_items"
     __table_args__ = (

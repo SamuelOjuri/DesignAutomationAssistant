@@ -284,11 +284,12 @@ On a new execution identity, upload or adopt the replacements first. Only after 
 
 - `services/design_processing_queue.py`: state upsert and job coalescing.  
 - `services/design_processing_worker.py`: claim, lease, heartbeat, retry loop.  
+- `services/design_processing_execution.py`: interruptible extraction subprocess, pending-result recovery when a child exits during an eligibility check, and child exit diagnostics. Check current eligibility again before accepting any received result; preserve cancellation when completion races with result delivery.
 - `services/design_processing_pipeline.py`: staged orchestration.  
 - `services/design_processing_artifacts.py`: durable artifact storage, publication adoption, and cleanup.  
 - `services/legacy_enquiry/`: framework-independent legacy extraction and matching code.  
 - `services/match_report.py`: report DTO and PDF rendering.  
-- `services/design_processing_reconciliation.py`: activation-bounded Landing Zone admission and recovery of registered unfinished items across groups. Completed Folder candidates are excluded and cancelled.
+- `services/design_processing_reconciliation.py`: activation-bounded Landing Zone admission and recovery of registered unfinished items across groups. Completed Folder candidates are excluded and cancelled. Durable `design_processing_reconciliation_checks` observations distinguish unavailable lookups from API errors; unavailable and excluded candidates have delayed broad rechecks, while item-scoped commands bypass delays. Missing lookups do not change processing history or retention dates.
 - `scripts/verify_legacy_enquiry_manifest.py`: offline legacy hash verification and fixture-generation prerequisite.  
 - monday\_client.py: queries, mutations, and multipart uploads.  
 - monday\_webhooks.py: dual-queue dispatch only.

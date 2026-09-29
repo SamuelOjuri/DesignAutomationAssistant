@@ -66,6 +66,13 @@ class MondayReadContractError(TransientMondayAPIError):
     pass
 
 
+class MondayItemUnavailable(HTTPException):
+    """A valid item lookup returned no visible item; this does not prove deletion."""
+
+    def __init__(self):
+        super().__init__(status_code=404, detail="monday item not found")
+
+
 class MondayWriteContractError(ValueError):
     pass
 
@@ -1063,7 +1070,7 @@ PROJECT_CREATED_DATE_COLUMN_ID = "date9__1"
 
 DESIGN_PROCESSING_INTAKE_QUERY = """
 query ($itemIds: [ID!]) {
-    items(ids: $itemIds) {
+    items(ids: $itemIds, exclude_nonactive: false) {
         id
         state
         name
@@ -1463,7 +1470,7 @@ def _extract_single_read_item(
     if not isinstance(items, list):
         raise MondayReadContractError(detail=f"monday {context} response is incomplete")
     if not items:
-        raise HTTPException(status_code=404, detail="monday item not found")
+        raise MondayItemUnavailable()
     if len(items) != 1 or not isinstance(items[0], dict):
         raise MondayReadContractError(detail=f"monday {context} item is malformed")
     return items[0]

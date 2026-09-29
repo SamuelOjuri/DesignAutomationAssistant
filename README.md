@@ -349,16 +349,32 @@ checkpoints. Allow for the extra extraction-process memory in the worker service
 Cancellation takes effect when detected; an external request already accepted
 cannot be recalled. Read failures stop further work rather than bypassing gates.
 
+If extraction finishes during an eligibility check, the parent drains its pending
+result before deciding whether the child exited without a result, then checks
+eligibility again before accepting it. Child-process failure messages include the
+PID, natural exit code, POSIX signal name where available, and elapsed seconds.
+These details precede the error text so they survive the job's `last_error` length
+limit. An exit code of zero with no result still means the result protocol failed;
+a missing exit code means the child had not finished exiting within the bounded
+diagnostic wait. A `SIGKILL` alone does not establish an out-of-memory kill; check
+Render's resource metrics/events to distinguish causes.
+
+The shared Supabase client normalizes the SDK-derived `/storage/v1/` endpoint
+before storage initialization. This addresses the trailing-slash warning without
+changing dependency versions, credentials, bucket names, or stored objects.
+
 Broad design reconciliation now also checks previously registered unfinished
 items outside Landing Zone, including old cancelled active items. Its activation
 timestamp bounds new admission, not recovery of existing records. `--limit`
-covers the combined candidates, ordered by recorded item update time (or creation
-time for new items); use a single non-overlapping scheduler. Completed items can
+covers the combined due candidates, ordered by last reconciliation attempt (or
+recorded item update/creation time before their first check); use a single
+non-overlapping scheduler. Completed items can
 be revisited for eligibility without resuming processing while still completed.
 Moving them back to an eligible group permits normal reconciliation again.
 
-Deploy matching API, design-worker and reconciliation code together. No migration
-or output-version bump is required. Previously rendered artifacts can be reused
+Deploy matching API, design-worker and reconciliation code together. Apply
+migration `0016_design_reconciliation` for the check records described below.
+No output-version bump is required. Previously rendered artifacts can be reused
 when both email revision and pipeline version match. For a known cancelled item,
 preview recovery, then enqueue it using the production configuration:
 
@@ -369,3 +385,55 @@ python -m backend.app.services.design_processing_operations reconcile-item --ite
 
 Run the design-processing regression tests, including
 `backend/tests/test_design_processing_active_groups.py`, before deployment.
+
+### Unavailable items and delayed reconciliation
+
+Apply the additive migration before running the updated reconciler:
+
+```powershell
+python -m alembic -c backend/alembic.ini upgrade head
+```
+
+`design_processing_reconciliation_checks` stores one observation per board/item:
+the last attempt, last successful lookup, outcome, reason, last observed group,
+and next check time. Existing rows need no backfill: the first scan records their
+outcomes, and subsequent scans respect the delays.
+
+A valid empty Monday item response records `unavailable` with reason
+`item_unavailable_to_worker`. It schedules a recheck after
+`DESIGN_PROCESSING_UNAVAILABLE_RECHECK_SECONDS` (default 3600, one hour).
+The intake query explicitly includes inactive items. An empty response does not
+establish deletion or completion; existing processing history, files, and
+retention dates are preserved.
+
+Confirmed exclusions, including Completed Folder, are rechecked after
+`DESIGN_PROCESSING_EXCLUDED_RECHECK_SECONDS` (default 21600, six hours).
+Their precise policy reason and observed group ID are recorded. Both settings
+must be positive integers. Delays affect broad reconciliation only: an explicit
+`reconcile-item --item-id ...` or reconciliation `--item-id ...` reads immediately,
+including with `--dry-run`. Webhooks can still queue newly eligible work without
+waiting for the broad scan. Successful eligible reads clear the recheck delay.
+
+Unavailable items produce a warning and a separate `unavailable` count; items
+whose deadline has not arrived produce a `deferred` count without an item lookup
+or using a `--limit` slot. Authentication, throttling, network, malformed-response,
+and database failures remain errors. Failed attempts also advance reconciliation
+ordering so a small batch cannot repeatedly select the same failing records.
+Dry runs persist neither observations nor processing changes.
+
+The reconciliation cron prints a compact JSON summary with outcome/reason counts
+and exits nonzero for genuine errors. Item-specific runs include item details;
+the operations CLI retains its full structured result. Inspect stored observations
+in Supabase with:
+
+```sql
+SELECT item_id, last_outcome, last_reason, last_group_id,
+       last_attempted_at, last_checked_at, next_check_at
+FROM design_processing_reconciliation_checks
+WHERE board_id = '1882196103'
+ORDER BY last_attempted_at DESC;
+```
+
+These check records do not create a purge deadline. Extending retention cleanup
+to design artifacts and defining retention for unavailable items are separate
+changes; the existing ingestion purge still covers only its current data scope.
