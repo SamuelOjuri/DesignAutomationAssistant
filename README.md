@@ -319,13 +319,15 @@ command returns queue and item-state counts, readiness age/checks, attempt
 percentiles, lease health, supersessions, analyzed-not-published count,
 publication latency, artifact cleanup state, and webhook child outcomes.
 
-### Continuing design processing in active groups
+### Admitting and continuing design processing in active groups
 
-New design-processing items are admitted in Landing Zone. Once registered, they
-can finish analysis and publication in `AUTO_SYNC_ACTIVE_GROUP_IDS`, independently
-of the auto-sync enable switches. A group move alone does not change the email
-revision or repeat completed extraction. Items created directly in an active group
-without a design-processing record are not automatically admitted.
+New design-processing items can be admitted in Landing Zone or any group in
+`AUTO_SYNC_ACTIVE_GROUP_IDS`, independently of the auto-sync enable switches.
+Items created directly in an active group, or moved there before registration,
+can start analysis and publication without a prior Landing Zone record. Creation,
+move, name and source-email webhooks use the item's current group. A group move
+alone does not change the email revision or repeat completed extraction;
+duplicate events coalesce into the existing active job.
 
 `AUTO_SYNC_COMPLETED_GROUP_ID` takes precedence over the eligible groups. Moving
 there marks the item ineligible and cancels outstanding design work with reason
@@ -363,9 +365,15 @@ The shared Supabase client normalizes the SDK-derived `/storage/v1/` endpoint
 before storage initialization. This addresses the trailing-slash warning without
 changing dependency versions, credentials, bucket names, or stored objects.
 
-Broad design reconciliation now also checks previously registered unfinished
-items outside Landing Zone, including old cancelled active items. Its activation
-timestamp bounds new admission, not recovery of existing records. `--limit`
+Broad design reconciliation enumerates all pages in Landing Zone and configured
+active groups, deduplicates items that move during discovery, and also checks
+previously registered unfinished items outside those groups, including old
+cancelled items. `DESIGN_PROCESSING_ACTIVATION_TIMESTAMP` bounds new admission
+by the item's Monday creation time (at or after the timestamp), not recovery of
+existing records. Item-scoped operator commands and live webhooks retain their
+existing behaviour without that broad-scan cutoff. Completed Folder is never
+included in new-item discovery, even if also configured as an active group.
+`--limit`
 covers the combined due candidates, ordered by last reconciliation attempt (or
 recorded item update/creation time before their first check); use a single
 non-overlapping scheduler. Completed items can
@@ -382,6 +390,13 @@ preview recovery, then enqueue it using the production configuration:
 python -m backend.app.services.design_processing_operations reconcile-item --item-id 3244851930 --dry-run
 python -m backend.app.services.design_processing_operations reconcile-item --item-id 3244851930
 ```
+
+The active-group admission change needs no additional migration or output-version
+bump. After deployment, the next broad reconciliation can register previously
+unseen active items created at or after the activation timestamp, including items
+like `3249971235` and `3249996676`. Use item-scoped reconciliation for an intentional
+older-item backfill. Existing name/email readiness and publication-mode rules still
+apply; discovery and queueing do not mean extraction or upload has finished.
 
 Run the design-processing regression tests, including
 `backend/tests/test_design_processing_active_groups.py`, before deployment.
@@ -413,6 +428,11 @@ must be positive integers. Delays affect broad reconciliation only: an explicit
 `reconcile-item --item-id ...` or reconciliation `--item-id ...` reads immediately,
 including with `--dry-run`. Webhooks can still queue newly eligible work without
 waiting for the broad scan. Successful eligible reads clear the recheck delay.
+The obsolete `not_registered_in_landing_zone` exclusion no longer delays a
+candidate rediscovered within the broad admission boundary. Reconciliation checks
+its live eligibility immediately; other exclusion and unavailable delays remain
+in effect. This does not admit old or undiscovered items merely because they have
+a check record.
 
 Unavailable items produce a warning and a separate `unavailable` count; items
 whose deadline has not arrived produce a `deferred` count without an item lookup

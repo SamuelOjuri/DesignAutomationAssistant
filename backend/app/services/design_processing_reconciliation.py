@@ -20,7 +20,7 @@ from ..monday_client import MondayGroupItem, MondayItemUnavailable, list_items_i
 from .auto_sync import get_monday_ingestion_access_token, utc_now
 from .design_processing_observability import log_design_processing_event
 from .design_processing_queue import queue_design_processing_snapshot
-from .design_processing_policy import design_scope_exclusion
+from .design_processing_policy import design_scope_exclusion, eligible_design_group_ids
 from .design_processing_target import (
     DesignProcessingReadGateway,
     MondayDesignProcessingReadGateway,
@@ -113,29 +113,33 @@ def _broad_reconciliation_candidates(
     board_id: str,
     group_id: str,
     activation_timestamp: datetime,
-    limit: Optional[int],
 ) -> tuple[list[MondayGroupItem], list[DesignProcessingReconciliationItemResult]]:
+    group_ids = sorted(eligible_design_group_ids(landing_group_id=group_id))
     items_by_group = list_items_in_groups(
         token,
         board_id,
-        [group_id],
+        group_ids,
     )
     candidates: list[MondayGroupItem] = []
     skipped: list[DesignProcessingReconciliationItemResult] = []
-    for summary in items_by_group.get(group_id, []):
-        created_at = _parse_created_at(summary.created_at, item_id=summary.item_id)
-        if created_at < activation_timestamp:
-            skipped.append(
-                DesignProcessingReconciliationItemResult(
-                    item_id=summary.item_id,
-                    action="skipped",
-                    reason="before_activation_timestamp",
+    seen: set[str] = set()
+    for eligible_group_id in group_ids:
+        for summary in items_by_group.get(eligible_group_id, []):
+            # An item can move between groups while their pages are fetched.
+            if summary.item_id in seen:
+                continue
+            seen.add(summary.item_id)
+            created_at = _parse_created_at(summary.created_at, item_id=summary.item_id)
+            if created_at < activation_timestamp:
+                skipped.append(
+                    DesignProcessingReconciliationItemResult(
+                        item_id=summary.item_id,
+                        action="skipped",
+                        reason="before_activation_timestamp",
+                    )
                 )
-            )
-            continue
-        candidates.append(summary)
-        if limit is not None and len(candidates) >= limit:
-            break
+                continue
+            candidates.append(summary)
     return candidates, skipped
 
 
@@ -185,11 +189,10 @@ def reconcile_landing_zone_once(
             board_id=board_id,
             group_id=group_id,
             activation_timestamp=_as_aware_utc(boundary),
-            limit=None,
         )
-        # New admission is still Landing-only and activation-bounded. Previously
-        # admitted unfinished items must also be checked after moving to an
-        # active group (or Completed Folder), including older cancelled jobs.
+        # New admission in Landing Zone and active groups is activation-bounded.
+        # Previously admitted unfinished items are also checked outside those
+        # groups, including older cancelled jobs and moves to Completed Folder.
         tracked = db.query(DesignProcessingItem).filter(
             DesignProcessingItem.board_id == board_id,
         ).all()
@@ -208,7 +211,7 @@ def reconcile_landing_zone_once(
             ):
                 candidates_by_id.setdefault(item.item_id, MondayGroupItem(item.item_id, None))
         # An unavailable lookup is not registration. Unregistered items must
-        # still pass activation-bounded Landing admission (or an explicit
+        # still pass activation-bounded eligible-group admission (or an explicit
         # item-scoped command), even if an earlier lookup left a check record.
 
         def last_visit(candidate):
@@ -224,9 +227,17 @@ def reconcile_landing_zone_once(
         due_candidates = []
         for candidate in candidates_by_id.values():
             check = checks.get(candidate.item_id)
+            # The old registration requirement no longer excludes active items.
+            # Recheck rediscovered candidates now, while preserving all other
+            # delays and the activation boundary for unregistered items.
+            obsolete_admission_exclusion = (
+                check is not None
+                and check.last_outcome == "excluded"
+                and check.last_reason == "not_registered_in_landing_zone"
+            )
             if check is not None and check.next_check_at is not None and (
                 _stored_utc(check.next_check_at) > reconciliation_now
-            ):
+            ) and not obsolete_admission_exclusion:
                 deferred_results.append(DesignProcessingReconciliationItemResult(
                     item_id=candidate.item_id, action="deferred", reason=check.last_reason,
                     group_id=check.last_group_id, next_check_at=_stored_utc(check.next_check_at),
@@ -308,7 +319,6 @@ def reconcile_landing_zone_once(
                 if outcome == "excluded":
                     reason = design_scope_exclusion(
                         snapshot, expected_board_id=board_id, landing_group_id=group_id,
-                        registered=queue_result.item is not None,
                     ) or reason
                     next_check_at = checked_at + timedelta(
                         seconds=settings.design_processing_excluded_recheck_seconds,
@@ -403,7 +413,7 @@ def reconcile_landing_zone_once(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Reconcile Landing Zone admission and previously registered unfinished items"
+        description="Reconcile Landing Zone and active-group admission and unfinished items"
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--item-id", default=None)

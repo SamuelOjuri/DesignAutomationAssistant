@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.app.config import settings
-from backend.app.models import DesignProcessingArtifact, DesignProcessingJob
+from backend.app.models import DesignProcessingArtifact, DesignProcessingItem, DesignProcessingJob
 from backend.app.services.auto_sync import utc_now
 from backend.app.services import design_processing_reconciliation as reconciliation
 from backend.app.services.design_processing_execution import _run_in_process, run_interruptible_analysis
@@ -161,11 +161,37 @@ def test_active_moves_preserve_running_execution_and_completed_wins(db_session, 
     assert item.latest_desired_input_revision is None
 
 
-def test_unregistered_active_item_is_not_automatically_admitted(db_session):
+@pytest.mark.parametrize("group_id", [ACTIVE, "active_b"])
+def test_unregistered_active_item_is_admitted_and_duplicate_events_coalesce(db_session, group_id):
     identity = ProcessingIdentity("a" * 64, settings.design_processing_pipeline_version)
-    result = _queue(db_session, replace(publication._publication_snapshot(identity), group_id=ACTIVE))
+    snapshot = replace(publication._publication_snapshot(identity), group_id=group_id)
+    result = _queue(db_session, snapshot)
+    assert result.outcome == "queued"
+    assert result.item.state == "scheduled"
+    assert result.item.latest_desired_input_revision == identity.input_revision
+    assert result.job.status == "scheduled"
+    duplicate = _queue(db_session, snapshot)
+    assert duplicate.outcome == "coalesced"
+    assert duplicate.job.id == result.job.id
+    assert db_session.query(DesignProcessingItem).count() == 1
+    assert db_session.query(DesignProcessingJob).count() == 1
+
+
+@pytest.mark.parametrize("overrides", [
+    {"group_id": "completed"},
+    {"group_id": "unconfigured"},
+    {"group_id": ACTIVE, "item_state": "archived"},
+    {"group_id": ACTIVE, "item_state": "deleted"},
+    {"group_id": ACTIVE, "board_id": "another-board"},
+])
+def test_first_admission_still_excludes_completed_inactive_and_unmanaged_items(db_session, monkeypatch, overrides):
+    monkeypatch.setattr(settings, "auto_sync_active_group_ids", "topics,completed")
+    identity = ProcessingIdentity("a" * 64, settings.design_processing_pipeline_version)
+    snapshot = replace(publication._publication_snapshot(identity), **overrides)
+    result = _queue(db_session, snapshot)
     assert result.outcome == "excluded"
     assert result.item is None
+    assert db_session.query(DesignProcessingItem).count() == 0
     assert db_session.query(DesignProcessingJob).count() == 0
 
 

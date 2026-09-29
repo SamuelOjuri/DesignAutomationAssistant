@@ -305,7 +305,7 @@ def queue_design_processing_snapshot(
     ).one_or_none()
     exclusion = design_scope_exclusion(
         snapshot, expected_board_id=expected_board_id,
-        landing_group_id=expected_group_id, registered=stored_item is not None,
+        landing_group_id=expected_group_id,
     )
     if exclusion is not None:
         if stored_item is None:

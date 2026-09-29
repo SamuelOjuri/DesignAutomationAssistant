@@ -434,6 +434,31 @@ def test_webhook_fetches_once_and_dispatches_consumers_independently(
     assert db_session.query(DesignProcessingJob).count() == 1
 
 
+@pytest.mark.parametrize("event_type", ["create_item", "move_pulse_into_group"])
+def test_webhook_registers_new_item_already_in_active_group(
+    webhook_client, db_session, monkeypatch, event_type,
+):
+    monkeypatch.setattr(settings, "auto_sync_enabled", False)
+    monkeypatch.setattr(monday_webhooks, "get_monday_ingestion_access_token", lambda: "service-token")
+    monkeypatch.setattr(
+        monday_webhooks, "fetch_current_source_revision_inputs",
+        lambda token, item_id: _monday_item(item_id=item_id, group_id="topics"),
+    )
+    for attempt in range(2):
+        # Payload still says Landing Zone; eligibility follows the live item.
+        response = webhook_client.post(
+            "/api/monday/webhooks?token=shared-secret",
+            json=_webhook_payload(
+                trigger_uuid=f"active-admission-{attempt}", event_type=event_type, column_id="",
+            ),
+        )
+        assert response.status_code == 200
+    assert db_session.query(DesignProcessingItem).one().state == "scheduled"
+    assert db_session.query(DesignProcessingJob).count() == 1
+    dispatches = db_session.query(MondayWebhookDispatch).filter_by(consumer="design_processing").all()
+    assert {dispatch.outcome for dispatch in dispatches} == {"queued", "coalesced"}
+
+
 def test_webhook_retry_processes_only_failed_design_child(
     webhook_client,
     db_session,

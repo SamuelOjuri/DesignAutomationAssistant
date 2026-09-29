@@ -374,7 +374,7 @@ def _target_readiness(
 ) -> TargetReadiness:
     if design_scope_exclusion(
         snapshot, expected_board_id=expected_board_id,
-        landing_group_id=expected_group_id, registered=True,
+        landing_group_id=expected_group_id,
     ) is not None:
         return "ineligible"
     if snapshot.missing_name:

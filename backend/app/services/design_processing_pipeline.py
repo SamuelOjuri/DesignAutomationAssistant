@@ -841,7 +841,6 @@ def cleanup_delete_pending_artifacts(
             exclusion = design_scope_exclusion(
                 snapshot, expected_board_id=str(settings.design_processing_board_id),
                 landing_group_id=str(settings.design_processing_landing_group_id),
-                registered=True,
             )
             if exclusion is not None:
                 queue_design_processing_snapshot(

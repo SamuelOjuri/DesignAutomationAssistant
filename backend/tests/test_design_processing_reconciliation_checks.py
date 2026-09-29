@@ -70,6 +70,116 @@ def aware(value):
     return value.replace(tzinfo=NOW.tzinfo)
 
 
+def test_broad_scan_admits_unregistered_active_items_across_pages_and_groups(db_session, monkeypatch):
+    first_id, second_id, other_active_id = "3249971235", "3249996676", "3"
+    boundary = NOW - timedelta(days=1)
+    monkeypatch.setattr(settings, "auto_sync_active_group_ids", f" topics,active_b,topics,{LANDING},completed ")
+    monkeypatch.setattr(reconciliation, "list_items_in_groups", monday_client.list_items_in_groups)
+    requests = []
+
+    def summary(item_id, created_at):
+        return {"id": item_id, "created_at": created_at.isoformat()}
+
+    def request(token, query, variables, **kwargs):
+        requests.append(variables)
+        if "cursor" in variables:
+            assert variables["cursor"] == "active-page-2"
+            return {"data": {"next_items_page": {
+                "cursor": None, "items": [summary(second_id, NOW - timedelta(hours=2))],
+            }}}
+        assert variables["boardIds"] == [BOARD]
+        assert set(variables["groupIds"]) == {LANDING, "topics", "active_b"}
+        assert len(variables["groupIds"]) == 3
+        return {"data": {"boards": [{"groups": [
+            {"id": LANDING, "items_page": {"cursor": None, "items": [
+                # The same item appears twice after moving during pagination.
+                summary(first_id, boundary),
+            ]}},
+            {"id": "topics", "items_page": {"cursor": "active-page-2", "items": [
+                summary(first_id, boundary),
+                summary("old", boundary - timedelta(seconds=1)),
+            ]}},
+            {"id": "active_b", "items_page": {"cursor": None, "items": [
+                summary(other_active_id, NOW - timedelta(hours=1)),
+            ]}},
+        ]}]}}
+
+    monkeypatch.setattr(monday_client, "monday_graphql_request", request)
+    gateway = fixtures.FakeReconciliationGateway({
+        first_id: fixtures._snapshot(item_id=first_id, group_id="topics"),
+        second_id: fixtures._snapshot(item_id=second_id, group_id="topics"),
+        other_active_id: fixtures._snapshot(item_id=other_active_id, group_id="active_b"),
+    })
+    preview = run(db_session, gateway, dry_run=True)
+    assert (preview.scanned, preview.queued, preview.skipped, preview.errors) == (3, 3, 1, 0)
+    assert preview.items[0].reason == "before_activation_timestamp"
+    assert all(item.action == "would_queued" for item in preview.items[1:])
+    db_session.commit()
+    assert db_session.query(DesignProcessingItem).count() == 0
+    assert db_session.query(DesignProcessingJob).count() == 0
+    assert db_session.query(DesignProcessingReconciliationCheck).count() == 0
+
+    assert run(db_session, gateway).queued == 3
+    assert run(db_session, gateway, now=NOW + timedelta(minutes=15)).coalesced == 3
+    assert db_session.query(DesignProcessingItem).count() == 3
+    assert db_session.query(DesignProcessingJob).count() == 3
+    assert all(job.status == "scheduled" for job in db_session.query(DesignProcessingJob))
+    assert check(db_session, first_id).last_group_id == "topics"
+    assert gateway.calls[:3] == [first_id, second_id, other_active_id]
+    assert sorted(gateway.calls) == sorted([first_id, second_id, other_active_id] * 3)
+    assert len(requests) == 6
+
+
+@pytest.mark.parametrize("outcome, reason, old_item, expected_action", [
+    ("excluded", "not_registered_in_landing_zone", False, "queued"),
+    ("excluded", "not_registered_in_landing_zone", True, "skipped"),
+    ("excluded", "completed_folder", False, "deferred"),
+    ("unavailable", "item_unavailable_to_worker", False, "deferred"),
+])
+def test_only_obsolete_admission_delays_are_bypassed_for_rediscovered_items(
+    db_session, monkeypatch, outcome, reason, old_item, expected_action,
+):
+    item_id = "3249971235"
+    db_session.add(DesignProcessingReconciliationCheck(
+        board_id=BOARD, item_id=item_id, last_attempted_at=NOW - timedelta(minutes=5),
+        last_outcome=outcome, last_reason=reason, next_check_at=NOW + timedelta(hours=6),
+    ))
+    db_session.commit()
+    created_at = NOW - (timedelta(days=40) if old_item else timedelta(hours=2))
+    monkeypatch.setattr(reconciliation, "list_items_in_groups", lambda *args: {
+        "topics": [monday_client.MondayGroupItem(item_id, created_at.isoformat())],
+    })
+    gateway = fixtures.FakeReconciliationGateway({
+        item_id: fixtures._snapshot(item_id=item_id, group_id="topics"),
+    })
+    result = run(db_session, gateway)
+    assert result.items[0].action == expected_action
+    if expected_action == "queued":
+        assert gateway.calls == [item_id]
+        assert check(db_session, item_id).next_check_at is None
+        assert db_session.query(DesignProcessingJob).count() == 1
+    else:
+        assert gateway.calls == []
+        assert aware(check(db_session, item_id).next_check_at) == NOW + timedelta(hours=6)
+        assert db_session.query(DesignProcessingItem).count() == 0
+        assert db_session.query(DesignProcessingJob).count() == 0
+
+
+def test_new_active_candidate_moved_to_completed_is_excluded_before_admission(db_session, monkeypatch):
+    item_id = "3249971235"
+    monkeypatch.setattr(reconciliation, "list_items_in_groups", lambda *args: {
+        "topics": [monday_client.MondayGroupItem(item_id, NOW.isoformat())],
+    })
+    gateway = fixtures.FakeReconciliationGateway({
+        item_id: fixtures._snapshot(item_id=item_id, group_id="completed"),
+    })
+    result = run(db_session, gateway)
+    assert result.excluded == 1 and result.errors == 0
+    assert result.items[0].reason == "completed_folder"
+    assert db_session.query(DesignProcessingItem).count() == 0
+    assert db_session.query(DesignProcessingJob).count() == 0
+
+
 def test_six_unavailable_items_are_recorded_and_deferred_without_changing_history(db_session, monkeypatch):
     for index, item_id in enumerate(IDS):
         item = seed(db_session, item_id, state="failed" if index == 0 else "ineligible")
@@ -139,7 +249,7 @@ def test_available_again_resumes_and_clears_delay(db_session, forced):
     assert aware(recorded.last_checked_at) == args["now"]
 
 
-def test_unregistered_missing_item_cannot_bypass_admission(db_session, monkeypatch):
+def test_unregistered_missing_item_observation_does_not_bypass_broad_activation_boundary(db_session, monkeypatch):
     class MissingGateway:
         def fetch_target(self, item_id):
             raise monday_client.MondayItemUnavailable()
@@ -147,17 +257,19 @@ def test_unregistered_missing_item_cannot_bypass_admission(db_session, monkeypat
     assert run(db_session, MissingGateway(), item_id=IDS[0]).unavailable == 1
     assert db_session.query(DesignProcessingItem).count() == 0
     monkeypatch.setattr(reconciliation, "list_items_in_groups", lambda *args, **kwargs: {
-        LANDING: [monday_client.MondayGroupItem(IDS[0], (NOW - timedelta(days=40)).isoformat())],
+        "topics": [monday_client.MondayGroupItem(IDS[0], (NOW - timedelta(days=40)).isoformat())],
     })
     gateway = fixtures.FakeReconciliationGateway({IDS[0]: fixtures._snapshot(item_id=IDS[0], group_id="topics")})
     result = run(db_session, gateway, now=NOW + timedelta(hours=1))
     assert result.scanned == 0 and gateway.calls == []
     assert result.items[0].reason == "before_activation_timestamp"
-    result = run(db_session, gateway, now=NOW + timedelta(hours=1), item_id=IDS[0])
-    assert result.excluded == 1
-    assert result.items[0].reason == "not_registered_in_landing_zone"
     assert db_session.query(DesignProcessingItem).count() == 0
     assert db_session.query(DesignProcessingJob).count() == 0
+    # Explicit operator admission can still bypass the broad-scan boundary.
+    result = run(db_session, gateway, now=NOW + timedelta(hours=1), item_id=IDS[0])
+    assert result.queued == 1
+    assert db_session.query(DesignProcessingItem).count() == 1
+    assert db_session.query(DesignProcessingJob).count() == 1
 
 
 def test_completed_items_are_deferred_then_recover_if_moved_back(db_session):

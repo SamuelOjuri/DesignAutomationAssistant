@@ -591,7 +591,7 @@ def _cancel_or_replace_mismatched_job(
             job,
             reason=design_scope_exclusion(
                 refreshed.snapshot, expected_board_id=str(settings.design_processing_board_id),
-                landing_group_id=str(settings.design_processing_landing_group_id), registered=True,
+                landing_group_id=str(settings.design_processing_landing_group_id),
             ) or "ineligible",
             now=now,
             item_state="ineligible",
@@ -793,7 +793,7 @@ def execute_claimed_analysis_job(
                     job,
                     reason=design_scope_exclusion(
                         refreshed.snapshot, expected_board_id=str(settings.design_processing_board_id),
-                        landing_group_id=str(settings.design_processing_landing_group_id), registered=True,
+                        landing_group_id=str(settings.design_processing_landing_group_id),
                     ) or "ineligible",
                     now=execution_now,
                     item_state="ineligible",
@@ -954,7 +954,7 @@ def execute_claimed_analysis_job(
             current = gateway.fetch_target(str(job.item_id))
             exclusion = design_scope_exclusion(
                 current, expected_board_id=str(settings.design_processing_board_id),
-                landing_group_id=str(settings.design_processing_landing_group_id), registered=True,
+                landing_group_id=str(settings.design_processing_landing_group_id),
             )
             if exclusion is not None:
                 return _cancel_or_replace_mismatched_job(
