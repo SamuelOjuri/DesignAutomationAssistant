@@ -93,17 +93,28 @@ task update or sync timestamps. The first sweep therefore treats every candidate
 as unchecked. No production migration or scheduler is installed by these changes.
 
 Active reconciliation enumerates all pages in the configured active groups, then
-inspects only `--limit` items, choosing never-attempted and then least-recently
-attempted items. `--page-size` controls only Monday's API page size (1-500, default
+inspects at most `--limit` due items, choosing never-attempted and then least-recently
+attempted items. Settled, successfully checked tasks are deferred for one hour by
+default. Local failures, missing snapshots, restoration, unfinished work, and group
+moves visible in discovery bypass this active freshness interval. `--page-size`
+controls only Monday's API page size (1-500, default
 500), not the inspection limit. Listing IDs still covers the entire candidate set
 on every invocation; API cursors are not persisted. Duplicate IDs across groups
 are inspected once per batch.
 
-Progress is persisted per board/item and scope. Successful checks and their queue
-decisions commit together. Failed checks advance rotation but retain any previous
+Progress is persisted per board/item and scope. Successful active reads also record
+the item's lifecycle observation, so a following lifecycle sweep can inspect other
+tasks instead of fetching the same item again. Source responses already contain the
+typed CRM values: complete responses update current metadata and linked dependencies
+in the same transaction, without scheduling another read. Pending or leased metadata
+refreshes and generations changed during the source read are preserved for the worker.
+Incomplete CRM responses retain last good values and use the existing retry queue.
+Successful checks and their queue decisions commit together. Failed checks advance
+rotation but retain any previous
 successful-check time, so one failing or inaccessible item cannot monopolize the
 batch. Completed-transition checks have separate progress and rotate past tasks
-that remain active. They also inspect tracked tasks whose ingestion is incomplete and
+that remain active, deferring successful lifecycle observations for one hour by default.
+They also inspect tracked tasks whose ingestion is incomplete and
 revisit confirmed archived/deleted tasks to detect restoration. Monday item `state`
 takes precedence over its retained group: archival disables automatic work, cancels
 jobs, and preserves stored data without starting a purge deadline. Restoration to an
@@ -118,6 +129,26 @@ Run from the repository root every five minutes (scheduler expression
 ```text
 python -m backend.app.services.auto_sync_reconciliation --limit 100 --page-size 500 --completed-transitions --completed-limit 100
 ```
+
+Both inspection sweeps have finite defaults even when flags are omitted: active
+uses `AUTO_SYNC_BACKFILL_BATCH_SIZE` (10); lifecycle uses
+`AUTO_SYNC_RECONCILIATION_COMPLETED_BATCH_SIZE` (100, positive). Configure
+`AUTO_SYNC_RECONCILIATION_ACTIVE_INTERVAL_SECONDS` and
+`AUTO_SYNC_RECONCILIATION_LIFECYCLE_INTERVAL_SECONDS` (both default 3600, minimum 0)
+to tune freshness; 0 disables the corresponding deferral. `--force` bypasses
+deferral while retaining the batch limits. Explicit `--completed-item-id` or
+`--completed-external-task-key` checks always inspect the target immediately.
+`--dry-run` respects stored freshness unless forced and saves no new observations;
+its reads cannot suppress a later lifecycle read. No new migration is needed.
+
+Webhooks and requested document/CRM refreshes retain their existing cadence. A
+missed webhook on a settled item can now wait for the freshness interval plus fair
+rotation and execution time. With 100 unchanged active items, complete CRM responses,
+and no pending metadata work, the hourly source cadence represents 2,400 item reads
+per day shared across source, CRM, and lifecycle checks, versus the analysis's
+86,400-request five-minute scenario. Discovery pages, account lookups, other items,
+workers, retries, and other integrations are additional; this is a workload estimate,
+not a production measurement or account-wide quota guarantee.
 
 Configure `DATABASE_URL`, `MONDAY_INGESTION_ACCESS_TOKEN`, `AUTO_SYNC_ENABLED`,
 `AUTO_SYNC_BOARD_ID`, and `AUTO_SYNC_ACTIVE_GROUP_IDS` for the scheduler. Keep the

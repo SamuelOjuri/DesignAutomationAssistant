@@ -23,7 +23,7 @@ from .auto_sync_policy import (
 )
 from .db_retry import AutoSyncConcurrencyError
 from .storage_ingest import compute_snapshot_version
-from .monday_metadata import enqueue_metadata, cancel_metadata
+from .monday_metadata import enqueue_metadata, cancel_metadata, refresh_metadata_from_item
 from .monday_metadata_fields import only_crm_fields_changed
 
 logger = logging.getLogger(__name__)
@@ -444,6 +444,7 @@ def apply_auto_sync_policy_for_item(
     schedule_immediately: bool = False,
     fallback_account_id: Optional[str] = None,
     refresh_reason: Optional[str] = None,
+    metadata_read_generation: Optional[int] = None,
 ) -> QueueResult:
     now = now or utc_now()
     policy = policy or policy_from_settings()
@@ -523,8 +524,12 @@ def apply_auto_sync_policy_for_item(
     if task is not None and task.board_id == str(settings.auto_sync_board_id) and decision.lifecycle_state != "active":
         cancel_metadata(db, task)
     if decision.should_queue_sync and task is not None and task.board_id == str(settings.auto_sync_board_id):
-        enqueue_metadata(db, task, immediate=schedule_immediately, only_if_idle=trigger_type in {"reconciliation", "backfill"})
-        metadata_queued = True
+        reused = metadata_read_generation is not None and refresh_metadata_from_item(
+            db, task, item, observed_generation=metadata_read_generation,
+        )
+        if not reused:
+            enqueue_metadata(db, task, immediate=schedule_immediately, only_if_idle=trigger_type in {"reconciliation", "backfill"})
+            metadata_queued = True
         if not active_jobs and task.sync_status != "failed":
             previous = db.query(TaskSnapshot).filter_by(
                 external_task_key=task.external_task_key, ingestion_status="complete",
@@ -532,9 +537,9 @@ def apply_auto_sync_policy_for_item(
             if previous is not None and only_crm_fields_changed(previous.task_context_json, item):
                 log_refresh_decision(
                     external_task_key=task.external_task_key, trigger_type=trigger_type,
-                    action="metadata_queued", reason="crm_fields_changed",
+                    action="metadata_queued" if metadata_queued else "metadata_refreshed", reason="crm_fields_changed",
                 )
-                return QueueResult(task=task, job=None, decision=decision, metadata_queued=True)
+                return QueueResult(task=task, job=None, decision=decision, metadata_queued=metadata_queued)
 
     if (
         decision.should_queue_sync

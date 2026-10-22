@@ -551,7 +551,8 @@ def test_active_reconciliation_rotates_across_all_groups_and_restarts(db_session
     assert result.candidate_count == 6
     assert result.never_checked == 0
     assert result.max_check_age_seconds is not None
-    assert db_session.query(AutoSyncReconciliationCheck).count() == 6
+    assert db_session.query(AutoSyncReconciliationCheck).filter_by(scope="active").count() == 6
+    assert db_session.query(AutoSyncReconciliationCheck).filter_by(scope="completed_transition").count() == 6
 
 
 @pytest.fixture()

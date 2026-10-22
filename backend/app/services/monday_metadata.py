@@ -85,6 +85,67 @@ def cancel_metadata(db: Session, task: Task) -> None:
         record.last_error = None
 
 
+def _store_fields(db: Session, record: TaskMondayMetadata, fields: list[dict[str, Any]]) -> None:
+    now = utc_now()
+    revision = metadata_revision(fields)
+    if record.revision != revision:
+        record.fields_json = fields
+        record.revision = revision
+        record.changed_at = now
+    record.checked_at = now
+    db.query(MondayMetadataLink).filter_by(external_task_key=record.external_task_key).delete(synchronize_session=False)
+    for field in fields:
+        for linked in field["linkedItems"]:
+            db.add(MondayMetadataLink(
+                external_task_key=record.external_task_key, column_id=field["columnId"],
+                linked_board_id=linked["boardId"], linked_item_id=linked["id"],
+            ))
+
+
+def refresh_metadata_from_item(
+    db: Session, task: Task, item: dict[str, Any], *, observed_generation: int,
+) -> bool:
+    """Reuse a complete source read only if no refresh intervened or is pending.
+
+    Capture observed_generation before the remote read. Never complete or replace
+    a webhook/worker request using an earlier reconciliation response. The caller
+    commits metadata and its reconciliation decision in the same transaction.
+    """
+    if (str(item.get("id")) != task.item_id
+            or str((item.get("board") or {}).get("id")) != task.board_id
+            or item.get("state") != "active"):
+        return False
+    try:
+        fields = normalize_fields(item)
+    except MetadataReadError:
+        return False
+    # Match orchestrator/worker lock order: Task, then metadata. Recheck local
+    # eligibility after locking, since an archive event can race the source read.
+    db.flush([task])
+    query = db.query(Task).filter_by(external_task_key=task.external_task_key).populate_existing()
+    if db.get_bind().dialect.name == "postgresql":
+        query = query.with_for_update()
+    current_task = query.one()
+    if current_task.auto_sync_state != "active" or not current_task.auto_sync_enabled:
+        return False
+    insert = pg_insert if db.get_bind().dialect.name == "postgresql" else sqlite_insert
+    db.execute(insert(TaskMondayMetadata).values(
+        external_task_key=task.external_task_key, requested_generation=0, completed_generation=0, attempt_count=0,
+    ).on_conflict_do_nothing(index_elements=["external_task_key"]))
+    record = _locked_record(db, task.external_task_key).one()
+    if (record.requested_generation != observed_generation
+            or record.requested_generation != record.completed_generation
+            or record.lease_token is not None):
+        return False
+    _store_fields(db, record, fields)
+    record.requested_generation += 1
+    record.completed_generation = record.requested_generation
+    record.scheduled_for = None
+    record.attempt_count = 0
+    record.last_error = None
+    return True
+
+
 def claim_refresh(db: Session, *, account_id: str) -> tuple[str, str, int] | None:
     now = utc_now()
     policy = policy_from_settings()
@@ -160,21 +221,8 @@ def execute_refresh(db: Session, claim: tuple[str, str, int], access_token: str)
             apply_auto_sync_policy_for_item(
                 db, item, trigger_type="metadata", fallback_account_id=current_task.account_id,
             )
-        now = utc_now()
         if fields is not None:
-            revision = metadata_revision(fields)
-            if record.revision != revision:
-                record.fields_json = fields
-                record.revision = revision
-                record.changed_at = now
-            record.checked_at = now
-            db.query(MondayMetadataLink).filter_by(external_task_key=task_key).delete(synchronize_session=False)
-            for field in fields:
-                for linked in field["linkedItems"]:
-                    db.add(MondayMetadataLink(
-                        external_task_key=task_key, column_id=field["columnId"],
-                        linked_board_id=linked["boardId"], linked_item_id=linked["id"],
-                    ))
+            _store_fields(db, record, fields)
         record.completed_generation = generation
         record.scheduled_for = None
         record.last_error = None

@@ -300,7 +300,11 @@ def test_reconciliation_checks_metadata_even_when_parent_timestamp_is_unchanged(
     monkeypatch.setattr(auto_sync_reconciliation, "fetch_current_source_revision_inputs", lambda *args, **kw: deepcopy(case.item))
     result = auto_sync_reconciliation.reconcile_active_items_once(case.db, dry_run=False, access_token="token", policy=policy_from_settings())
     assert result.queued == 0
-    assert case.db.get(TaskMondayMetadata, case.task.external_task_key).requested_generation == 1
+    record = case.db.get(TaskMondayMetadata, case.task.external_task_key)
+    assert record.requested_generation == record.completed_generation == 1
+    assert record.fields_json == normalize_fields(case.item)
+    assert case.db.query(MondayMetadataLink).count() == 2
+    assert metadata.run_metadata_once(case.db, "token") == []
 
 
 def test_metadata_query_contains_no_assets_and_uses_typed_columns(monkeypatch):

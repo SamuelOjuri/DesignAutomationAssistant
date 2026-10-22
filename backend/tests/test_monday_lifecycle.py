@@ -158,7 +158,8 @@ def test_restore_reactivates_and_refreshes_without_forcing_documents(case, monke
         assert active_check(case, monkeypatch).errors == 0
     assert case.task.auto_sync_state == "active" and case.task.auto_sync_enabled
     assert record.requested_generation > original_generation
-    assert metadata.run_metadata_once(case.db, "token") == ["completed"]
+    expected = [] if source == "active_reconciliation" else ["completed"]
+    assert metadata.run_metadata_once(case.db, "token") == expected
     assert record.requested_generation == record.completed_generation
     assert all(not job.force_requested for job in case.db.query(AutoSyncJob).all())
     assert case.db.query(TaskSnapshot).count() == case.db.query(TaskFile).count() == 1

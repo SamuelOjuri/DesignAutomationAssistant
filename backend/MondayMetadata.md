@@ -30,7 +30,12 @@ retain the last successful values with a visible refresh error.
    every five seconds and makes no Monday requests when no eligible work is due.
 4. Continue the existing scheduled reconciliation command across **all active items**:
    `python -m backend.app.services.auto_sync_reconciliation --limit 100 --page-size 500 --completed-transitions --completed-limit 100`.
-   Its fair rotation also queues metadata for otherwise fresh tasks. Running a complete
+   Its fair rotation reuses complete source responses to refresh metadata, including
+   otherwise fresh tasks. Settled items and successful lifecycle observations have
+   configurable one-hour freshness intervals; webhooks still request normal debounced
+   refreshes. See the README for interval settings, bounded defaults, and `--force`.
+   Pending/leased worker requests are preserved, and incomplete CRM responses queue
+   a retry without replacing last good values. Running a complete
    sweep after deployment initializes the metadata and reverse dependency index for
    existing active projects. Linked events received before this initial sweep are
    recovered by subsequent reconciliation. Allow sweep coverage to complete before
@@ -57,7 +62,8 @@ retain the last successful values with a visible refresh error.
 Mirror changes are handled through their source board; no assumption is made that a
 mirror update emits a holding-board webhook or changes its `updated_at` timestamp.
 The dependency index selects only active holding tasks and is replaced atomically when
-links change. Every refresh rereads current Monday values. Leases, generation checks,
+links change. Every refresh uses current Monday values, including a successful source
+read shared by reconciliation. Leases, generation checks,
 and retry backoff prevent an expired or superseded worker from publishing old data.
 
 The ordinary auto-sync dispatcher skips document ingestion when it observes changed CRM
@@ -68,7 +74,7 @@ itself never downloads attachments, extracts documents, or calls an LLM.
 
 Completed/excluded tasks stop automatic metadata work. Existing metadata remains visible
 as last checked; it is deleted with project data on retention expiry. Reopening an active
-task schedules a fresh read. Archived/unreadable linked items that cannot be resolved
+task refreshes from its source response or schedules a fresh read. Archived/unreadable linked items that cannot be resolved
 produce a retry and preserve last known values rather than an invented empty value.
 
 ## Holding-item archival and restoration

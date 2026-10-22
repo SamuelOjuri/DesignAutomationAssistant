@@ -12,8 +12,9 @@ from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..db import SessionLocal
-from ..models import AutoSyncJob, AutoSyncReconciliationCheck, Task
+from ..models import AutoSyncJob, AutoSyncReconciliationCheck, Task, TaskMondayMetadata, TaskSnapshot
 from ..monday_client import (
     fetch_current_account_id,
     fetch_current_source_revision_inputs,
@@ -30,7 +31,7 @@ from .auto_sync import (
     utc_now,
 )
 from .auto_sync_policy import ACTIVE_JOB_STATUSES, INACTIVE_SOURCE_STATES, AutoSyncPolicy, policy_from_settings
-from .monday_metadata import enqueue_metadata
+from .monday_metadata import enqueue_metadata, refresh_metadata_from_item
 
 logger = logging.getLogger(__name__)
 
@@ -78,17 +79,49 @@ def _fair_item_ids_by_group(
     *,
     board_id: str,
     scope: str = "active",
+    account_id: Optional[str] = None,
+    force: bool = False,
 ) -> list[tuple[str, str]]:
     checks = {
-        check.item_id: _as_aware_utc(check.last_attempted_at)
+        check.item_id: check
         for check in db.query(AutoSyncReconciliationCheck).populate_existing().filter_by(board_id=board_id, scope=scope).all()
     }
     candidates: dict[str, str] = {}
     for group_id in group_ids:
         for item_id in item_ids_by_group.get(group_id, []):
             candidates.setdefault(str(item_id), group_id)
+    cutoff = utc_now() - timedelta(seconds=settings.auto_sync_reconciliation_active_interval_seconds)
+    if not force:
+        # Check local health in one query, rather than a snapshot/job lookup for
+        # every fresh candidate. Repairs and visible group moves remain due.
+        busy = db.query(AutoSyncJob.id).filter(
+            AutoSyncJob.board_id == Task.board_id, AutoSyncJob.item_id == Task.item_id,
+            AutoSyncJob.status.in_(ACTIVE_JOB_STATUSES),
+        ).exists()
+        fresh_groups = dict(db.query(Task.item_id, Task.source_group_id).join(
+            AutoSyncReconciliationCheck, and_(
+                AutoSyncReconciliationCheck.board_id == Task.board_id,
+                AutoSyncReconciliationCheck.item_id == Task.item_id,
+                AutoSyncReconciliationCheck.scope == scope,
+            ),
+        ).join(TaskSnapshot, and_(
+            TaskSnapshot.external_task_key == Task.external_task_key,
+            TaskSnapshot.snapshot_version == Task.last_indexed_source_revision,
+            TaskSnapshot.ingestion_status == "complete",
+        )).filter(
+            Task.board_id == board_id, Task.account_id == account_id,
+            Task.auto_sync_state == "active", Task.auto_sync_enabled.is_(True), Task.sync_status == "completed",
+            AutoSyncReconciliationCheck.last_outcome == "fresh",
+            AutoSyncReconciliationCheck.last_checked_at > cutoff, ~busy,
+        ).distinct().all())
+        candidates = {
+            item_id: group_id for item_id, group_id in candidates.items()
+            if fresh_groups.get(item_id) != group_id
+        }
     oldest = datetime.min.replace(tzinfo=timezone.utc)
-    ordered = sorted(candidates, key=lambda item_id: (checks.get(item_id, oldest), item_id))
+    ordered = sorted(candidates, key=lambda item_id: (
+        _as_aware_utc(checks[item_id].last_attempted_at) if item_id in checks else oldest, item_id,
+    ))
     return [(candidates[item_id], item_id) for item_id in ordered[:limit]]
 
 
@@ -231,6 +264,7 @@ def reconcile_active_items_once(
     limit: Optional[int] = None,
     page_size: int = 500,
     stuck_after_seconds: int = 3600,
+    force: bool = False,
 ) -> ReconciliationResult:
     policy = policy or policy_from_settings()
     batch_limit = policy.backfill_batch_size if limit is None else limit
@@ -241,7 +275,7 @@ def reconcile_active_items_once(
     group_ids = _ordered_active_group_ids(policy)
     item_ids_by_group = list_item_ids_in_groups(token, policy.board_id, group_ids, limit=page_size)
     selected_items = _fair_item_ids_by_group(
-        db, item_ids_by_group, group_ids, batch_limit, board_id=policy.board_id,
+        db, item_ids_by_group, group_ids, batch_limit, board_id=policy.board_id, account_id=account_id, force=force,
     )
 
     item_results: list[ReconciliationItemResult] = []
@@ -251,9 +285,14 @@ def reconcile_active_items_once(
 
     for expected_group_id, item_id in selected_items:
         try:
+            # Fence metadata publication against events arriving during the read.
+            metadata_record = db.get(TaskMondayMetadata, f"{account_id}:{policy.board_id}:{item_id}", populate_existing=True)
+            metadata_generation = metadata_record.requested_generation if metadata_record is not None else 0
             item = fetch_current_source_revision_inputs(token, item_id, account_id=account_id)
             desired_source_revision = compute_desired_source_revision(item)
             metadata = item_metadata_from_monday_item(item, fallback_account_id=account_id)
+            if metadata.item_id != item_id or metadata.board_id != policy.board_id or metadata.account_id != account_id:
+                raise ValueError("Monday returned an unexpected reconciliation item identity")
             decision = policy.classify_item(metadata.board_id, metadata.group_id, metadata.source_state)
             task = db.get(Task, metadata.external_task_key)
             reconciliation_reason = _active_reconciliation_reason(
@@ -312,6 +351,7 @@ def reconcile_active_items_once(
                     schedule_immediately=True,
                     fallback_account_id=account_id,
                     refresh_reason=reconciliation_reason,
+                    metadata_read_generation=metadata_generation,
                 )
                 db.flush()
                 job_id = str(queue_result.job.id) if queue_result.job is not None and queue_result.job.id else None
@@ -322,7 +362,10 @@ def reconcile_active_items_once(
                 job_id = None
                 action = reconciliation_reason
                 if decision.should_queue_sync and task is not None:
-                    enqueue_metadata(db, task, immediate=True, only_if_idle=True)
+                    if not refresh_metadata_from_item(db, task, item, observed_generation=metadata_generation):
+                        enqueue_metadata(db, task, immediate=True, only_if_idle=True)
+                    task.source_group_id = metadata.group_id
+                    task.source_group_title = metadata.group_title
                 elif decision.should_track_task and decision.lifecycle_state != "active":
                     apply_auto_sync_policy_for_item(
                         db, item, trigger_type="reconciliation", policy=policy,
@@ -334,6 +377,15 @@ def reconcile_active_items_once(
                 db, board_id=policy.board_id, item_id=item_id, scope="active",
                 outcome=action, reason=reconciliation_reason,
             )
+            # This response also established lifecycle. Persist that observation
+            # atomically so the lifecycle phase (including a separate run) can
+            # spend its bounded batch on other tasks instead of reading it again.
+            if decision.lifecycle_state is not None and db.get(Task, metadata.external_task_key) is not None:
+                _record_check(
+                    db, board_id=policy.board_id, item_id=item_id, scope="completed_transition",
+                    outcome="still_active" if decision.lifecycle_state == "active" else decision.lifecycle_state,
+                    reason=decision.reason,
+                )
             db.commit()
             queued += int(job_id is not None)
             skipped += int(job_id is None)
@@ -403,9 +455,11 @@ def detect_completed_transitions_once(
     limit: Optional[int] = None,
     item_id: Optional[str] = None,
     external_task_key: Optional[str] = None,
+    force: bool = False,
 ) -> ReconciliationResult:
     policy = policy or policy_from_settings()
-    if limit is not None and limit < 1:
+    batch_limit = settings.auto_sync_reconciliation_completed_batch_size if limit is None else limit
+    if batch_limit < 1:
         raise ValueError("Completed-transition limit must be positive")
     token = access_token or get_monday_ingestion_access_token()
     query = (
@@ -428,9 +482,14 @@ def detect_completed_transitions_once(
     if external_task_key is not None:
         query = query.filter(Task.external_task_key == external_task_key)
     candidate_ids = {row.item_id for row in query.with_entities(Task.item_id).all()}
-    if limit is not None:
-        query = query.limit(limit)
-    tasks = query.all()
+    if not force and item_id is None and external_task_key is None:
+        cutoff = utc_now() - timedelta(seconds=settings.auto_sync_reconciliation_lifecycle_interval_seconds)
+        query = query.filter(or_(
+            AutoSyncReconciliationCheck.last_checked_at.is_(None),
+            AutoSyncReconciliationCheck.last_checked_at <= cutoff,
+            AutoSyncReconciliationCheck.last_outcome.in_(("error", "source_unavailable")),
+        ))
+    tasks = query.limit(batch_limit).all()
 
     item_results: list[ReconciliationItemResult] = []
     completed_retained = 0
@@ -474,6 +533,8 @@ def detect_completed_transitions_once(
                 continue
             item["account_id"] = task.account_id
             metadata = item_metadata_from_monday_item(item, fallback_account_id=task.account_id)
+            if metadata.item_id != task.item_id or metadata.board_id != task.board_id:
+                raise ValueError("Monday returned an unexpected reconciliation item identity")
             decision = policy.classify_item(metadata.board_id, metadata.group_id, metadata.source_state)
 
             if decision.lifecycle_state in INACTIVE_SOURCE_STATES:
@@ -602,6 +663,7 @@ def _run_from_new_session(args: argparse.Namespace) -> tuple[ReconciliationResul
                 limit=args.limit,
                 page_size=args.page_size,
                 stuck_after_seconds=args.stuck_after_seconds,
+                force=args.force,
             )
         completed_result = None
         if args.completed_transitions:
@@ -611,6 +673,7 @@ def _run_from_new_session(args: argparse.Namespace) -> tuple[ReconciliationResul
                 limit=args.completed_limit,
                 item_id=args.completed_item_id,
                 external_task_key=args.completed_external_task_key,
+                force=args.force,
             )
         return active_result, completed_result
     finally:
@@ -619,10 +682,11 @@ def _run_from_new_session(args: argparse.Namespace) -> tuple[ReconciliationResul
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Reconcile durable auto-sync jobs with monday current state")
-    parser.add_argument("--limit", type=int, default=None, help="Maximum active items to inspect")
+    parser.add_argument("--limit", type=int, default=None, help="Maximum active items to inspect (default: AUTO_SYNC_BACKFILL_BATCH_SIZE, 10)")
     parser.add_argument("--page-size", type=int, default=500, help="Monday API page size (1-500), independent of --limit")
     parser.add_argument("--skip-active", action="store_true", help="Skip active-group reconciliation")
     parser.add_argument("--dry-run", action="store_true", help="Inspect monday state without creating jobs")
+    parser.add_argument("--force", action="store_true", help="Inspect even recently checked items; batch limits still apply")
     parser.add_argument(
         "--stuck-after-seconds",
         type=int,
@@ -637,8 +701,8 @@ def main() -> int:
     parser.add_argument(
         "--completed-limit",
         type=int,
-        default=None,
-        help="Maximum indexed active tasks to inspect for completed transitions",
+        default=settings.auto_sync_reconciliation_completed_batch_size,
+        help="Maximum tracked tasks to inspect for lifecycle changes (default: AUTO_SYNC_RECONCILIATION_COMPLETED_BATCH_SIZE, 100)",
     )
     completed_target = parser.add_mutually_exclusive_group()
     completed_target.add_argument(
