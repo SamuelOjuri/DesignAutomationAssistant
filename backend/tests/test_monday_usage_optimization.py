@@ -112,6 +112,37 @@ def test_combined_reconciliation_shares_live_discovery_without_writing_in_dry_ru
     assert db_session.query(DesignProcessingReconciliationCheck).count() == 0
 
 
+def test_combined_reconciliation_defers_all_five_unavailable_sources(db_session, monkeypatch):
+    monkeypatch.setattr(settings, "auto_sync_board_id", fixtures.BOARD_ID)
+    monkeypatch.setattr(settings, "design_processing_mode", "off")
+    monkeypatch.setattr(settings, "auto_sync_reconciliation_unavailable_interval_seconds", 3600)
+    monkeypatch.setattr(auto_sync_reconciliation, "utc_now", lambda: fixtures.NOW)
+    monkeypatch.setattr(auto_sync_reconciliation, "fetch_current_account_id", lambda token: "acct")
+    monkeypatch.setattr(monday_reconciliation, "list_items_in_groups", lambda *args, **kwargs: {})
+    calls = []
+
+    def missing(token, item_id, **kwargs):
+        calls.append(item_id)
+        raise HTTPException(404, "monday item not found")
+
+    monkeypatch.setattr(auto_sync_reconciliation, "fetch_item_metadata", missing)
+    for item_id in ("1", "2", "3", "4", "5"):
+        db_session.add(Task(
+            external_task_key=f"acct:{fixtures.BOARD_ID}:{item_id}", account_id="acct", board_id=fixtures.BOARD_ID,
+            item_id=item_id, auto_sync_state="active", auto_sync_enabled=True, sync_status="completed",
+        ))
+    db_session.commit()
+    first = monday_reconciliation.reconcile_monday_once(db_session, dry_run=False, access_token="token")
+    assert first["completed"].scanned == first["completed"].source_unavailable == 5
+    monkeypatch.setattr(auto_sync_reconciliation, "utc_now", lambda: fixtures.NOW + timedelta(minutes=5))
+    second = monday_reconciliation.reconcile_monday_once(db_session, dry_run=False, access_token="token")
+    result = second["completed"]
+    assert result.scanned == result.source_unavailable == result.errors == 0
+    assert result.source_unavailable_deferred == result.never_checked == result.candidate_count == 5
+    assert calls == ["1", "2", "3", "4", "5"]
+    assert {task.auto_sync_state for task in db_session.query(Task)} == {"active"}
+
+
 @pytest.mark.parametrize("kwargs", [{"limit": 0}, {"design_limit": 0}, {"completed_limit": 0}, {"page_size": 501}])
 def test_combined_invalid_limits_do_not_call_monday(db_session, monkeypatch, kwargs):
     monkeypatch.setattr(monday_reconciliation, "get_monday_ingestion_access_token", lambda: pytest.fail("invalid limits"))

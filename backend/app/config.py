@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     auto_sync_reconciliation_completed_batch_size: int = Field(default=100, ge=1)
     auto_sync_reconciliation_active_interval_seconds: int = Field(default=3600, ge=0)
     auto_sync_reconciliation_lifecycle_interval_seconds: int = Field(default=3600, ge=0)
+    auto_sync_reconciliation_unavailable_interval_seconds: int = Field(default=3600, ge=1)
     auto_sync_worker_enabled: bool = False
     auto_sync_reconciliation_enabled: bool = False
     auto_sync_purge_enabled: bool = False

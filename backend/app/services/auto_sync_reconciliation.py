@@ -66,6 +66,7 @@ class ReconciliationResult:
     source_unavailable: int = 0
     archived: int = 0
     reactivated: int = 0
+    source_unavailable_deferred: int = 0
 
 
 def _ordered_active_group_ids(policy: AutoSyncPolicy) -> list[str]:
@@ -488,13 +489,38 @@ def detect_completed_transitions_once(
     if external_task_key is not None:
         query = query.filter(Task.external_task_key == external_task_key)
     candidate_ids = {row.item_id for row in query.with_entities(Task.item_id).all()}
+    source_unavailable_deferred = 0
     if not force and item_id is None and external_task_key is None:
-        cutoff = utc_now() - timedelta(seconds=settings.auto_sync_reconciliation_lifecycle_interval_seconds)
-        query = query.filter(or_(
-            AutoSyncReconciliationCheck.last_checked_at.is_(None),
-            AutoSyncReconciliationCheck.last_checked_at <= cutoff,
-            AutoSyncReconciliationCheck.last_outcome.in_(("error", "source_unavailable")),
-        ))
+        now = utc_now()
+        cutoff = now - timedelta(seconds=settings.auto_sync_reconciliation_lifecycle_interval_seconds)
+        unavailable_cutoff = now - timedelta(
+            seconds=settings.auto_sync_reconciliation_unavailable_interval_seconds,
+        )
+        source_unavailable_deferred = query.filter(
+            AutoSyncReconciliationCheck.last_outcome == "source_unavailable",
+            AutoSyncReconciliationCheck.last_attempted_at > unavailable_cutoff,
+        ).order_by(None).count()
+        query = query.filter(
+            or_(
+                AutoSyncReconciliationCheck.last_checked_at.is_(None),
+                AutoSyncReconciliationCheck.last_checked_at <= cutoff,
+                AutoSyncReconciliationCheck.last_outcome.in_(("error", "source_unavailable")),
+            ),
+            # Unavailable is an observation, not a successful lifecycle check.
+            # Its own retry clock must gate even never-successful items while
+            # genuine errors remain due. Apply this before the batch limit.
+            or_(
+                AutoSyncReconciliationCheck.last_outcome.is_(None),
+                AutoSyncReconciliationCheck.last_outcome != "source_unavailable",
+                AutoSyncReconciliationCheck.last_attempted_at <= unavailable_cutoff,
+            ),
+        )
+        if source_unavailable_deferred:
+            logger.info(
+                "Lifecycle reconciliation board=%s source_unavailable_deferred=%s retry_interval_seconds=%s dry_run=%s",
+                policy.board_id, source_unavailable_deferred,
+                settings.auto_sync_reconciliation_unavailable_interval_seconds, dry_run,
+            )
     tasks = query.limit(batch_limit).all()
 
     item_results: list[ReconciliationItemResult] = []
@@ -646,6 +672,7 @@ def detect_completed_transitions_once(
         completed_retained=completed_retained,
         errors=errors,
         source_unavailable=source_unavailable,
+        source_unavailable_deferred=source_unavailable_deferred,
         archived=archived,
         reactivated=reactivated,
         items=tuple(item_results),

@@ -212,7 +212,30 @@ are reported as `source_unavailable` warnings, not errors. The summary includes 
 not fail the CLI. They do not prove deletion: snapshots, stored files, task state,
 and retention dates remain unchanged. Non-dry runs save the attempted check but
 preserve the previous successful-check time, then retry through normal fair
-rotation. A visible item resumes normal group reconciliation automatically.
+rotation after `AUTO_SYNC_RECONCILIATION_UNAVAILABLE_INTERVAL_SECONDS` (default
+3600, positive integer). The delay uses the last unavailable attempt, including
+when the item has never had a successful check. Repeated unavailable results
+restart that delay. Deferred items consume no inspection slots and are counted
+as `source_unavailable_deferred`, separately from unavailable lookups actually
+performed in that run. Coverage still reports items with no successful check as
+`never_checked`; deferral does not manufacture a successful observation.
+
+This backoff applies to routine lifecycle sweeps in both the standalone and
+combined reconciliation commands. `--force` on either command, and the standalone
+`--completed-item-id` or `--completed-external-task-key` options bypass it; dry runs
+respect it unless explicitly bypassed and never advance the retry clock.
+Webhooks and active-group discovery remain immediate recovery paths. A visible
+item resumes normal group reconciliation automatically, and a successful
+lifecycle lookup returns to the ordinary lifecycle interval. Changing only
+`AUTO_SYNC_RECONCILIATION_LIFECYCLE_INTERVAL_SECONDS` does not change this
+unavailable-item delay. Deploy the updated reconciliation code and optionally
+set the new variable in its environment; the one-hour default needs no new
+database migration or backfill. Previously recorded unavailable attempts are
+honored immediately. With five persistently unavailable items, hourly retries
+represent about 120 item reads/day instead of 1,440 at five-minute intervals.
+Missed restoration can wait for the retry interval plus scheduler/fair rotation
+time; stored data and retention policy are preserved throughout.
+
 Authentication, rate-limit, other API errors, and progress-write failures remain
 errors. This handling does not change active-group reconciliation or ingestion.
 

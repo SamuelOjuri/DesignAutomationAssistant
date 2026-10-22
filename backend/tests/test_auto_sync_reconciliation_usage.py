@@ -20,6 +20,7 @@ from backend.tests.test_monday_metadata import case, refresh
 def source(case, monkeypatch):
     monkeypatch.setattr(settings, "auto_sync_reconciliation_active_interval_seconds", 3600)
     monkeypatch.setattr(settings, "auto_sync_reconciliation_lifecycle_interval_seconds", 3600)
+    monkeypatch.setattr(settings, "auto_sync_reconciliation_unavailable_interval_seconds", 3600)
     now = datetime(2026, 10, 22, 12, tzinfo=timezone.utc)
     monkeypatch.setattr(reconciliation, "utc_now", lambda: now)
     revision = compute_desired_source_revision(case.item)
@@ -244,17 +245,201 @@ def test_lifecycle_freshness_expires_and_targeted_and_forced_checks_bypass_it(ca
 
 
 @pytest.mark.parametrize("failure", [RuntimeError("failure"), HTTPException(404, "monday item not found")])
-def test_failed_lifecycle_checks_do_not_become_fresh(case, source, monkeypatch, failure):
+def test_failed_lifecycle_checks_preserve_success_history(case, source, monkeypatch, failure):
     active(case)
+    check_key = (case.task.board_id, case.task.item_id, "completed_transition")
+    last_success = case.db.get(AutoSyncReconciliationCheck, check_key).last_checked_at
 
     def fetch(*args, **kwargs):
         raise failure
 
     monkeypatch.setattr(reconciliation, "fetch_item_metadata", fetch)
     lifecycle(case, force=True)
+    assert case.db.get(AutoSyncReconciliationCheck, check_key, populate_existing=True).last_checked_at == last_success
     result = lifecycle(case)
-    assert result.scanned == 1
-    assert result.errors + result.source_unavailable == 1
+    if isinstance(failure, HTTPException):
+        assert result.scanned == 0 and result.source_unavailable_deferred == 1
+    else:
+        assert result.scanned == 1 and result.errors == 1
+
+
+@pytest.mark.parametrize("previous_success", [False, True])
+@pytest.mark.parametrize("interval", [1800, 3600])
+def test_unavailable_lifecycle_backoff_survives_restart_and_recovers_at_deadline(
+    case, source, monkeypatch, previous_success, interval,
+):
+    now, _ = source
+    if previous_success:
+        active(case)
+    attempted_at = now + timedelta(hours=2)
+    monkeypatch.setattr(settings, "auto_sync_reconciliation_unavailable_interval_seconds", interval)
+    monkeypatch.setattr(reconciliation, "utc_now", lambda: attempted_at)
+    calls = []
+    available = False
+
+    def fetch(*args, **kwargs):
+        calls.append("lifecycle")
+        if not available:
+            raise HTTPException(404, "monday item not found")
+        return deepcopy(case.item)
+
+    monkeypatch.setattr(reconciliation, "fetch_item_metadata", fetch)
+    assert lifecycle(case).source_unavailable == 1
+    key = (case.task.board_id, case.task.item_id, "completed_transition")
+    check = case.db.get(AutoSyncReconciliationCheck, key, populate_existing=True)
+    assert check.last_attempted_at == attempted_at.replace(tzinfo=None)
+    assert check.last_checked_at == (now.replace(tzinfo=None) if previous_success else None)
+
+    # A stale/missing successful timestamp must not bypass the attempt-based
+    # retry clock, including in a different process/session and at its boundary.
+    for seconds in (1, 900, interval - 1):
+        monkeypatch.setattr(reconciliation, "utc_now", lambda seconds=seconds: attempted_at + timedelta(seconds=seconds))
+        with Session(case.db.bind) as restarted:
+            result = reconciliation.detect_completed_transitions_once(restarted, access_token="token", dry_run=False)
+        assert result.scanned == result.errors == result.source_unavailable == 0
+        assert result.source_unavailable_deferred == result.candidate_count == 1
+        assert result.never_checked == int(not previous_success)
+    assert calls == ["lifecycle"]
+
+    available = True
+    monkeypatch.setattr(reconciliation, "utc_now", lambda: attempted_at + timedelta(seconds=interval))
+    result = lifecycle(case)
+    assert result.items[0].action == "still_active" and result.source_unavailable_deferred == 0
+    assert result.never_checked == 0 and result.errors == 0
+    assert len(calls) == 2
+    assert lifecycle(case).scanned == 0  # Recovered items use normal freshness.
+    check = case.db.get(AutoSyncReconciliationCheck, key, populate_existing=True)
+    assert check.last_checked_at == (attempted_at + timedelta(seconds=interval)).replace(tzinfo=None)
+
+
+@pytest.mark.parametrize("bypass", ["force", "item_id", "external_task_key"])
+def test_explicit_unavailable_checks_bypass_and_restart_retry_clock(case, source, monkeypatch, bypass):
+    now, _ = source
+    calls = []
+
+    def missing(*args, **kwargs):
+        calls.append("lifecycle")
+        raise HTTPException(404, "monday item not found")
+
+    monkeypatch.setattr(reconciliation, "fetch_item_metadata", missing)
+    assert lifecycle(case).source_unavailable == 1
+    monkeypatch.setattr(reconciliation, "utc_now", lambda: now + timedelta(minutes=15))
+    options = {
+        "force": {"force": True},
+        "item_id": {"item_id": case.task.item_id},
+        "external_task_key": {"external_task_key": case.task.external_task_key},
+    }[bypass]
+    result = lifecycle(case, **options)
+    assert result.source_unavailable == 1 and result.source_unavailable_deferred == 0
+    # At the original deadline, the explicitly renewed observation is still
+    # deferred. It becomes due one hour after that latest unavailable attempt.
+    monkeypatch.setattr(reconciliation, "utc_now", lambda: now + timedelta(hours=1))
+    assert lifecycle(case).source_unavailable_deferred == 1
+    assert len(calls) == 2
+    monkeypatch.setattr(reconciliation, "utc_now", lambda: now + timedelta(minutes=75))
+    assert lifecycle(case).source_unavailable == 1
+    assert len(calls) == 3
+
+
+def test_unavailable_dry_runs_do_not_start_extend_or_clear_backoff(case, source, monkeypatch):
+    now, _ = source
+    calls = []
+
+    def missing(*args, **kwargs):
+        calls.append("lifecycle")
+        raise HTTPException(404, "monday item not found")
+
+    monkeypatch.setattr(reconciliation, "fetch_item_metadata", missing)
+    preview = lambda **kwargs: reconciliation.detect_completed_transitions_once(
+        case.db, access_token="token", dry_run=True, **kwargs,
+    )
+    assert preview().source_unavailable == 1
+    assert case.db.query(AutoSyncReconciliationCheck).count() == 0
+    assert lifecycle(case).source_unavailable == 1
+    monkeypatch.setattr(reconciliation, "utc_now", lambda: now + timedelta(minutes=15))
+    assert preview().source_unavailable_deferred == 1
+    assert len(calls) == 2
+    assert preview(force=True).source_unavailable == 1
+    monkeypatch.setattr(reconciliation, "fetch_item_metadata", lambda *a, **kw: deepcopy(case.item))
+    assert preview(item_id=case.task.item_id).items[0].action == "still_active"
+    assert lifecycle(case).source_unavailable_deferred == 1
+    check = case.db.query(AutoSyncReconciliationCheck).populate_existing().one()
+    assert check.last_attempted_at == now.replace(tzinfo=None)
+    assert check.last_checked_at is None and check.last_outcome == "source_unavailable"
+    monkeypatch.setattr(reconciliation, "utc_now", lambda: now + timedelta(hours=1))
+    assert preview().scanned == 1
+    assert lifecycle(case).scanned == 1
+    assert lifecycle(case).scanned == 0
+
+
+def test_unavailable_deferrals_leave_limited_slots_for_other_due_items(case, source, monkeypatch):
+    now, _ = source
+    calls = []
+
+    def fetch(token, item_id, **kwargs):
+        calls.append(item_id)
+        if item_id == "123":
+            raise HTTPException(404, "monday item not found")
+        return {**deepcopy(case.item), "id": item_id}
+
+    monkeypatch.setattr(reconciliation, "fetch_item_metadata", fetch)
+    assert lifecycle(case).source_unavailable == 1
+    case.db.add_all([
+        Task(external_task_key="acct:1882196103:124", account_id="acct", board_id="1882196103", item_id="124",
+             auto_sync_enabled=True, auto_sync_state="active", sync_status="completed"),
+        AutoSyncReconciliationCheck(board_id="1882196103", item_id="124", scope="completed_transition",
+                                    last_attempted_at=now + timedelta(minutes=5), last_outcome="error", last_reason="failed"),
+    ])
+    case.db.commit()
+    monkeypatch.setattr(reconciliation, "utc_now", lambda: now + timedelta(minutes=15))
+    result = lifecycle(case, limit=1)
+    assert result.scanned == 1 and result.items[0].item_id == "124"
+    assert result.source_unavailable_deferred == 1
+    assert result.candidate_count == 2 and result.never_checked == 1
+    assert calls == ["123", "124"]
+
+
+@pytest.mark.parametrize("failure", [
+    HTTPException(401, "Unauthorized"), HTTPException(403, "Forbidden"),
+    HTTPException(404, "another endpoint missing"), HTTPException(429, "Rate limited"),
+    HTTPException(502, "Upstream error"), ValueError("malformed response"), TimeoutError("connection timed out"),
+])
+def test_real_errors_remain_due_after_an_unavailable_observation(case, source, monkeypatch, failure):
+    def missing(*args, **kwargs):
+        raise HTTPException(404, "monday item not found")
+
+    monkeypatch.setattr(reconciliation, "fetch_item_metadata", missing)
+    assert lifecycle(case).source_unavailable == 1
+
+    def fail(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(reconciliation, "fetch_item_metadata", fail)
+    assert lifecycle(case, force=True).errors == 1
+    result = lifecycle(case)
+    assert result.errors == result.scanned == 1
+    assert result.source_unavailable == result.source_unavailable_deferred == 0
+    check = case.db.query(AutoSyncReconciliationCheck).populate_existing().one()
+    assert check.last_outcome == "error" and check.last_checked_at is None
+
+
+@pytest.mark.parametrize("recovery", ["webhook", "discovery"])
+def test_unavailable_lifecycle_backoff_does_not_block_other_recovery_paths(case, source, monkeypatch, recovery):
+    def missing(*args, **kwargs):
+        raise HTTPException(404, "monday item not found")
+
+    monkeypatch.setattr(reconciliation, "fetch_item_metadata", missing)
+    assert lifecycle(case).source_unavailable == 1
+    if recovery == "webhook":
+        case.item["assets"] = [{"id": "new", "name": "drawing.pdf"}]
+        result = apply_auto_sync_policy_for_item(
+            case.db, case.item, trigger_type="webhook", desired_source_revision=compute_desired_source_revision(case.item),
+        )
+        case.db.commit()
+        assert result.job is not None and result.created_job
+    else:
+        assert active(case).items[0].action == "fresh"
+        assert lifecycle(case).source_unavailable_deferred == 0
 
 
 def test_dry_run_writes_no_metadata_or_progress(case, source):

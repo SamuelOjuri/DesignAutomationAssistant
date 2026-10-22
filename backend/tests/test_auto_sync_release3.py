@@ -45,6 +45,7 @@ def durable_sync_settings(monkeypatch):
     monkeypatch.setattr(settings, "auto_sync_board_id", "1882196103")
     monkeypatch.setattr(settings, "auto_sync_worker_enabled", True)
     monkeypatch.setattr(settings, "monday_ingestion_access_token", "service-token")
+    monkeypatch.setattr(settings, "auto_sync_reconciliation_unavailable_interval_seconds", 3600)
 
 
 class FakeBackgroundTasks:
@@ -176,6 +177,21 @@ def test_completed_transition_source_unavailable_preserves_data(
     decision = next(record for record in caplog.records if getattr(record, "event", None) == "auto_sync.refresh_decision")
     assert decision.refresh_action == decision.refresh_reason == "source_unavailable"
     assert "service-token" not in caplog.text
+    if not dry_run:
+        last_attempt = check.last_attempted_at
+        deferred = detect_completed_transitions_once(
+            db_session, dry_run=False, access_token="service-token", policy=_policy(),
+        )
+        assert deferred.scanned == deferred.source_unavailable == deferred.errors == 0
+        assert deferred.source_unavailable_deferred == 1
+        db_session.refresh(task)
+        db_session.refresh(snapshot)
+        db_session.refresh(stored_file)
+        assert {column.name: getattr(task, column.name) for column in Task.__table__.columns} == task_before
+        assert {column.name: getattr(snapshot, column.name) for column in TaskSnapshot.__table__.columns} == snapshot_before
+        assert {column.name: getattr(stored_file, column.name) for column in TaskFile.__table__.columns} == file_before
+        db_session.refresh(check)
+        assert check.last_attempted_at == last_attempt
     monkeypatch.setattr("sys.argv", ["auto_sync_reconciliation"])
     monkeypatch.setattr(auto_sync_reconciliation, "_run_from_new_session", lambda args: (
         auto_sync_reconciliation.ReconciliationResult(dry_run=dry_run, board_id=task.board_id), result,
@@ -797,12 +813,13 @@ def test_completed_transition_source_unavailable_rotates_and_recovers(
         }
 
     monkeypatch.setattr(auto_sync_reconciliation, "fetch_item_metadata", metadata)
+    monkeypatch.setattr(settings, "auto_sync_reconciliation_unavailable_interval_seconds", 3600)
     started = datetime.now(timezone.utc)
     results = []
-    for iteration in range(3):
+    for minutes in (0, 1, 60):
         monkeypatch.setattr(
             auto_sync_reconciliation, "utc_now",
-            lambda checked_at=started + timedelta(minutes=iteration): checked_at,
+            lambda checked_at=started + timedelta(minutes=minutes): checked_at,
         )
         results.append(detect_completed_transitions_once(
             db_session, dry_run=False, access_token="token", policy=_policy(), limit=1,
@@ -814,7 +831,7 @@ def test_completed_transition_source_unavailable_rotates_and_recovers(
     assert all(result.errors == 0 for result in results)
     check = db_session.get(AutoSyncReconciliationCheck, ("1882196103", "1", "completed_transition"))
     assert check.last_outcome == expected_action
-    assert check.last_checked_at == (started + timedelta(minutes=2)).replace(tzinfo=None)
+    assert check.last_checked_at == (started + timedelta(hours=1)).replace(tzinfo=None)
     task = db_session.get(Task, "acct:1882196103:1")
     assert task.auto_sync_state == ("active" if expected_action == "still_active" else "completed_retained")
 
