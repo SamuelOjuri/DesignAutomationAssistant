@@ -71,14 +71,14 @@ def test_gemini_generate_content_forwards_config_and_releases_slot(monkeypatch):
     monkeypatch.setattr(llm_interface, "get_rate_limiter", lambda: limiter)
 
     response = llm_interface.gemini_api_with_retry(
-        model="gemini-3.5-flash",
+        model="gemini-3.8-flash",
         contents="Extract parameters",
         config=config,
     )
 
     assert response == {"ok": True}
     assert client.models.kwargs == {
-        "model": "gemini-3.5-flash",
+        "model": "gemini-3.8-flash",
         "contents": "Extract parameters",
         "config": config,
     }

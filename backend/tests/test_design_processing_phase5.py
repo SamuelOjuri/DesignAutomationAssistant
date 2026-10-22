@@ -93,20 +93,32 @@ def test_legacy_gemini_client_uses_thinking_level_without_sampling_parameters():
         return SimpleNamespace(text="Project Name: Test")
 
     client = LegacyGeminiClient(
-        "gemini-3.5-flash",
+        "gemini-3.8-flash",
         thinking_level="medium",
         generate_content=generate_content,
     )
 
     assert client.query_llm("email context", "extract project") == "Project Name: Test"
     config = captured["config"]
-    assert captured["model"] == "gemini-3.5-flash"
+    assert captured["model"] == "gemini-3.8-flash"
     assert config.thinking_config.thinking_level == types.ThinkingLevel.MEDIUM
     assert config.temperature is None
     assert config.top_p is None
     assert config.top_k is None
     assert config.candidate_count is None
     assert config.thinking_config.thinking_budget is None
+
+
+@pytest.mark.parametrize("model", ["gemini-3.8-flash", "models/gemini-3.8-flash"])
+def test_legacy_gemini_client_rejects_minimal_thinking_for_gemini_38(model):
+    with pytest.raises(ValueError, match="gemini-3.8-flash.*minimal"):
+        LegacyGeminiClient(model, thinking_level="minimal")
+
+
+def test_legacy_gemini_client_preserves_other_model_thinking_configuration():
+    client = LegacyGeminiClient("gemini-3.5-flash", thinking_level="minimal")
+
+    assert client.generation_config.thinking_config.thinking_level == types.ThinkingLevel.MINIMAL
 
 
 def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate():
@@ -133,7 +145,7 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
         return SimpleNamespace(text=json.dumps(payload), parsed=None)
 
     client = LegacyGeminiClient(
-        "gemini-3.5-flash",
+        "gemini-3.8-flash",
         thinking_level="medium",
         generate_content=generate_content,
     )
@@ -161,6 +173,7 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
     assert b"(1:100)" in pdf_content
     assert b"(Bauder Contract Number)" in pdf_content
     config = captured["config"]
+    assert captured["model"] == "gemini-3.8-flash"
     assert config.response_mime_type == "application/json"
     assert config.response_json_schema == DesignParameterExtraction.model_json_schema()
     schema_properties = config.response_json_schema["properties"]

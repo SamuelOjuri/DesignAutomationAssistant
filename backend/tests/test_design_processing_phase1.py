@@ -63,23 +63,25 @@ def test_legacy_golden_fixtures_reproduce_byte_for_byte():
     assert csv_bytes.count(b"\r\n") == 17
 
 
-def test_design_processing_defaults_pin_identity_and_remain_off():
-    configured = _settings(
-        design_processing_mode="off",
-        design_processing_worker_enabled=False,
-        design_processing_reconciliation_enabled=False,
-        design_processing_allowlist_item_ids=[],
-        design_processing_extraction_model="gemini-3.5-flash",
-        design_processing_thinking_level="medium",
-    )
+def test_design_processing_defaults_pin_identity_and_remain_off(monkeypatch):
+    required_values = {
+        name: getattr(settings, name)
+        for name, field in Settings.model_fields.items()
+        if field.is_required()
+    }
+    for name in Settings.model_fields:
+        monkeypatch.delenv(name.upper(), raising=False)
+    configured = Settings(_env_file=None, **required_values)
 
     expected_version = (
         "legacy-files-"
         "82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:"
-        "model-gemini-3.5-flash:"
+        "model-gemini-3.8-flash:"
         "thinking-medium:"
         "output-v7"
     )
+    assert configured.gemini_model == "gemini-3.8-flash"
+    assert configured.design_processing_extraction_model == "gemini-3.8-flash"
     assert configured.design_processing_mode == "off"
     assert configured.design_processing_worker_enabled is False
     assert configured.design_processing_reconciliation_enabled is False
@@ -91,6 +93,44 @@ def test_design_processing_defaults_pin_identity_and_remain_off():
     assert configured.design_processing_pipeline_digest == hashlib.sha256(
         expected_version.encode("utf-8")
     ).hexdigest()
+
+
+def test_gemini_model_environment_overrides_remain_independent(monkeypatch):
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-3.5-flash")
+    monkeypatch.setenv("DESIGN_PROCESSING_EXTRACTION_MODEL", "gemini-3.8-flash")
+    monkeypatch.setenv("DESIGN_PROCESSING_THINKING_LEVEL", "medium")
+
+    configured = Settings()
+
+    assert configured.gemini_model == "gemini-3.5-flash"
+    assert configured.design_processing_extraction_model == "gemini-3.8-flash"
+
+
+@pytest.mark.parametrize("model", ["gemini-3.8-flash", "models/gemini-3.8-flash"])
+def test_design_processing_rejects_minimal_thinking_for_gemini_38(model):
+    with pytest.raises(ValidationError, match="gemini-3.8-flash.*minimal"):
+        _settings(
+            design_processing_extraction_model=model,
+            design_processing_thinking_level=" MINIMAL ",
+        )
+
+
+@pytest.mark.parametrize("level", ["low", "medium", "high"])
+def test_design_processing_accepts_supported_gemini_38_thinking_levels(level):
+    configured = _settings(
+        design_processing_extraction_model="gemini-3.8-flash",
+        design_processing_thinking_level=level,
+    )
+
+    assert configured.design_processing_thinking_level == level
+
+
+def test_model_migration_changes_design_processing_identity():
+    previous = _settings(design_processing_extraction_model="gemini-3.5-flash")
+    upgraded = _settings(design_processing_extraction_model="gemini-3.8-flash")
+
+    assert upgraded.design_processing_pipeline_version != previous.design_processing_pipeline_version
+    assert upgraded.design_processing_pipeline_digest != previous.design_processing_pipeline_digest
 
 
 @pytest.mark.parametrize("mode", ["invalid", "publish", "on"])

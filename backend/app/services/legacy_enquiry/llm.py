@@ -3,10 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Sequence
+from typing import Any, Callable, Sequence
 
 from google.genai import types
 
+from ...gemini_models import ThinkingLevel, validate_thinking_level
 from ..llm_interface import gemini_api_with_retry
 from .parameter_extraction import (
     DesignParameterExtraction,
@@ -14,7 +15,6 @@ from .parameter_extraction import (
 )
 
 
-ThinkingLevel = Literal["minimal", "low", "medium", "high"]
 GenerateContent = Callable[[str, Any, types.GenerateContentConfig], Any]
 
 
@@ -36,8 +36,7 @@ class LegacyGeminiClient:
     def __post_init__(self) -> None:
         if not self.model.strip():
             raise ValueError("model must not be empty")
-        if self.thinking_level not in {"minimal", "low", "medium", "high"}:
-            raise ValueError("thinking_level must be minimal, low, medium, or high")
+        validate_thinking_level(self.model, self.thinking_level)
         if self.max_attachment_workers < 1:
             raise ValueError("max_attachment_workers must be positive")
 

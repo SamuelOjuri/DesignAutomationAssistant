@@ -4,6 +4,45 @@ Task chat supports authenticated response streaming through a native Netlify Edg
 relay. Deployment order, timeout settings, and the protected 120-second transport
 probe are documented in [ChatStreaming.md](backend/ChatStreaming.md).
 
+## Gemini 3.8 Flash configuration
+
+Chat, retrieval planning, and general PDF/image extraction default to
+`gemini-3.8-flash`. The design-processing worker separately defaults to the same
+model with `medium` thinking. Configure both selections explicitly in the root
+`.env` and in each deployed API, worker, and reconciliation service:
+
+```dotenv
+GEMINI_MODEL=gemini-3.8-flash
+DESIGN_PROCESSING_EXTRACTION_MODEL=gemini-3.8-flash
+DESIGN_PROCESSING_THINKING_LEVEL=medium
+```
+
+The two model settings remain independent. Gemini 3.8 Flash supports `low`,
+`medium`, and `high` thinking; settings validation and direct worker-client
+construction reject `minimal` for this model. Chat planning and synthesis omit
+deprecated sampling parameters and retain their JSON output schemas. See
+[Google's migration guide](https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.8).
+
+Deploy matching code and environment settings across services and coordinate
+their restarts. Changing the extraction model changes the design-processing
+pipeline identity automatically; no separate output-revision bump is needed for
+this model change. Enabled reconciliation can enqueue eligible tracked items
+again, so validate representative outputs in `shadow` or `allowlist` mode before
+broad publication. The legacy verification snapshot and golden fixtures remain
+pinned to their original source bytes.
+
+The general extraction model also participates in asset-reuse compatibility.
+Future processing will regenerate results from an incompatible model, while
+completed snapshots with unchanged source hashes still return early. Use an
+explicit forced sync when historical documents need re-extraction. The embedding
+model remains `gemini-embedding-001` with 1536 dimensions; this migration needs no
+database schema change.
+
+Before deployment, run the affected backend tests and live checks for model
+access, structured extraction, citations, PDF/image quality, and latency. The
+streaming tests exercise the pinned Google SDK through a mocked HTTP transport;
+they do not verify live account access or quota.
+
 ## Incremental task sync
 
 Snapshot hashes still use Monday's `updated_at` and asset IDs. A different hash
@@ -364,7 +403,7 @@ Configuration supports `off`, `shadow`, `allowlist`, and `enabled` modes.
 `DESIGN_PROCESSING_ALLOWLIST_ITEM_IDS` accepts comma-separated decimal item IDs
 or a JSON array and is required when mode is `allowlist`. Activation timestamps
 must include a timezone. The pipeline version combines the full legacy manifest
-digest, the separately pinned `gemini-2.5-flash` extraction model, and a
+digest, the separately pinned `gemini-3.8-flash` extraction model, and a
 code-owned output revision that changes whenever rendered or extracted output
 semantics change.
 

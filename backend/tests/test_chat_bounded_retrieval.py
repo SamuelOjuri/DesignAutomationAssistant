@@ -115,6 +115,7 @@ def test_u_value_roof_fall_compound_question_batches_and_forces_synthesis(
     monkeypatch,
     caplog,
 ):
+    monkeypatch.setattr(chat.settings, "gemini_model", "gemini-3.8-flash")
     caplog.set_level(logging.DEBUG, logger=chat.__name__)
     events = []
     generated = []
@@ -135,7 +136,7 @@ def test_u_value_roof_fall_compound_question_batches_and_forces_synthesis(
 
     class FakeModels:
         def generate_content(self, *, model, contents, config):
-            generated.append({"contents": contents, "config": config})
+            generated.append({"model": model, "contents": contents, "config": config})
             if _is_retrieval_plan_config(config):
                 events.append("planning")
                 return FakeResponse(parsed=plan.model_dump())
@@ -178,7 +179,12 @@ def test_u_value_roof_fall_compound_question_batches_and_forces_synthesis(
     assert citations == [{**evidence[0], "sourceId": "S1"}]
     assert events == ["context", "planning", "retrieval", "synthesis"]
     assert len(generated) == 2
-    assert generated[0]["config"].temperature == 0.1
+    for request in generated:
+        assert request["model"] == "gemini-3.8-flash"
+        assert not {
+            "temperature", "top_p", "top_k", "candidate_count",
+            "frequency_penalty", "presence_penalty",
+        }.intersection(request["config"].model_dump(exclude_none=True))
     assert generated[0]["config"].tools is None
     assert generated[1]["config"].tools is None
     assert generated[0]["config"].response_schema is None

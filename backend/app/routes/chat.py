@@ -169,7 +169,6 @@ def _history_payload(
 
 def _planning_config() -> types.GenerateContentConfig:
     return types.GenerateContentConfig(
-        temperature=0.1,
         response_mime_type="application/json",
         response_json_schema=_RetrievalPlan.model_json_schema(),
         system_instruction=(
@@ -373,7 +372,6 @@ def _fallback_answer_from_sources(
 
 def _synthesis_config() -> types.GenerateContentConfig:
     return types.GenerateContentConfig(
-        temperature=0.2,
         response_mime_type="application/json",
         response_json_schema=_SynthesisResult.model_json_schema(),
         system_instruction=(

@@ -285,6 +285,7 @@ def test_real_google_sdk_streaming_uses_async_transport_and_closes_response(monk
     import httpx
     from google import genai
 
+    monkeypatch.setattr(chat.settings, "gemini_model", "gemini-3.8-flash")
     requests = []
     closed = []
     class ProviderBody(httpx.AsyncByteStream):
@@ -301,7 +302,12 @@ def test_real_google_sdk_streaming_uses_async_transport_and_closes_response(monk
     async def handle(request):
         requests.append(request.url.path)
         body = json.loads(request.content)
+        assert "/models/gemini-3.8-flash:" in request.url.path
         assert body["generationConfig"]["responseMimeType"] == "application/json"
+        assert not {
+            "temperature", "topP", "topK", "candidateCount",
+            "frequencyPenalty", "presencePenalty",
+        }.intersection(body["generationConfig"])
         if "streamGenerateContent" in request.url.path:
             return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, stream=ProviderBody())
         return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": '{"search_queries":[]}'}]}, "finishReason": "STOP"}]})

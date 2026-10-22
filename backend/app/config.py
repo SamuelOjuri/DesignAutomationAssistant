@@ -6,6 +6,7 @@ from typing import Annotated, Literal, Optional
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from .gemini_models import ThinkingLevel, validate_thinking_level
 from .services.legacy_enquiry import LEGACY_MANIFEST_DIGEST
 
 DESIGN_PROCESSING_PIPELINE_REVISION = "output-v7"
@@ -43,7 +44,7 @@ class Settings(BaseSettings):
 
     # Gemini
     gemini_api_key: str
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
 
     # Chat retrieval
     chat_retrieval_max_queries: int = Field(default=2, ge=1, le=2)
@@ -83,11 +84,9 @@ class Settings(BaseSettings):
     design_processing_board_id: str = "1882196103"
     design_processing_landing_group_id: str = "group_mkpbd6vy"
     design_processing_project_board_id: str = "1825117125"
-    design_processing_extraction_model: str = "gemini-3.5-flash"
+    design_processing_extraction_model: str = "gemini-3.8-flash"
     design_processing_extraction_remote_validation_seconds: int = Field(default=60, ge=1)
-    design_processing_thinking_level: Literal[
-        "minimal", "low", "medium", "high"
-    ] = "medium"
+    design_processing_thinking_level: ThinkingLevel = "medium"
     design_processing_artifact_bucket: str = "design-processing-artifacts"
     design_processing_allowlist_item_ids: Annotated[list[str], NoDecode] = Field(
         default_factory=list
@@ -231,6 +230,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_design_processing_settings(self) -> "Settings":
+        validate_thinking_level(
+            self.design_processing_extraction_model,
+            self.design_processing_thinking_level,
+        )
         if (
             self.design_processing_mode == "allowlist"
             and not self.design_processing_allowlist_item_ids
