@@ -8,6 +8,103 @@ import pytest
 from backend.app.services import design_processing_execution as execution
 
 
+@pytest.fixture()
+def simulated_extraction(monkeypatch):
+    """Advance a ten-minute child wait without sleeping or external requests."""
+    state = SimpleNamespace(
+        elapsed=0.0, duration=600.0, terminated=False, closed=False,
+    )
+
+    class Receiver:
+        def poll(self, timeout=0):
+            state.elapsed += timeout
+            return state.elapsed >= state.duration
+
+        def recv(self):
+            return True, {"result": "ok"}
+
+        def close(self):
+            pass
+
+    class Process:
+        pid = None
+        exitcode = 0
+
+        def start(self):
+            self.pid = 123
+
+        def is_alive(self):
+            return not state.terminated and state.elapsed < state.duration
+
+        def terminate(self):
+            state.terminated = True
+
+        def join(self, timeout):
+            pass
+
+        def close(self):
+            state.closed = True
+
+    monkeypatch.setattr(execution, "monotonic", lambda: state.elapsed)
+    monkeypatch.setattr(execution.multiprocessing, "get_context", lambda method: SimpleNamespace(
+        Pipe=lambda **kwargs: (Receiver(), SimpleNamespace(close=lambda: None)),
+        Process=lambda **kwargs: Process(),
+    ))
+    return state
+
+
+@pytest.mark.parametrize("remote_seconds", [30, 60])
+def test_long_extraction_uses_local_polls_and_bounded_remote_reads(simulated_extraction, remote_seconds):
+    local_checks, remote_checks = [], []
+    result = execution.run_interruptible_analysis(
+        (), client=execution.LegacyGeminiClient("offline"),
+        check_local=lambda: local_checks.append(simulated_extraction.elapsed),
+        check_current=lambda: remote_checks.append(simulated_extraction.elapsed),
+        remote_validation_seconds=remote_seconds,
+    )
+    assert result == {"result": "ok"}
+    assert local_checks == list(range(5, 600, 5))
+    # Start and completion are always fresh, including completion at a deadline.
+    assert remote_checks == [0, *range(remote_seconds, 600, remote_seconds), 600]
+    assert simulated_extraction.closed
+
+
+def test_local_cancellation_terminates_child_before_next_remote_read(simulated_extraction):
+    remote_checks = []
+
+    def check_local():
+        raise RuntimeError("stored_identity_changed")
+
+    with pytest.raises(RuntimeError, match="stored_identity_changed"):
+        execution.run_interruptible_analysis(
+            (), client=execution.LegacyGeminiClient("offline"), check_local=check_local,
+            check_current=lambda: remote_checks.append(simulated_extraction.elapsed),
+        )
+    assert simulated_extraction.elapsed == 5
+    assert remote_checks == [0]
+    assert simulated_extraction.terminated and simulated_extraction.closed
+
+
+@pytest.mark.parametrize("failure_at", [10, 60, 600])
+def test_periodic_and_completion_remote_failures_stop_extraction(simulated_extraction, failure_at):
+    if failure_at == 10:
+        simulated_extraction.duration = 10
+
+    def check_current():
+        if simulated_extraction.elapsed >= failure_at:
+            raise RuntimeError("Monday validation failed")
+
+    with pytest.raises(RuntimeError, match="Monday validation failed"):
+        execution.run_interruptible_analysis(
+            (), client=execution.LegacyGeminiClient("offline"),
+            check_local=lambda: None, check_current=check_current,
+        )
+    assert simulated_extraction.elapsed == failure_at
+    assert simulated_extraction.closed
+    if failure_at < simulated_extraction.duration:
+        assert simulated_extraction.terminated
+
+
 def _send_when_released(connection, release):
     if not release.wait(15):
         raise RuntimeError("test parent never released child")
@@ -30,7 +127,10 @@ def _send_large_result(connection):
 
 
 @pytest.mark.parametrize("cancel_on_check", [None, 1, 2])
-def test_result_arriving_during_eligibility_check_is_drained_and_still_guarded(monkeypatch, cancel_on_check):
+@pytest.mark.parametrize("local_poll", [False, True])
+def test_result_arriving_during_eligibility_check_is_drained_and_still_guarded(
+    monkeypatch, cancel_on_check, local_poll,
+):
     context = multiprocessing.get_context("spawn")
     release = context.Event()
     handles = {}
@@ -65,6 +165,7 @@ def test_result_arriving_during_eligibility_check_is_drained_and_still_guarded(m
     if cancel_on_check is None:
         result = execution._run_in_process(
             _send_when_released, (release,), check_current=check_current, poll_seconds=0.01,
+            check_local=check_current if local_poll else None,
         )
         assert result == {"result": "ok"}
         assert len(checks) == 2
@@ -72,6 +173,7 @@ def test_result_arriving_during_eligibility_check_is_drained_and_still_guarded(m
         with pytest.raises(RuntimeError, match="completed_folder") as error:
             execution._run_in_process(
                 _send_when_released, (release,), check_current=check_current, poll_seconds=0.01,
+                check_local=check_current if local_poll else None,
             )
         assert not isinstance(error.value, execution.DesignExtractionProcessError)
     assert not any(child.name == "design-extraction" for child in multiprocessing.active_children())

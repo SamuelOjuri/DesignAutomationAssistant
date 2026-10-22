@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     design_processing_landing_group_id: str = "group_mkpbd6vy"
     design_processing_project_board_id: str = "1825117125"
     design_processing_extraction_model: str = "gemini-3.5-flash"
+    design_processing_extraction_remote_validation_seconds: int = Field(default=60, ge=1)
     design_processing_thinking_level: Literal[
         "minimal", "low", "medium", "high"
     ] = "medium"

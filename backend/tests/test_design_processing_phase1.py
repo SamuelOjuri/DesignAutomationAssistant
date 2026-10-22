@@ -132,6 +132,8 @@ def test_design_processing_normalizes_allowlist_and_activation_timestamp():
         ("design_processing_project_board_id", "0"),
         ("design_processing_landing_group_id", ""),
         ("design_processing_extraction_model", "  "),
+        ("design_processing_extraction_remote_validation_seconds", 0),
+        ("design_processing_extraction_remote_validation_seconds", -1),
         ("design_processing_thinking_level", "deep"),
         ("design_processing_artifact_bucket", "bucket/path"),
         ("design_processing_allowlist_item_ids", "123,bad"),

@@ -385,10 +385,17 @@ reads and writes are not an atomic conditional update. Landing Zone retains its
 existing scalar-write behaviour. AI Data remains email-derived, with Monday
 values taking precedence in the assistant.
 
-Production extraction runs in a spawned child process. The parent checks current
-job/source eligibility every five seconds while waiting and terminates that
-process on cancellation; matching, artifact storage and publication also have
-checkpoints. Allow for the extra extraction-process memory in the worker service.
+Production extraction runs in a spawned child process. Every five seconds, the
+parent reloads local job state to check lease ownership, cancellation, desired
+input/pipeline version and execution policy, without reading Monday. While waiting,
+it also validates the current Monday source every 60 seconds, configurable with
+`DESIGN_PROCESSING_EXTRACTION_REMOTE_VALIDATION_SECONDS` (positive integer seconds).
+Webhook-recorded changes take effect at the next local check; changes not yet
+recorded locally are detected at the next remote validation. A ten-minute wait
+therefore uses about 10 periodic Monday reads instead of 120. Fresh Monday reads
+still guard extraction start/completion, stage checkpoints and publication writes.
+The parent terminates the extraction process on cancellation. Allow for the extra
+extraction-process memory in the worker service.
 Cancellation takes effect when detected; an external request already accepted
 cannot be recalled. Read failures stop further work rather than bypassing gates.
 

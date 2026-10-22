@@ -4,7 +4,7 @@ import multiprocessing
 import os
 import signal
 from time import monotonic
-from typing import Callable
+from typing import Callable, Optional
 
 from .legacy_enquiry.analysis import analyze_downloaded_email_assets
 from .legacy_enquiry.llm import LegacyGeminiClient
@@ -57,7 +57,9 @@ def run_interruptible_analysis(
     *,
     client,
     check_current: Callable[[], object],
+    check_local: Optional[Callable[[], object]] = None,
     poll_seconds: float = 5.0,
+    remote_validation_seconds: float = 60.0,
 ):
     check_current()
     # Injected clients support deterministic in-process tests and offline tools.
@@ -70,11 +72,15 @@ def run_interruptible_analysis(
 
     return _run_in_process(
         _analyze_in_child, (downloaded_assets, client),
-        check_current=check_current, poll_seconds=poll_seconds,
+        check_current=check_current, check_local=check_local,
+        poll_seconds=poll_seconds, remote_validation_seconds=remote_validation_seconds,
     )
 
 
-def _run_in_process(target, args, *, check_current, poll_seconds=5.0):
+def _run_in_process(
+    target, args, *, check_current, check_local=None, poll_seconds=5.0,
+    remote_validation_seconds=60.0,
+):
     context = multiprocessing.get_context("spawn")
     receiver, sender = context.Pipe(duplex=False)
     process = context.Process(
@@ -84,11 +90,19 @@ def _run_in_process(target, args, *, check_current, poll_seconds=5.0):
         name="design-extraction",
     )
     started_at = monotonic()
+    next_remote_validation = started_at + remote_validation_seconds
     try:
         process.start()
         sender.close()
         while not receiver.poll(poll_seconds):
-            check_current()
+            if check_local is None:
+                # Callers without a local gate retain full validation each tick.
+                check_current()
+            else:
+                check_local()
+                if monotonic() >= next_remote_validation:
+                    check_current()
+                    next_remote_validation = monotonic() + remote_validation_seconds
             if not process.is_alive():
                 # The child may have sent its result and exited while the
                 # eligibility check was running. Drain that result before

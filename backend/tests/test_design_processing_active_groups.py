@@ -290,7 +290,8 @@ def _returning_child(connection):
     connection.send((True, {"result": "ok"}))
 
 
-def test_extraction_process_is_terminated_on_cancellation(tmp_path):
+@pytest.mark.parametrize("local_poll", [False, True])
+def test_extraction_process_is_terminated_on_cancellation(tmp_path, local_poll):
     marker = tmp_path / "started"
     deadline = time.monotonic() + 15
 
@@ -301,7 +302,10 @@ def test_extraction_process_is_terminated_on_cancellation(tmp_path):
             pytest.fail("child did not start")
 
     with pytest.raises(RuntimeError, match="completed_folder"):
-        _run_in_process(_blocking_child, (marker,), check_current=check, poll_seconds=0.05)
+        _run_in_process(
+            _blocking_child, (marker,), check_current=check, poll_seconds=0.05,
+            check_local=check if local_poll else None,
+        )
     assert not any(child.name == "design-extraction" for child in multiprocessing.active_children())
 
 

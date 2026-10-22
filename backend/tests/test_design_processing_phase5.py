@@ -25,7 +25,7 @@ from backend.app.models import (
 )
 from backend.app.monday_client import MondayProjectBoardItem
 from backend.app.services.auto_sync import utc_now
-from backend.app.services import design_processing_worker
+from backend.app.services import design_processing_pipeline, design_processing_worker
 from backend.app.services.ai_data_report import render_ai_data_pdf
 from backend.app.services.design_processing_inputs import (
     DownloadedDesignEmailAsset,
@@ -35,6 +35,7 @@ from backend.app.services.design_processing_inputs import (
 )
 from backend.app.services.design_processing_queue import queue_design_processing_snapshot
 from backend.app.services.design_processing_state import ProcessingIdentity
+from backend.app.services.design_processing_target import DesignProcessingTargetMismatch
 from backend.app.services.legacy_enquiry.analysis import analyze_downloaded_email_assets
 from backend.app.services.legacy_enquiry.formatting import build_ai_data_csv_bytes
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
@@ -698,6 +699,101 @@ def test_move_during_extraction_continues_only_in_active_groups(db_session, gold
         assert jobs[0].status == "completed"
         assert jobs[1].status == "scheduled"
         assert db_session.query(DesignProcessingArtifact).count() == 3
+
+
+def test_extraction_local_polls_reload_state_without_monday_reads(db_session, golden, monkeypatch):
+    golden_input, _ = golden
+    snapshot = _snapshot(golden_input)
+    _queue(db_session, snapshot)
+    gateway = FakeReadGateway(snapshot, golden_input)
+    original_analysis = design_processing_pipeline.run_interruptible_analysis
+    monkeypatch.setattr(settings, "design_processing_extraction_remote_validation_seconds", 30)
+    poll_count = 0
+
+    def analyze(downloaded_assets, *, check_local, remote_validation_seconds, **kwargs):
+        nonlocal poll_count
+        remote_reads = gateway.fetch_target_calls
+        assert remote_validation_seconds == 30
+        for _ in range(120):
+            check_local()
+            poll_count += 1
+            assert not db_session.in_transaction()
+        assert gateway.fetch_target_calls == remote_reads
+        return original_analysis(downloaded_assets, check_local=check_local, **kwargs)
+
+    monkeypatch.setattr(design_processing_pipeline, "run_interruptible_analysis", analyze)
+    result = run_worker_once(
+        db_session, worker_id="local-check-worker", access_token="test-token", gateway=gateway,
+        analysis_client=FakeLegacyClient(golden_input), artifact_storage=MemoryArtifactStorage(),
+        downloader=FixtureDownloader(WORKSPACE_ROOT / golden_input["sourceEmail"]["path"]),
+        mode="shadow", claim_limit=1, recover_leases=False, heartbeat_interval_seconds=0,
+    )
+    assert result.analyzed == 1
+    assert poll_count == 120
+
+
+@pytest.mark.parametrize("change, reason", [
+    ("cancel", "lease_lost"),
+    ("lease", "lease_lost"),
+    ("input", "stored_identity_changed"),
+    ("pipeline", "stored_identity_changed"),
+    ("execution_pipeline", "pipeline_changed"),
+    ("execution_kind", "execution_changed"),
+    ("policy", "execution_disabled"),
+])
+def test_extraction_local_poll_detects_committed_changes(
+    db_session, golden, monkeypatch, change, reason,
+):
+    golden_input, _ = golden
+    snapshot = _snapshot(golden_input)
+    _queue(db_session, snapshot)
+    gateway = FakeReadGateway(snapshot, golden_input)
+    policy_enabled = True
+    detected = []
+
+    def analyze(downloaded_assets, *, check_local, **kwargs):
+        nonlocal policy_enabled
+        check_local()
+        assert not db_session.in_transaction()
+        with sessionmaker(bind=db_session.bind)() as writer:
+            item = writer.query(DesignProcessingItem).one()
+            job = writer.query(DesignProcessingJob).one()
+            if change == "cancel":
+                job.status = "cancelled"
+            elif change == "lease":
+                job.locked_by = "another-worker"
+            elif change == "input":
+                item.latest_desired_input_revision = "revision-b"
+            elif change == "pipeline":
+                item.latest_desired_pipeline_version = "pipeline-v2"
+            elif change == "execution_pipeline":
+                item.latest_desired_pipeline_version = "pipeline-v2"
+                job.execution_pipeline_version = "pipeline-v2"
+            elif change == "execution_kind":
+                job.execution_kind = "publication"
+            elif change == "policy":
+                policy_enabled = False
+            writer.commit()
+        remote_reads = gateway.fetch_target_calls
+        with pytest.raises(DesignProcessingTargetMismatch) as error:
+            check_local()
+        assert error.value.reason == reason
+        assert gateway.fetch_target_calls == remote_reads
+        assert not db_session.in_transaction()
+        detected.append(reason)
+        raise error.value
+
+    monkeypatch.setattr(design_processing_pipeline, "run_interruptible_analysis", analyze)
+    run_worker_once(
+        db_session, worker_id="local-check-worker", access_token="test-token", gateway=gateway,
+        analysis_client=FakeLegacyClient(golden_input), artifact_storage=MemoryArtifactStorage(),
+        downloader=FixtureDownloader(WORKSPACE_ROOT / golden_input["sourceEmail"]["path"]),
+        mode="shadow", execution_policy=lambda kind, item_id: policy_enabled,
+        claim_limit=1, recover_leases=False, heartbeat_interval_seconds=0,
+    )
+    assert detected == [reason]
+    assert db_session.query(DesignProcessingItem).one().extracted_parameters_json is None
+    assert db_session.query(DesignProcessingArtifact).count() == 0
 
 
 def test_supersession_at_final_checkpoint_never_advances_analyzed_identity(

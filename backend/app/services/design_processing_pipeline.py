@@ -56,6 +56,7 @@ from .design_processing_state import (
 from .design_processing_target import (
     DesignProcessingReadGateway,
     DesignProcessingTargetMismatch,
+    assert_current_execution_state,
     assert_current_execution_target,
 )
 from .legacy_enquiry.analysis import (
@@ -232,6 +233,22 @@ def run_analysis_pipeline(
     downloader: Optional[AssetDownloader] = None,
     clock: Clock = utc_now,
 ) -> str:
+    def check_local():
+        try:
+            current_item, current_job, _ = _lock_current_analysis(
+                db, job_id, worker_id=worker_id, execution_policy=execution_policy,
+            )
+            assert_current_execution_state(
+                current_item, current_job, pipeline_version=pipeline_version,
+                worker_id=worker_id,
+                execution_allowed=_execution_is_allowed(
+                    "analysis", current_item.item_id, mode=mode,
+                    allowlist_item_ids=allowlist_item_ids, execution_policy=execution_policy,
+                ),
+            )
+        finally:
+            db.rollback()  # Release row locks before waiting for the next poll.
+
     def check_current():
         current_item, current_job, _ = _lock_current_analysis(
             db, job_id, worker_id=worker_id, execution_policy=execution_policy,
@@ -292,6 +309,10 @@ def run_analysis_pipeline(
                 downloaded_assets,
                 client=analysis_client,
                 check_current=check_current,
+                check_local=check_local,
+                remote_validation_seconds=(
+                    settings.design_processing_extraction_remote_validation_seconds
+                ),
             )
         finally:
             _remove_downloaded_files(downloaded_assets)

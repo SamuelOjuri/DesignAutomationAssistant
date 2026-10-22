@@ -314,20 +314,15 @@ def apply_current_target_snapshot(
     )
 
 
-def assert_current_execution_target(
+def assert_current_execution_state(
     item: DesignProcessingItem,
     job: DesignProcessingJob,
     *,
-    gateway: DesignProcessingReadGateway,
     pipeline_version: str,
-    expected_board_id: str,
-    expected_group_id: str,
     worker_id: str,
     execution_allowed: bool = True,
-) -> DesignProcessingTargetSnapshot:
-    snapshot = gateway.fetch_target(job.item_id)
-    _assert_snapshot_item(snapshot, item)
-
+) -> ProcessingIdentity:
+    """Validate freshly loaded local state without reading Monday."""
     if job.status != "running" or job.locked_by != worker_id:
         raise DesignProcessingTargetMismatch(
             "lease_lost",
@@ -355,6 +350,26 @@ def assert_current_execution_target(
             "pipeline_changed",
             "configured pipeline version differs from the execution identity",
         )
+    return execution
+
+
+def assert_current_execution_target(
+    item: DesignProcessingItem,
+    job: DesignProcessingJob,
+    *,
+    gateway: DesignProcessingReadGateway,
+    pipeline_version: str,
+    expected_board_id: str,
+    expected_group_id: str,
+    worker_id: str,
+    execution_allowed: bool = True,
+) -> DesignProcessingTargetSnapshot:
+    execution = assert_current_execution_state(
+        item, job, pipeline_version=pipeline_version, worker_id=worker_id,
+        execution_allowed=execution_allowed,
+    )
+    snapshot = gateway.fetch_target(job.item_id)
+    _assert_snapshot_item(snapshot, item)
 
     readiness = _target_readiness(
         snapshot,
