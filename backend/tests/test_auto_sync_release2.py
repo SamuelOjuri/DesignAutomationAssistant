@@ -140,6 +140,7 @@ def test_source_revision_query_uses_account_fallback_not_board_account(monkeypat
 
 
 def test_fetch_current_account_id_reads_me_account(monkeypatch):
+    monday_client.fetch_current_account_id.cache_clear()
     monkeypatch.setattr(
         monday_client,
         "monday_graphql_request",

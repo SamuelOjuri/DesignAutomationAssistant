@@ -434,6 +434,57 @@ def test_webhook_fetches_once_and_dispatches_consumers_independently(
     assert db_session.query(DesignProcessingJob).count() == 1
 
 
+@pytest.mark.parametrize("mode, column_id", [
+    ("off", "name"), ("shadow", "file_mkza7y37"), ("shadow", "file_mm59rntf"),
+    ("shadow", "unrelated_column"),
+])
+def test_webhook_skips_snapshot_when_no_consumer_needs_it(webhook_client, db_session, monkeypatch, mode, column_id):
+    monkeypatch.setattr(settings, "auto_sync_board_id", "another-board")
+    monkeypatch.setattr(settings, "design_processing_mode", mode)
+    monkeypatch.setattr(monday_webhooks, "get_monday_ingestion_access_token", lambda: pytest.fail("no remote work needed"))
+    monkeypatch.setattr(monday_webhooks, "fetch_current_source_revision_inputs", lambda *args: pytest.fail("unnecessary snapshot"))
+    response = webhook_client.post(
+        "/api/monday/webhooks?token=shared-secret",
+        json=_webhook_payload(trigger_uuid="no-snapshot", column_id=column_id),
+    )
+    assert response.status_code == 200
+    assert {dispatch.status for dispatch in db_session.query(MondayWebhookDispatch)} == {"succeeded"}
+    assert db_session.query(DesignProcessingJob).count() == 0
+
+
+def test_auto_sync_still_reads_worker_output_events(webhook_client, monkeypatch):
+    # Outputs are design no-ops, but auto-sync indexes their updated contents.
+    calls = []
+    monkeypatch.setattr(monday_webhooks, "get_monday_ingestion_access_token", lambda: "service-token")
+    def fetch_item(token, item_id):
+        calls.append(item_id)
+        return _monday_item(item_id=item_id, group_id="topics")
+    monkeypatch.setattr(monday_webhooks, "fetch_current_source_revision_inputs", fetch_item)
+    response = webhook_client.post(
+        "/api/monday/webhooks?token=shared-secret",
+        json=_webhook_payload(trigger_uuid="auto-output", column_id="file_mkza7y37"),
+    )
+    assert response.status_code == 200 and len(calls) == 1
+    assert response.json()["dispatches"]["design_processing"]["outcome"] == "ignored"
+    assert response.json()["dispatches"]["auto_sync"]["outcome"] == "queued"
+
+
+def test_snapshot_failure_does_not_fail_a_design_noop_consumer(webhook_client, db_session, monkeypatch):
+    monkeypatch.setattr(monday_webhooks, "get_monday_ingestion_access_token", lambda: "service-token")
+    def unavailable(*args, **kwargs):
+        raise monday_webhooks.TransientMondayAPIError(detail="temporary outage")
+    monkeypatch.setattr(monday_webhooks, "fetch_current_source_revision_inputs", unavailable)
+    response = webhook_client.post(
+        "/api/monday/webhooks?token=shared-secret",
+        json=_webhook_payload(trigger_uuid="auto-unavailable-design-noop", column_id="file_mkza7y37"),
+    )
+    assert response.status_code == 503
+    dispatches = {dispatch.consumer: dispatch for dispatch in db_session.query(MondayWebhookDispatch)}
+    assert dispatches["auto_sync"].status == "failed"
+    assert dispatches["design_processing"].status == "succeeded"
+    assert dispatches["design_processing"].outcome == "ignored"
+
+
 @pytest.mark.parametrize("event_type", ["create_item", "move_pulse_into_group"])
 def test_webhook_registers_new_item_already_in_active_group(
     webhook_client, db_session, monkeypatch, event_type,

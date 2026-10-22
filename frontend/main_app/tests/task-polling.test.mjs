@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { startTaskPolling } from "../lib/task-polling.ts";
+import { startTaskPolling, taskPollingInterval } from "../lib/task-polling.ts";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -8,11 +8,12 @@ function surface() {
   let timer;
   let visible = true;
   let listener;
+  let delay;
   return {
     environment: {
       isVisible: () => visible,
       subscribe: (callback) => { listener = callback; return () => { listener = undefined; }; },
-      schedule: (callback, milliseconds) => { assert.equal(milliseconds, 12000); timer = callback; return 1; },
+      schedule: (callback, milliseconds) => { delay = milliseconds; timer = callback; return 1; },
       cancel: () => { timer = undefined; },
     },
     tick: async () => { const callback = timer; timer = undefined; callback?.(); await settle(); },
@@ -20,6 +21,7 @@ function surface() {
     setVisible: (value) => { visible = value; },
     hasTimer: () => Boolean(timer),
     hasListener: () => Boolean(listener),
+    delay: () => delay,
   };
 }
 
@@ -27,8 +29,9 @@ test("discovers metadata revisions after sync completed without a snapshot chang
   const page = surface();
   let response = { snapshotVersion: "same", syncStatus: "completed", metadataRevision: "one", projectName: "Old" };
   const rendered = [];
-  const stop = startTaskPolling(async (_, first) => { rendered.push({ ...response, first }); }, assert.fail, page.environment);
+  const stop = startTaskPolling(async (_, first) => { rendered.push({ ...response, first }); return response; }, assert.fail, page.environment);
   await settle();
+  assert.equal(page.delay(), 60000);
   response = { ...response, metadataRevision: "two", projectName: "Updated" };
   await page.tick();
   assert.equal(rendered.length, 2);
@@ -50,6 +53,44 @@ test("pauses reads while hidden and refreshes immediately on return", async () =
   page.setVisible(true);
   await page.focus();
   assert.equal(calls, 2);
+  assert.equal(page.delay(), 12000);
+  stop();
+});
+
+test("settled tasks stay discoverable and return to fast polling when work starts", async () => {
+  const page = surface();
+  let syncStatus = "completed";
+  const stop = startTaskPolling(async () => ({ syncStatus }), assert.fail, page.environment);
+  await settle();
+  assert.equal(page.delay(), 60000);
+  syncStatus = "queued";
+  await page.focus();
+  assert.equal(page.delay(), 12000);
+  syncStatus = "syncing";
+  await page.tick();
+  assert.equal(page.delay(), 12000);
+  syncStatus = "failed";
+  await page.tick();
+  assert.equal(page.delay(), 60000);
+  stop();
+});
+
+test("unknown states retain fast polling and errors recover at the fast interval", async () => {
+  for (const syncStatus of [null, undefined, "queued", "syncing", "unexpected"]) {
+    assert.equal(taskPollingInterval({ syncStatus }), 12000);
+  }
+  const page = surface();
+  let fail = false;
+  const errors = [];
+  const stop = startTaskPolling(async () => {
+    if (fail) throw new Error("offline");
+    return { syncStatus: "completed" };
+  }, (error) => errors.push(error.message), page.environment);
+  await settle();
+  fail = true;
+  await page.tick();
+  assert.equal(page.delay(), 12000);
+  assert.deepEqual(errors, ["offline"]);
   stop();
 });
 

@@ -299,6 +299,84 @@ def test_webhook_processing_is_not_blocked_by_reconciliation_delay(db_session):
     assert result.outcome == "queued"
 
 
+def settled_item(db, monkeypatch, *, published=True):
+    item = seed(db, "settled", state="ready_for_review" if published else "analyzed")
+    version = settings.design_processing_pipeline_version
+    item.latest_desired_input_revision = item.latest_analyzed_input_revision = "revision-a"
+    item.latest_desired_pipeline_version = item.latest_analyzed_pipeline_version = version
+    if published:
+        item.latest_published_input_revision = "revision-a"
+        item.latest_published_pipeline_version = version
+    db.commit()
+    monkeypatch.setattr(reconciliation, "list_items_in_groups", lambda *args, **kwargs: {
+        "topics": [monday_client.MondayGroupItem(item.item_id, NOW.isoformat())],
+    })
+    return item
+
+
+def test_settled_success_skips_item_reads_until_deadline_then_detects_changes(db_session, monkeypatch):
+    item = settled_item(db_session, monkeypatch)
+    gateway = fixtures.FakeReconciliationGateway({item.item_id: fixtures._snapshot(item_id=item.item_id, group_id="topics")})
+    first = run(db_session, gateway)
+    assert first.items[0].action == "ignored" and first.items[0].reason == "ready"
+    assert first.items[0].next_check_at == NOW + timedelta(hours=1)
+    for minutes in (15, 30, 45):
+        assert run(db_session, gateway, now=NOW + timedelta(minutes=minutes)).deferred == 1
+    assert gateway.calls == [item.item_id]
+    changed = fixtures.FakeReconciliationGateway({item.item_id: fixtures._snapshot(
+        item_id=item.item_id, group_id="topics", input_revision="revision-b",
+    )})
+    assert run(db_session, changed, now=NOW + timedelta(hours=1)).queued == 1
+    assert check(db_session, item.item_id).next_check_at is None
+
+
+def test_explicit_settled_check_and_webhook_bypass_deadline(db_session, monkeypatch):
+    item = settled_item(db_session, monkeypatch)
+    gateway = fixtures.FakeReconciliationGateway({item.item_id: fixtures._snapshot(item_id=item.item_id, group_id="topics")})
+    run(db_session, gateway)
+    assert run(db_session, gateway, item_id=item.item_id, now=NOW + timedelta(minutes=1)).scanned == 1
+    result = queue_design_processing_snapshot(
+        db_session, fixtures._snapshot(item_id=item.item_id, group_id="topics", input_revision="revision-b"),
+        trigger_type="webhook", mode="enabled", pipeline_version=settings.design_processing_pipeline_version,
+        expected_board_id=BOARD, expected_group_id=LANDING, now=NOW + timedelta(minutes=2),
+    )
+    db_session.commit()
+    assert result.outcome == "queued"
+    assert run(db_session, gateway, now=NOW + timedelta(minutes=3)).scanned == 1
+
+
+@pytest.mark.parametrize("change", ["pipeline", "publication", "local", "group"])
+def test_settled_deadline_does_not_delay_known_changes(db_session, monkeypatch, change):
+    item = settled_item(db_session, monkeypatch, published=change != "publication")
+    gateway = fixtures.FakeReconciliationGateway({item.item_id: fixtures._snapshot(item_id=item.item_id, group_id="topics")})
+    first = run(db_session, gateway, mode="shadow" if change == "publication" else "enabled")
+    assert first.items[0].action == "ignored"
+    assert first.items[0].next_check_at == NOW + timedelta(hours=1)
+    if change == "pipeline":
+        monkeypatch.setattr(settings, "design_processing_extraction_model", "new-model")
+    elif change == "publication":
+        monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", [item.item_id])
+    elif change == "local":
+        item.updated_at = NOW + timedelta(seconds=1)
+        db_session.commit()
+    else:
+        monkeypatch.setattr(reconciliation, "list_items_in_groups", lambda *args: {
+            LANDING: [monday_client.MondayGroupItem(item.item_id, NOW.isoformat())],
+        })
+    result = run(db_session, gateway, now=NOW + timedelta(minutes=1), mode="allowlist" if change == "publication" else "enabled")
+    assert result.scanned == 1 and result.errors == 0
+    if change in {"pipeline", "publication"}:
+        assert result.queued == 1
+
+
+def test_settled_dry_run_reports_deadline_without_saving_it(db_session, monkeypatch):
+    item = settled_item(db_session, monkeypatch)
+    gateway = fixtures.FakeReconciliationGateway({item.item_id: fixtures._snapshot(item_id=item.item_id, group_id="topics")})
+    result = run(db_session, gateway, dry_run=True)
+    assert result.items[0].next_check_at == NOW + timedelta(hours=1)
+    assert check(db_session, item.item_id) is None
+
+
 def test_deferred_items_do_not_take_limited_scan_slots(db_session, monkeypatch):
     seed(db_session, "1")
     completed = fixtures.FakeReconciliationGateway({"1": fixtures._snapshot(item_id="1", group_id="completed")})

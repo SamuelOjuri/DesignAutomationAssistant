@@ -547,6 +547,20 @@ def _design_trigger_type(normalized: NormalizedWebhookEvent) -> Optional[str]:
     return None
 
 
+def _dispatch_requires_snapshot(consumer: str, normalized: NormalizedWebhookEvent) -> bool:
+    if normalized.item_id is None:
+        return False
+    if consumer == "auto_sync":
+        # Linked-board handlers enqueue dependents locally, even when the board
+        # also happens to be configured as a managed board.
+        return normalized.board_id == str(settings.auto_sync_board_id) and normalized.board_id not in LINKED_BOARD_IDS
+    return (
+        settings.design_processing_mode != "off"
+        and normalized.board_id == str(settings.design_processing_board_id)
+        and _design_trigger_type(normalized) is not None
+    )
+
+
 def _dispatch_design_processing(
     db: Session,
     dispatch: MondayWebhookDispatch,
@@ -802,10 +816,7 @@ def monday_webhook(
 
     item: Optional[dict[str, Any]] = None
     snapshot_error: Optional[Exception] = None
-    if claimable_dispatches and normalized.item_id and normalized.board_id in {
-        str(settings.auto_sync_board_id),
-        str(settings.design_processing_board_id),
-    }:
+    if any(_dispatch_requires_snapshot(dispatch.consumer, normalized) for dispatch in claimable_dispatches):
         try:
             access_token = get_monday_ingestion_access_token()
             item = fetch_current_source_revision_inputs(
@@ -818,21 +829,7 @@ def monday_webhook(
     retryable_failure = False
     for dispatch in claimable_dispatches:
         try:
-            design_requires_snapshot = (
-                dispatch.consumer == "design_processing"
-                and settings.design_processing_mode != "off"
-                and normalized.board_id == str(settings.design_processing_board_id)
-                and normalized.item_id is not None
-                and _design_trigger_type(normalized) is not None
-            )
-            auto_sync_requires_snapshot = (
-                dispatch.consumer == "auto_sync"
-                and normalized.board_id == str(settings.auto_sync_board_id)
-                and normalized.item_id is not None
-            )
-            if snapshot_error is not None and (
-                design_requires_snapshot or auto_sync_requires_snapshot
-            ):
+            if snapshot_error is not None and _dispatch_requires_snapshot(dispatch.consumer, normalized):
                 raise snapshot_error
             _process_dispatch(
                 db,

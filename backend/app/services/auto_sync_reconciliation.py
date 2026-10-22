@@ -16,6 +16,7 @@ from ..config import settings
 from ..db import SessionLocal
 from ..models import AutoSyncJob, AutoSyncReconciliationCheck, Task, TaskMondayMetadata, TaskSnapshot
 from ..monday_client import (
+    MondayGroupItem,
     fetch_current_account_id,
     fetch_current_source_revision_inputs,
     fetch_item_metadata,
@@ -265,6 +266,7 @@ def reconcile_active_items_once(
     page_size: int = 500,
     stuck_after_seconds: int = 3600,
     force: bool = False,
+    discovered_items: Optional[dict[str, list[MondayGroupItem]]] = None,
 ) -> ReconciliationResult:
     policy = policy or policy_from_settings()
     batch_limit = policy.backfill_batch_size if limit is None else limit
@@ -273,7 +275,11 @@ def reconcile_active_items_once(
     token = access_token or get_monday_ingestion_access_token()
     account_id = fetch_current_account_id(token)
     group_ids = _ordered_active_group_ids(policy)
-    item_ids_by_group = list_item_ids_in_groups(token, policy.board_id, group_ids, limit=page_size)
+    item_ids_by_group = (
+        {group_id: [item.item_id for item in discovered_items.get(group_id, [])] for group_id in group_ids}
+        if discovered_items is not None
+        else list_item_ids_in_groups(token, policy.board_id, group_ids, limit=page_size)
+    )
     selected_items = _fair_item_ids_by_group(
         db, item_ids_by_group, group_ids, batch_limit, board_id=policy.board_id, account_id=account_id, force=force,
     )

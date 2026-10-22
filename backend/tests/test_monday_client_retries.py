@@ -26,6 +26,7 @@ def graphql_error(code, **extensions):
 
 @pytest.fixture
 def client(monkeypatch):
+    monday_client.fetch_current_account_id.cache_clear()
     pending, calls, sleeps = [], [], []
     now = [0.0]
     monkeypatch.setattr(monday_client, "_monday_cooldowns", {})
@@ -48,7 +49,8 @@ def client(monkeypatch):
         monday_client, "_post_monday_graphql",
         monday_client._post_monday_graphql.retry_with(sleep=sleep),
     )
-    return pending, calls, sleeps
+    yield pending, calls, sleeps
+    monday_client.fetch_current_account_id.cache_clear()
 
 
 def test_429_waits_for_longest_server_delay_then_recovers(client, caplog):

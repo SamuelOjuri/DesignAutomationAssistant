@@ -463,10 +463,12 @@ export default function TaskPage() {
       if (data && !signal.aborted) {
         if (data.syncStatus === "completed" || data.syncStatus === "failed") setSyncStatus(null);
         const sourceVersion = `${externalTaskKey}:${data.snapshotVersion}:${Boolean(data.taskContext?.monday_metadata?.revision)}`;
-        if (sourceVersionRef.current !== sourceVersion && await fetchSources(signal)) {
+        if (sourceVersionRef.current !== sourceVersion) {
+          if (!await fetchSources(signal)) return;
           sourceVersionRef.current = sourceVersion;
         }
       }
+      return data ?? undefined;
     }, (error) => setSummaryError(`Refresh error: ${String(error)}`));
   }, [externalTaskKey, fetchSummary, fetchSources, refreshCount, sessionExpired]);
 

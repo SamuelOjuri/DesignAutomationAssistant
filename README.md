@@ -102,6 +102,25 @@ controls only Monday's API page size (1-500, default
 on every invocation; API cursors are not persisted. Duplicate IDs across groups
 are inspected once per batch.
 
+When both auto-sync and design reconciliation are scheduled, replace the two
+separate cron commands with this combined command (for example, every five
+minutes). Preview with `--dry-run` first:
+
+```text
+python -m backend.app.services.monday_reconciliation --limit 100 --completed-limit 100 --design-limit 100 --page-size 500
+```
+
+It discovers the union of the two reconcilers' groups once per board and passes
+the same live inventory to both sweeps. Shared groups, including their later
+pages, are fetched once. Distinct boards get separate inventories. All pages are
+still read to preserve fair selection and full admission coverage; inspection
+limits do not cap pagination. Inventories are not cached across runs. This
+command also runs lifecycle checks, reusing active-check freshness as above.
+Its `--force` flag applies to auto-sync freshness; explicit design item commands
+remain the way to bypass design delays. Disable the separate schedules when
+switching to this command, and prevent overlapping invocations. Existing commands
+remain available. No additional database migration is required for these changes.
+
 Progress is persisted per board/item and scope. Successful active reads also record
 the item's lifecycle observation, so a following lifecycle sweep can inspect other
 tasks instead of fetching the same item again. Source responses already contain the
@@ -475,7 +494,20 @@ Their precise policy reason and observed group ID are recorded. Both settings
 must be positive integers. Delays affect broad reconciliation only: an explicit
 `reconcile-item --item-id ...` or reconciliation `--item-id ...` reads immediately,
 including with `--dry-run`. Webhooks can still queue newly eligible work without
-waiting for the broad scan. Successful eligible reads clear the recheck delay.
+waiting for the broad scan. Successful eligible reads clear an unavailable or
+exclusion delay.
+
+Settled eligible results (`ignored:ready`, including analysis already completed
+in shadow mode) instead schedule their next check after
+`DESIGN_PROCESSING_SETTLED_RECHECK_SECONDS` (default 3600, positive). Queued,
+coalesced and failed work gets no settled delay. Deferred items do not consume
+inspection slots. A pipeline change, newly permitted publication, newer local
+item state, or an eligible group move seen in discovery bypasses the settled
+delay. Explicit item commands and webhooks also remain immediate. Changes missed
+by webhooks can wait up to this interval plus scheduler/batch rotation time.
+For 36 unchanged settled items, hourly reads represent about 864 item reads per
+day, versus 3,456 with a 15-minute sweep; discovery and other reads are additional.
+
 The obsolete `not_registered_in_landing_zone` exclusion no longer delays a
 candidate rediscovered within the broad admission boundary. Reconciliation checks
 its live eligibility immediately; other exclusion and unavailable delays remain
@@ -505,6 +537,34 @@ ORDER BY last_attempted_at DESC;
 These check records do not create a purge deadline. Extending retention cleanup
 to design artifacts and defining retention for unavailable items are separate
 changes; the existing ingestion purge still covers only its current data scope.
+
+### Task polling and webhook request usage
+
+Visible task pages poll summaries every 12 seconds while ingestion is pending or
+running, and every 60 seconds after ingestion completes or fails. They still
+discover metadata-only changes and newly queued work; focus/visibility return
+and manual refresh trigger an immediate read. Hidden tabs pause reads, requests
+never overlap, and failed summary requests retry on the fast cadence. A settled
+visible tab uses about 60 permission lookups/hour instead of 300, excluding focus
+events and other user actions. Background changes can take up to 60 seconds to
+appear on an already settled page.
+
+Permission decisions are deliberately not cached: each backend summary/source,
+chat, sync and download request retains its existing access check, with no new
+permission-revocation grace period. The immutable token-to-account identity is
+cached separately (up to 32 successful identities per API/worker process). Token
+rotation uses a new entry; failed identity requests are never cached. This removes
+repeated `me.account` lookups from webhook bursts without granting item access.
+The cache is not shared between processes and a fresh process must read the
+identity once.
+
+Webhook dispatchers decide whether a claimed consumer needs a current snapshot
+before any remote reads. Disabled/non-actionable design consumers and locally
+handled linked-board metadata events can complete without a snapshot. Required
+snapshots are shared by both consumers. Design output-file events still fetch a
+snapshot when auto-sync needs to index the changed file. Retry claims continue
+to skip successful consumers and snapshot failures affect only consumers that
+need the read.
 
 ### Project matching API usage
 

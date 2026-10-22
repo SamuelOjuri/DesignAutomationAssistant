@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
+from functools import lru_cache
 import hashlib
 import json
 import logging
@@ -711,7 +712,11 @@ query {
 """
 
 
+@lru_cache(maxsize=32)
 def fetch_current_account_id(access_token: str) -> str:
+    # A token's account identity is immutable. Cache only successful identities;
+    # each subsequent item/permission request still authenticates with Monday.
+    # Token rotation naturally uses a different entry, bounded per process.
     payload = monday_graphql_request(
         access_token,
         CURRENT_ACCOUNT_QUERY,

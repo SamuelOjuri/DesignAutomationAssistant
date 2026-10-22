@@ -97,6 +97,7 @@ class Settings(BaseSettings):
     design_processing_readiness_alert_threshold_seconds: int = Field(default=21600, ge=1)
     design_processing_unavailable_recheck_seconds: int = Field(default=3600, ge=1)
     design_processing_excluded_recheck_seconds: int = Field(default=21600, ge=1)
+    design_processing_settled_recheck_seconds: int = Field(default=3600, ge=1)
 
     model_config = SettingsConfigDict(
         env_file=".env",

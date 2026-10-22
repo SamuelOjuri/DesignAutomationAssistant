@@ -5,9 +5,15 @@ type PollingEnvironment = {
   cancel: (timer: ReturnType<typeof setTimeout>) => void;
 };
 
+type TaskPollingState = { syncStatus?: string | null };
+
+export function taskPollingInterval(state: TaskPollingState | void): number {
+  return state?.syncStatus === "completed" || state?.syncStatus === "failed" ? 60_000 : 12_000;
+}
+
 /** Keep discovering server changes after ingestion completes, without overlapping reads. */
 export function startTaskPolling(
-  refresh: (signal: AbortSignal, first: boolean) => Promise<void>,
+  refresh: (signal: AbortSignal, first: boolean) => Promise<TaskPollingState | void>,
   onError: (error: unknown) => void,
   environment: PollingEnvironment = {
     isVisible: () => document.visibilityState === "visible",
@@ -27,21 +33,23 @@ export function startTaskPolling(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let busy = false;
   let first = true;
+  let interval = 12_000;
   const poll = async () => {
     if (busy || controller.signal.aborted) return;
     if (timer !== undefined) environment.cancel(timer);
     if (environment.isVisible()) {
       busy = true;
       try {
-        await refresh(controller.signal, first);
+        interval = taskPollingInterval(await refresh(controller.signal, first));
         first = false;
       } catch (error) {
+        interval = 12_000;
         if (!controller.signal.aborted) onError(error);
       } finally {
         busy = false;
       }
     }
-    if (!controller.signal.aborted) timer = environment.schedule(() => void poll(), 12_000);
+    if (!controller.signal.aborted) timer = environment.schedule(() => void poll(), interval);
   };
   const unsubscribe = environment.subscribe(() => {
     if (environment.isVisible()) void poll();

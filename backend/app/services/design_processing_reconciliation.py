@@ -19,8 +19,9 @@ from ..models import DesignProcessingItem, DesignProcessingReconciliationCheck
 from ..monday_client import MondayGroupItem, MondayItemUnavailable, list_items_in_groups
 from .auto_sync import get_monday_ingestion_access_token, utc_now
 from .design_processing_observability import log_design_processing_event
-from .design_processing_queue import queue_design_processing_snapshot
+from .design_processing_queue import publication_allowed_for_item, queue_design_processing_snapshot
 from .design_processing_policy import design_scope_exclusion, eligible_design_group_ids
+from .design_processing_state import next_obligation
 from .design_processing_target import (
     DesignProcessingReadGateway,
     MondayDesignProcessingReadGateway,
@@ -113,9 +114,10 @@ def _broad_reconciliation_candidates(
     board_id: str,
     group_id: str,
     activation_timestamp: datetime,
-) -> tuple[list[MondayGroupItem], list[DesignProcessingReconciliationItemResult]]:
+    discovered_items: Optional[dict[str, list[MondayGroupItem]]] = None,
+) -> tuple[list[MondayGroupItem], list[DesignProcessingReconciliationItemResult], dict[str, str]]:
     group_ids = sorted(eligible_design_group_ids(landing_group_id=group_id))
-    items_by_group = list_items_in_groups(
+    items_by_group = discovered_items if discovered_items is not None else list_items_in_groups(
         token,
         board_id,
         group_ids,
@@ -123,6 +125,7 @@ def _broad_reconciliation_candidates(
     candidates: list[MondayGroupItem] = []
     skipped: list[DesignProcessingReconciliationItemResult] = []
     seen: set[str] = set()
+    candidate_groups: dict[str, str] = {}
     for eligible_group_id in group_ids:
         for summary in items_by_group.get(eligible_group_id, []):
             # An item can move between groups while their pages are fetched.
@@ -140,7 +143,8 @@ def _broad_reconciliation_candidates(
                 )
                 continue
             candidates.append(summary)
-    return candidates, skipped
+            candidate_groups[summary.item_id] = eligible_group_id
+    return candidates, skipped, candidate_groups
 
 
 def reconcile_landing_zone_once(
@@ -154,6 +158,7 @@ def reconcile_landing_zone_once(
     item_id: Optional[str] = None,
     limit: Optional[int] = None,
     now: Optional[datetime] = None,
+    discovered_items: Optional[dict[str, list[MondayGroupItem]]] = None,
 ) -> DesignProcessingReconciliationResult:
     configured_mode = mode or settings.design_processing_mode
     board_id = str(settings.design_processing_board_id)
@@ -184,11 +189,12 @@ def reconcile_landing_zone_once(
             raise ValueError(
                 "broad design-processing reconciliation requires an activation timestamp"
             )
-        candidates, prefiltered_results = _broad_reconciliation_candidates(
+        candidates, prefiltered_results, candidate_groups = _broad_reconciliation_candidates(
             token,
             board_id=board_id,
             group_id=group_id,
             activation_timestamp=_as_aware_utc(boundary),
+            discovered_items=discovered_items,
         )
         # New admission in Landing Zone and active groups is activation-bounded.
         # Previously admitted unfinished items are also checked outside those
@@ -235,9 +241,26 @@ def reconcile_landing_zone_once(
                 and check.last_outcome == "excluded"
                 and check.last_reason == "not_registered_in_landing_zone"
             )
+            stored = tracked_by_id.get(candidate.item_id)
+            # Only successful, settled observations use this fast bypass. Keep
+            # unavailable/excluded backoffs intact. Policy changes and local
+            # work must be actionable even before the settled deadline.
+            settled_changed = (
+                check is not None and check.last_outcome == "ignored" and check.last_reason == "ready"
+                and stored is not None and (
+                    stored.latest_desired_pipeline_version != settings.design_processing_pipeline_version
+                    or next_obligation(stored, publication_allowed=publication_allowed_for_item(
+                        mode=configured_mode, item_id=stored.item_id,
+                        allowlist_item_ids=settings.design_processing_allowlist_item_ids,
+                    )) is not None
+                    or check.last_checked_at is None
+                    or _stored_utc(stored.updated_at) > _stored_utc(check.last_checked_at)
+                    or candidate_groups.get(candidate.item_id, check.last_group_id) != check.last_group_id
+                )
+            )
             if check is not None and check.next_check_at is not None and (
                 _stored_utc(check.next_check_at) > reconciliation_now
-            ) and not obsolete_admission_exclusion:
+            ) and not (obsolete_admission_exclusion or settled_changed):
                 deferred_results.append(DesignProcessingReconciliationItemResult(
                     item_id=candidate.item_id, action="deferred", reason=check.last_reason,
                     group_id=check.last_group_id, next_check_at=_stored_utc(check.next_check_at),
@@ -322,6 +345,10 @@ def reconcile_landing_zone_once(
                     ) or reason
                     next_check_at = checked_at + timedelta(
                         seconds=settings.design_processing_excluded_recheck_seconds,
+                    )
+                elif outcome == "ignored" and reason == "ready":
+                    next_check_at = checked_at + timedelta(
+                        seconds=settings.design_processing_settled_recheck_seconds,
                     )
                 if not dry_run:
                     _record_check(
