@@ -1302,6 +1302,80 @@ def fetch_project_word_hit_counts(
     return counts
 
 
+def fetch_project_items_matching_any_words(
+    access_token: str,
+    board_id: str,
+    words: Sequence[str],
+    *,
+    start_date: str = "2021-01-01",
+    limit: int = 500,
+) -> tuple[MondayProjectBoardItem, ...]:
+    """Read the complete dated candidate pool once, rather than every subset."""
+    normalized_words = tuple(dict.fromkeys(_normalize_project_words(words)))
+    if not normalized_words:
+        raise ValueError("at least one project search word is required")
+    normalized_board_id = _normalize_positive_decimal_id(board_id, "board_id")
+    _validate_project_start_date(start_date)
+    if not 1 <= limit <= 500:
+        raise ValueError("limit must be between 1 and 500")
+    query = f"""
+    query ($boardIds: [ID!], $queryParams: ItemsQuery, $limit: Int!) {{
+        boards(ids: $boardIds) {{
+            items_page(query_params: $queryParams, limit: $limit) {{
+                {PROJECT_ITEMS_PAGE_FIELDS}
+            }}
+        }}
+    }}
+    """
+    payload = monday_graphql_request(
+        access_token, query,
+        {
+            "boardIds": [normalized_board_id],
+            "limit": limit,
+            "queryParams": {
+                "operator": "and",
+                "rules": [{
+                    "column_id": PROJECT_CREATED_DATE_COLUMN_ID,
+                    "compare_value": ["EXACT", start_date],
+                    "operator": "greater_than_or_equals",
+                }],
+                "groups": [{
+                    "operator": "or",
+                    "rules": [{
+                        "column_id": PROJECT_TITLE_COLUMN_ID,
+                        "compare_value": [word],
+                        "operator": "contains_text",
+                    } for word in normalized_words],
+                }],
+            },
+        },
+        timeout=20,
+    )
+    page = _extract_project_board_page(payload, context="project candidate search")
+    items_by_id: dict[str, MondayProjectBoardItem] = {}
+    seen_cursors: set[str] = set()
+    while True:
+        for item in _parse_project_items(page):
+            items_by_id.setdefault(item.item_id, item)
+        # A missing cursor is not evidence that the candidate pool is complete.
+        if "cursor" not in page:
+            raise MondayReadContractError(detail="monday project candidate page cursor is missing")
+        cursor = page["cursor"]
+        if cursor is None:
+            return tuple(item for item in items_by_id.values() if item.state == "active")
+        if not isinstance(cursor, str) or not cursor or cursor in seen_cursors:
+            raise MondayReadContractError(detail="monday project candidate page cursor is malformed or repeated")
+        seen_cursors.add(cursor)
+        next_payload = monday_graphql_request(
+            access_token, NEXT_PROJECT_ITEMS_PAGE_QUERY,
+            {"cursor": cursor, "limit": limit}, timeout=20,
+        )
+        next_data = _require_mapping(next_payload, "data", context="next project candidate page")
+        page = next_data.get("next_items_page")
+        if not isinstance(page, Mapping):
+            raise MondayReadContractError(detail="monday next project candidate page is incomplete")
+
+
 def fetch_project_items_matching_words(
     access_token: str,
     board_id: str,

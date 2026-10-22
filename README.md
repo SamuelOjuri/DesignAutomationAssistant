@@ -258,6 +258,16 @@ The offline legacy source must be available at
 `data/FW_ Drawings Titley close_Walton House.msg`. Both inputs are verified by
 SHA-256 before legacy code is executed.
 
+Treat the ignored `producer/TechnicalDesignAssistant` directory as an immutable
+verification snapshot; keep active legacy development in a separate checkout.
+The manifest pins exact bytes, including line endings and the final newline.
+If source verification fails, restore the original files matching those hashes
+rather than updating the manifest or regenerating expected outputs to accept
+the changed checkout. The local snapshot drift found on 22 October 2026 was
+repaired from hash-matching Git blobs, with the replaced files backed up under
+`tmp/legacy_snapshot_backup_20261022T093508Z`. The manifest and golden fixtures
+were retained unchanged.
+
 Run the Phase 1 trust gates from the workspace root:
 
 ```powershell
@@ -457,3 +467,186 @@ ORDER BY last_attempted_at DESC;
 These check records do not create a purge deadline. Extending retention cleanup
 to design artifacts and defining retention for unavailable items are separate
 changes; the existing ingestion purge still covers only its current data scope.
+
+### Project matching API usage
+
+Project matching uses one batched word-specificity lookup and a paginated
+candidate query on the configured project board. The candidate filter is
+`date9__1 >= 2021-01-01 AND (text3__1 contains word A OR word B OR ...)`.
+The date condition stays outside the OR group. Search terms are passed as
+GraphQL variables; no semantic-search endpoint or API-version change is needed.
+
+The matcher selects the longest matching word signature locally, with ties
+broken by the existing word-specificity order. It preserves substring matching,
+the first 500 results for the winning combination, similarity ranking, and the
+existing fuzzy fallback when there are no word matches. Candidate pagination
+must finish before choosing a match; malformed pages, failed requests, and
+repeated cursors raise errors rather than reporting a project as new. Existing
+remote execution checks still surround each logical gateway operation.
+
+Deploy the updated design worker with its matching gateway/client code. There
+is no database migration or output-version bump. The pinned producer snapshot
+and legacy fixtures remain unchanged. Matching requests now scale with result
+pages, rather than the number of possible word subsets; very broad candidate
+sets and the existing full-board fuzzy fallback still require pagination.
+
+Run the offline parity, pagination, and request-budget tests:
+
+```powershell
+venv/Scripts/python.exe -m pytest backend/tests/test_project_matching_efficiency.py backend/tests/test_design_processing_phase3.py backend/tests/test_design_processing_phase5.py -q
+venv/Scripts/python.exe -m pytest backend/tests/test_project_matching_efficiency.py -k no_match_requests -q -s
+```
+
+The request-budget evaluation compares the prior subset algorithm with the
+production gateway and new matcher using fake Monday responses. For a no-match
+search with one candidate page and one fuzzy-fallback page, it counts 9 requests
+including source-item validation, versus 3,075 for a ten-word title previously.
+Retries and other pipeline stages are excluded. No live Monday calls are made.
+
+### Live comparison with `search.items` (22 October 2026)
+
+The service token authenticated successfully. The implemented candidate filter
+also passed a live read using the configured `2025-04` API version. A separate
+read-only evaluation used `search.items` on `2026-07`, scoped to project board
+`1825117125`, with `limit: 20` and both `BALANCED` and `QUALITY` strategies.
+The four verified projects have numeric item names; their descriptive titles
+were read from `text3__1`. The fixture IDs are synthetic and were not used as
+live project IDs.
+
+| Query | Implemented matcher found expected project | BALANCED | QUALITY |
+| --- | --- | --- | --- |
+| Bracken Dale, LA | Yes | Yes | Yes |
+| VIE06 - Austria | Yes | Yes | Yes |
+| 100 New Kings Road | Yes | Yes | No |
+| Wickside, Hepscott Road | Yes | Yes | Yes |
+| 100 New Kings Road SW6 4LX | Yes | Yes | No |
+
+`BALANCED` returned the four exact-title projects at rank 1, and the postcode
+variant's expected project at rank 2. Searching the reference `16771` was a
+successful control. Both strategies returned 20 raw results for each of two
+invented project titles. After checking the current board, active state, custom
+`date9__1` cutoff, and applying the existing 0.55 similarity threshold, neither
+negative case retained a search match. Raw nonempty search results therefore
+must not be interpreted as proof that the queried project already exists.
+
+The implemented matcher required 2-4 matching reads for the positive cases.
+Search used one request per query, including the live fields needed for
+validation. A cold negative required 21 matching reads: the word-count and
+candidate queries plus 19 pages covering 9,160 dated active projects for the
+fuzzy fallback. That complete fallback scan and identical queries were reused
+between evaluation cases only; the production matcher has no new shared cache.
+These counts exclude worker source-item validation and complexity weighting.
+
+The comparison harness recorded 52 successful HTTP requests and one connection
+retry, separate from the initial connection probes. All operations were reads.
+This initial sample suggested testing `BALANCED` further as a fast first pass.
+The expanded comparison below supersedes that provisional recommendation.
+`QUALITY` was less reliable on these particular known projects. Neither
+evaluation switched production to `search.items`, changed the global API
+version, or deployed the code.
+
+### Expanded matcher evaluation and recommendation (22 October 2026)
+
+**Keep the optimized paginated board filter as the primary matcher for the
+existing project-review workflow.** `BALANCED` retrieved all known intended
+projects in this sample, including titles held only in `text3__1`, but omitted
+alternative candidates that the current matching report can present for review.
+
+The expanded read-only benchmark used a complete snapshot of 9,160 dated active
+projects, live word-specificity counts, and 36 cases: 20 exact titles, eight
+altered titles with a known intended source project, four invented nonmatches,
+and four ambiguous broad queries. Sixteen exact-title projects were sampled
+using seed `20261022`; four were the previously verified anchors. All 20 have
+descriptive titles absent from their numeric item names. Both methods use the
+same board, active-state, and `date9__1` validation. Two selection policies were
+tested over the live `BALANCED` results to separate retrieval from ranking:
+
+| Test | Optimized board matcher | BALANCED + same matching policy | BALANCED + 0.55 similarity threshold |
+| --- | --- | --- | --- |
+| Exact titles: intended project ranked first | 20/20 | 20/20 | 20/20 |
+| Altered titles: intended project ranked first | 8/8 | 8/8 | 6/8 |
+| Invented nonmatches rejected | 4/4 | 4/4 | 4/4 |
+
+The threshold-only search approach excluded the intended `Bracken Dale, LA`
+project for `LA Dale Bracken`, accepting a different project instead. It returned
+no accepted project for `7AW N12 Rd Holden 40-42`, whose intended source was
+`40-42 Holden Rd N12 7AW`. Both intended projects were present in the raw search
+results and recovered when the same word-selection policy was applied. These
+are selection-policy failures, not failures of raw semantic retrieval.
+
+Even with identical selection rules, the complete ordered candidate reports
+agreed for only 24 of 28 intended-project cases, and none of the four ambiguous
+queries. Broad-query examples illustrate the retrieval difference:
+
+| Query | Optimized report candidates | Raw BALANCED results | Those optimized candidates present in raw search |
+| --- | --- | --- | --- |
+| Kings Road | 24 | 20 | 9 |
+| High Street | 59 | 20 | 4 |
+| Industrial Estate | 11 | 20 | 8 |
+| School | 500 (existing report cap) | 20 | 10 |
+
+Not every semantic result is a board-filter match, and some raw results fail the
+custom-date validation. These counts measure compatibility and candidate
+coverage, not independent proof that the board match is semantically superior.
+Search's maximum of 20 results and lack of pagination prevent it from preserving
+the current candidate-report contract. Its index is asynchronous; resolving
+`live_data` validates returned records but cannot restore omitted candidates.
+One of four fresh repeat queries changed its candidate set and order, although
+the intended project remained present in all four repeats.
+
+The optimized matcher modeled a median of two matching HTTP reads for exact
+titles (range 2-7), and three for altered titles (range 2-21). Four actual gateway
+probes confirmed both the modeled counts (2, 4, 2, 21) and full matching outputs.
+The snapshot model filters the original `text3__1` field, including blanks,
+rather than the client's fallback display title. `BALANCED` with the similarity
+policy used one HTTP request per query, with median request latency 0.851 seconds;
+this is not an end-to-end speed comparison. Using the same global word-specificity
+ordering with search would also require a word-count read when uncached.
+
+The remaining request hotspot is the existing full-board fuzzy fallback: 19
+additional pages in this snapshot, for 21 matching reads on a cold nonmatch or
+the tested Austria typo. A shared incremental project index is a separate
+optimization to investigate. The new matcher already removes the exponential
+subset-query loop; switching to semantic search is not required for that saving.
+`BALANCED` remains suitable for an optional suggestions interface if the product
+only needs a few ranked results.
+
+The benchmark recorded 73 successful HTTP requests, no connection failures,
+and no search GraphQL errors. Shared snapshot/count reads were reused only by
+the benchmark; production has no new cross-request cache. Request counts exclude
+worker validation, retries, complexity weighting, and other applications using
+the account. Twenty exact titles, eight generated variants, and four negative
+controls do not establish production-wide recall or false-positive rates.
+The targeted matching, gateway, and fixture suite passed: **124 tests**.
+
+Detailed case results, request ledger, and limitations are saved in
+[`tmp/project_matcher_benchmark_results.json`](tmp/project_matcher_benchmark_results.json).
+The benchmark is [`tmp/benchmark_project_matchers.py`](tmp/benchmark_project_matchers.py);
+its full-board response cache was removed after analysis. Application matching
+logic was not changed by this expanded evaluation.
+
+### Matcher release verification (22 October 2026)
+
+After repairing the local legacy snapshot, all ten pinned source hashes verify
+and the committed golden JSON/CSV reproduce byte-for-byte. No manifest hashes,
+expected fixtures, pipeline versions, or database schemas were changed for
+this repair or the matching optimization.
+
+```powershell
+venv/Scripts/python.exe -m pytest backend/tests -q --disable-warnings --tb=short
+# 694 passed, 8 skipped (PostgreSQL integration tests require TEST_DATABASE_URL).
+venv/Scripts/python.exe -m pytest backend/tests/test_design_processing_phase1.py -q --disable-warnings --tb=short
+# 18 passed, including both legacy verification checks.
+git diff --check
+```
+
+The matcher update is ready to commit and deploy to the design-processing
+worker using the existing Monday API version and configuration. PostgreSQL
+integration coverage was not rerun against a database; the update makes no
+database changes. Local evaluation reports, recovery utilities, downloaded Git
+history, and replaced-source backups are excluded through `.gitignore`.
+No commit, push, or production deployment was performed by this verification.
+
+See Monday's [search reference](https://developer.monday.com/api-reference/reference/search)
+and [search guide](https://developer.monday.com/api-reference/docs/searching-across-your-account)
+for result limits, indexing behavior, and strategy options.

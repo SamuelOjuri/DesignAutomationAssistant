@@ -48,6 +48,13 @@ class DesignProcessingReadGateway(Protocol):
         start_date: str = "2021-01-01",
     ) -> tuple[monday_client.MondayProjectBoardItem, ...]: ...
 
+    def fetch_project_items_matching_any_words(
+        self,
+        words: Sequence[str],
+        *,
+        start_date: str = "2021-01-01",
+    ) -> tuple[monday_client.MondayProjectBoardItem, ...]: ...
+
     def fetch_project_items_matching_full_text(
         self,
         project_name: str,
@@ -145,6 +152,19 @@ class MondayDesignProcessingReadGateway:
             self.access_token,
             self.project_board_id,
             project_name,
+            start_date=start_date,
+        )
+
+    def fetch_project_items_matching_any_words(
+        self,
+        words: Sequence[str],
+        *,
+        start_date: str = "2021-01-01",
+    ) -> tuple[monday_client.MondayProjectBoardItem, ...]:
+        return monday_client.fetch_project_items_matching_any_words(
+            self.access_token,
+            self.project_board_id,
+            words,
             start_date=start_date,
         )
 

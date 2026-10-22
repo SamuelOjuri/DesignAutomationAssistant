@@ -259,6 +259,12 @@ class FakeReadGateway:
     def fetch_project_items_matching_words(self, words, *, start_date="2021-01-01"):
         return self.items
 
+    def fetch_project_items_matching_any_words(self, words, *, start_date="2021-01-01"):
+        return tuple(
+            item for item in self.items
+            if any(word.lower() in item.project_title.lower() for word in words)
+        )
+
     def fetch_project_items_matching_full_text(
         self,
         project_name,

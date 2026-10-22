@@ -32,6 +32,11 @@ node_modules/
 /tmp/excel_deps/
 /tmp/monday-metadata-pytest-*/
 /tmp/pytest-design-groups-*/
+# Local evaluations contain project samples; recovery folders contain legacy backups.
+/tmp/*monday_search*
+/tmp/*project_matcher*
+/tmp/*legacy_snapshot*
+/tmp/legacy-source-recovery.git/
 dist/
 build/
 

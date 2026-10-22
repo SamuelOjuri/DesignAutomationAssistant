@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from difflib import SequenceMatcher
-import itertools
 import re
 from typing import Any, Protocol, Sequence
 
@@ -9,6 +8,8 @@ from ...monday_client import MondayProjectBoardItem
 
 
 PROJECT_SEARCH_START_DATE = "2021-01-01"
+# The old per-combination query returned at most one page of 500 matches.
+PROJECT_MATCH_LIMIT = 500
 
 
 class ProjectMatchingGateway(Protocol):
@@ -17,7 +18,7 @@ class ProjectMatchingGateway(Protocol):
         words: Sequence[str],
     ) -> dict[str, int]: ...
 
-    def fetch_project_items_matching_words(
+    def fetch_project_items_matching_any_words(
         self,
         words: Sequence[str],
         *,
@@ -177,16 +178,30 @@ def match_projects(
         meaningful_words,
         key=lambda word: counts.get(word, 1_000_000),
     )
-    matches: list[dict[str, Any]] = []
-    for subset_size in range(len(ordered_words), 0, -1):
-        for subset in itertools.combinations(ordered_words, subset_size):
-            items = gateway.fetch_project_items_matching_words(
-                subset,
-                start_date=PROJECT_SEARCH_START_DATE,
-            )
-            matches = _ordered_matches(items, project_name)
-            if matches:
-                return _result_with_matches(matches)
+    candidates = gateway.fetch_project_items_matching_any_words(
+        ordered_words,
+        start_date=PROJECT_SEARCH_START_DATE,
+    )
+    # Every item satisfies all subsets of its matching word positions. The first
+    # nonempty legacy combination is therefore the longest signature, breaking
+    # ties by position in the specificity-ordered word list. This avoids both
+    # remote subset queries and exponential local combination enumeration.
+    lowered_words = [word.lower() for word in ordered_words]
+    by_signature: dict[tuple[int, ...], list[MondayProjectBoardItem]] = {}
+    for item in candidates:
+        if item.state != "active":
+            continue
+        title = item.project_title.lower()
+        signature = tuple(
+            index for index, word in enumerate(lowered_words) if word in title
+        )
+        if signature:
+            by_signature.setdefault(signature, []).append(item)
+    if by_signature:
+        winning_signature = min(by_signature, key=lambda value: (-len(value), value))
+        return _result_with_matches(_ordered_matches(
+            by_signature[winning_signature][:PROJECT_MATCH_LIMIT], project_name,
+        ))
 
     fallback_items = gateway.fetch_active_project_items_since(
         start_date=PROJECT_SEARCH_START_DATE,
