@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 from pathlib import Path
 from typing import Protocol, Sequence
@@ -40,6 +40,7 @@ class LegacyAnalysisResult:
     project_name: str
     email_content_audit: tuple[EmailContentAudit, ...]
     extracted_text_sha256: str
+    performance_parameters: dict[str, str | None] = field(default_factory=dict)
 
 
 def analyze_downloaded_email_assets(
@@ -97,9 +98,10 @@ def analyze_downloaded_email_assets(
             )
         )
 
+    structured_parameters = client.extract_design_parameters(all_text)
     parameters = extract_parameters(
         all_text,
-        extracted_parameters=client.extract_design_parameters(all_text),
+        extracted_parameters=structured_parameters,
     )
     query_llm: QueryLlm = client.query_llm
     project_name = extract_project_name_from_content(
@@ -119,4 +121,9 @@ def analyze_downloaded_email_assets(
         project_name=project_name,
         email_content_audit=tuple(audits),
         extracted_text_sha256=hashlib.sha256(all_text.encode("utf-8")).hexdigest(),
+        performance_parameters={
+            **structured_parameters.as_canonical_parameters(),
+            "Date Received": parameters["Date Received"],
+            "Bauder Roof Num": structured_parameters.bauder_roof_num,
+        },
     )

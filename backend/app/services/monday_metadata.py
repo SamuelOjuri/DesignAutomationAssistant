@@ -54,6 +54,8 @@ def enqueue_metadata(
         seconds=0 if immediate else policy_from_settings().debounce_seconds,
     )
     record.attempt_count = 0
+    from .performance_specification import enqueue_specification
+    enqueue_specification(db, task.board_id, task.item_id, group_id=task.source_group_id, immediate=immediate)
     return record
 
 
@@ -76,6 +78,8 @@ def enqueue_linked_dependents(db: Session, board_id: str, item_id: str) -> int:
 
 
 def cancel_metadata(db: Session, task: Task) -> None:
+    from .performance_specification import cancel_specification
+    cancel_specification(db, task.board_id, task.item_id)
     record = _locked_record(db, task.external_task_key).one_or_none()
     if record is not None:
         record.completed_generation = record.requested_generation
@@ -92,6 +96,10 @@ def _store_fields(db: Session, record: TaskMondayMetadata, fields: list[dict[str
         record.fields_json = fields
         record.revision = revision
         record.changed_at = now
+        from .performance_specification import enqueue_specification
+        task = db.get(Task, record.external_task_key)
+        if task is not None:
+            enqueue_specification(db, task.board_id, task.item_id, group_id=task.source_group_id)
     record.checked_at = now
     db.query(MondayMetadataLink).filter_by(external_task_key=record.external_task_key).delete(synchronize_session=False)
     for field in fields:

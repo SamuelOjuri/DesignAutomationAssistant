@@ -135,6 +135,7 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
         scale="1:100",
         page_size="A1",
         bauder_contract_number="B123456",
+        bauder_roof_num="007",
         membrane="SBS modified bitumen",
         vcl="BauderTEC KSA DUO",
     )
@@ -151,6 +152,8 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
     )
     extracted = client.extract_design_parameters("email and attachment content")
     parameters = extract_parameters("", extracted_parameters=extracted)
+    assert extracted.bauder_roof_num == "007"
+    assert "Bauder Roof Num" not in parameters  # Historical CSV contract is preserved.
 
     assert parameters["Fall of Tapered"].endswith("scheme itself).")
     assert parameters["Tapered Insulation"] == "Not provided"
@@ -505,6 +508,8 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
         }
     )
     assert item.extracted_parameters_json["parameters"] == expected_parameters
+    assert item.extracted_parameters_json["performanceParameters"]["Tapered Insulation"] == "TR27"
+    assert item.extracted_parameters_json["performanceParameters"]["Bauder Roof Num"] is None
     assert item.extracted_parameters_json["sources"]["Reason for Change"] == "Business Rule"
     assert item.match_result_json["legacyDiagnostics"] == golden_expected["matching"]
     assert job.status == "completed"

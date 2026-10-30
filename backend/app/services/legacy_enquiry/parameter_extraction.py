@@ -147,6 +147,15 @@ class DesignParameterExtraction(BaseModel):
             "the roof insulation."
         )
     )
+    bauder_roof_num: str | None = Field(
+        default=None,
+        description=(
+            "A roof number explicitly identified as Bauder's roof number in the email "
+            "subject or body. Preserve leading zeroes and letters. Do not substitute a "
+            "contract number, drawing reference, or infer a roof number. Usually absent; "
+            "return null when not explicitly specified."
+        ),
+    )
 
     def as_canonical_parameters(self) -> dict[str, str | None]:
         return {

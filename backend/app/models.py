@@ -469,6 +469,75 @@ class DesignProcessingItem(Base):
     )
 
 
+class PerformanceSpecification(Base):
+    """Durable refresh state, independent of extraction and historical AI Data."""
+
+    __tablename__ = "performance_specifications"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["board_id", "item_id"],
+            ["design_processing_items.board_id", "design_processing_items.item_id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("requested_generation >= completed_generation AND completed_generation >= 0"),
+        Index("ix_performance_specifications_due", "scheduled_for"),
+    )
+    board_id = Column(String, primary_key=True)
+    item_id = Column(String, primary_key=True)
+    requested_generation = Column(Integer, nullable=False, default=1)
+    completed_generation = Column(Integer, nullable=False, default=0)
+    scheduled_for = Column(DateTime(timezone=True), nullable=True)
+    lease_token = Column(String, nullable=True)
+    lease_until = Column(DateTime(timezone=True), nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    checked_at = Column(DateTime(timezone=True), nullable=True)
+    source_json = Column(JSON, nullable=True)
+    current_revision = Column(String, nullable=True)
+
+
+class PerformanceSpecificationLink(Base):
+    __tablename__ = "performance_specification_links"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["board_id", "item_id"],
+            ["performance_specifications.board_id", "performance_specifications.item_id"],
+            ondelete="CASCADE",
+        ),
+        Index("ix_performance_specification_links_source", "linked_board_id", "linked_item_id"),
+    )
+    board_id = Column(String, primary_key=True)
+    item_id = Column(String, primary_key=True)
+    linked_board_id = Column(String, primary_key=True)
+    linked_item_id = Column(String, primary_key=True)
+
+
+class PerformanceSpecificationArtifact(Base):
+    """Only files in this ledger may be adopted or replaced by this publisher."""
+
+    __tablename__ = "performance_specification_artifacts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["board_id", "item_id"],
+            ["performance_specifications.board_id", "performance_specifications.item_id"],
+            ondelete="CASCADE",
+        ),
+    )
+    board_id = Column(String, primary_key=True)
+    item_id = Column(String, primary_key=True)
+    revision = Column(String, primary_key=True)
+    translation_json = Column(JSON, nullable=False)
+    model_version = Column(String, nullable=False)
+    filename = Column(String, nullable=False)
+    storage_bucket = Column(String, nullable=False)
+    storage_object_key = Column(String, nullable=False)
+    content_sha256 = Column(String, nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    monday_asset_id = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="rendered")
+    last_error = Column(Text, nullable=True)
+
+
 class DesignProcessingJob(Base):
     __tablename__ = "design_processing_jobs"
     __table_args__ = (

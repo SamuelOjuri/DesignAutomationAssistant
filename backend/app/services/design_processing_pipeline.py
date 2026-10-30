@@ -164,6 +164,7 @@ def _extraction_payload(
         "schemaVersion": 1,
         **_identity_payload(identity),
         "parameters": result.parameters,
+        "performanceParameters": result.performance_parameters,
         "sources": result.sources,
         "projectName": result.project_name,
         "emailContentHashes": [
@@ -445,6 +446,9 @@ def run_analysis_pipeline(
         worker_id=worker_id,
         now=completed_at,
     )
+    from .performance_specification import enqueue_specification
+
+    enqueue_specification(db, item.board_id, item.item_id, group_id=snapshot.group_id)
     db.flush([item, job])
 
     publication_allowed = _execution_is_allowed(

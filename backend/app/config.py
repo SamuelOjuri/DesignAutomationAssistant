@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from .gemini_models import ThinkingLevel, validate_thinking_level
 from .services.legacy_enquiry import LEGACY_MANIFEST_DIGEST
 
-DESIGN_PROCESSING_PIPELINE_REVISION = "output-v7"
+DESIGN_PROCESSING_PIPELINE_REVISION = "output-v8"
 
 class Settings(BaseSettings):
     # monday
@@ -76,6 +76,20 @@ class Settings(BaseSettings):
     auto_sync_purge_enabled: bool = False
     monday_ingestion_access_token: Optional[str] = None
     monday_api_version: str = "2025-04"
+
+    # Independent, active-group-only CAD specification publication.
+    performance_specification_enabled: bool = False
+    performance_specification_recheck_seconds: int = Field(default=3600, ge=30)
+    performance_specification_column_map: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+    @field_validator("performance_specification_column_map")
+    @classmethod
+    def _validate_specification_scopes(cls, value):
+        if set(value) - {"holding", "project", "drawing"}:
+            raise ValueError("Specification column-map scopes must be holding, project or drawing")
+        if any(not column_id.strip() for fields in value.values() for column_id in fields.values()):
+            raise ValueError("Specification mapped column IDs must not be empty")
+        return value
 
     # Design-processing worker
     design_processing_mode: Literal["off", "shadow", "allowlist", "enabled"] = "off"

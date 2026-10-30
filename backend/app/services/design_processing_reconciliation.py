@@ -328,6 +328,12 @@ def reconcile_landing_zone_once(
                     allowlist_item_ids=settings.design_processing_allowlist_item_ids,
                     now=checked_at,
                 )
+                if not dry_run:
+                    from .performance_specification import cancel_specification, enqueue_specification
+                    if snapshot.item_state != "active":
+                        cancel_specification(db, snapshot.board_id, snapshot.item_id)
+                    else:
+                        enqueue_specification(db, snapshot.board_id, snapshot.item_id, group_id=snapshot.group_id)
                 if queue_result.item is not None:
                     queue_result.item.updated_at = checked_at
                 db.flush()

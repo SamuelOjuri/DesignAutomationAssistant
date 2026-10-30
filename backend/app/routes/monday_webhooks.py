@@ -468,6 +468,28 @@ def _dispatch_auto_sync(
 ) -> None:
     policy = policy_from_settings()
     now = utc_now()
+    if settings.performance_specification_enabled and normalized.column_id not in DESIGN_OUTPUT_COLUMN_IDS:
+        from ..services.performance_specification import (
+            cancel_specification, enqueue_specification, enqueue_specification_dependents,
+        )
+        if normalized.board_id and normalized.item_id:
+            enqueue_specification_dependents(db, normalized.board_id, normalized.item_id)
+        # Newly created subitems have no dependency row yet; the parent project
+        # is already indexed. Monday subitem events include its identity.
+        event = db.get(MondayWebhookEvent, dispatch.webhook_event_id)
+        body = _event_body(event.payload_json) if event is not None else {}
+        parent_id = _first_string(body, ("parent_item_id", "parentItemId"))
+        parent_board = _first_string(body, ("parent_item_board_id", "parentItemBoardId", "parentBoardId"))
+        if parent_id:
+            enqueue_specification_dependents(
+                db, parent_board or str(settings.design_processing_project_board_id), parent_id,
+            )
+        if normalized.board_id == str(settings.design_processing_board_id) and normalized.item_id and item:
+            if item.get("state") != "active":
+                cancel_specification(db, normalized.board_id, normalized.item_id)
+            else:
+                enqueue_specification(db, normalized.board_id, normalized.item_id,
+                                      group_id=(item.get("group") or {}).get("id"))
     if normalized.board_id in LINKED_BOARD_IDS and normalized.item_id:
         source_event = (
             normalized.column_id in {"name", PROJECT_NAME_COLUMN_ID}

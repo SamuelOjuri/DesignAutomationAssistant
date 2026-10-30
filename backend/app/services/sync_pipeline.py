@@ -78,7 +78,7 @@ def _is_ai_data_pdf_preview(asset: Dict[str, Any], kind: str) -> bool:
     ext = (asset.get("file_extension") or "").lower().lstrip(".")
     name = (asset.get("name") or "").lower()
     return (
-        name.startswith("ai_data_preview_")
+        name.startswith(("ai_data_preview_", "project_performance_specification_details_"))
         and (ext == "pdf" or name.endswith(".pdf"))
     )
 
