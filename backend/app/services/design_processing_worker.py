@@ -651,6 +651,7 @@ def _record_execution_failure(
     worker_id: str,
     error: str,
     now: datetime,
+    source_manifest=None,
 ) -> str:
     item, job = lock_design_processing_item_and_job(db, job_id)
     if job is None:
@@ -662,6 +663,8 @@ def _record_execution_failure(
     if job.status != "running" or job.locked_by != worker_id:
         db.rollback()
         return "not_claimed"
+    if source_manifest is not None:
+        job.result_json = {**(job.result_json or {}), "sourceExtractionFailure": source_manifest}
     if execution_identity(job) is None:
         job.attempt_count += 1
         job.last_error = error
@@ -704,6 +707,7 @@ def _record_execution_failure_safely(
     *,
     worker_id: str,
     error: str,
+    source_manifest=None,
 ) -> str:
     try:
         return run_transaction_with_retry(
@@ -714,6 +718,7 @@ def _record_execution_failure_safely(
                 worker_id=worker_id,
                 error=error,
                 now=utc_now(),
+                source_manifest=source_manifest,
             ),
             operation_name=f"record design-processing job {job_id} failure",
             retry_if=is_postgres_deadlock,
@@ -970,6 +975,7 @@ def execute_claimed_analysis_job(
             job_id,
             worker_id=worker_id,
             error=str(exc)[:2000],
+            source_manifest=getattr(exc, "manifest", None),
         )
 
 

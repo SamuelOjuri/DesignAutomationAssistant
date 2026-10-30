@@ -237,7 +237,7 @@ def test_intake_query_fetches_email_scalar_values_and_required_asset_metadata(
     assert actual is expected
     assert calls[0][1] == {"itemIds": ["2657106977"]}
     assert "state" in calls[0][0]
-    assert 'column_values(ids: ["file_mkpbm883", "date_mkpb23av", "hour_mkpbb3j1", "dropdown_mkpbafca"])' in calls[0][0]
+    assert "column_values {" in calls[0][0]  # Includes configured supplementary source columns.
     assert "updated_at" not in calls[0][0]
     assert "updates" not in calls[0][0]
 

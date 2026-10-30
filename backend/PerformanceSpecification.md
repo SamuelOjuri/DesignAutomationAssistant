@@ -3,15 +3,21 @@
 The additional PDF is published to **Project Holding Page** (`1882196103`),
 **AI Data** (`file_mkza7y37`). It contains selectable text with the exact 18 CAD
 labels in the requested order. Dropdowns contain exact permitted strings; U-values
-contain two decimal places (decimal HALF_UP rounding). Missing or unresolved values
-display **Not Provided**. **Incoming Information** is always blank. Bauder Roof Num
+contain two decimal places (decimal HALF_UP rounding). Genuinely absent values
+display **Not Provided**. Known values with unresolved translations or conflicting
+evidence hold publication for review and retain the last successful PDF.
+**Incoming Information** is always blank. Bauder Roof Num
 is optional and extracted only when explicitly stated in email content.
 
 The specification uses the configured design extraction model in a separate,
 schema-constrained LLM translation call. There is no deterministic material-alias
 translator. Backend checks reject unsupported enum strings, invented text/IDs,
-missing-value inventions and changed numeric facts. Ambiguous material translations
-become null/Not Provided, with warnings retained in the artifact's translation JSON.
+missing-value inventions and changed numeric facts. The model receives shared field
+definitions, the source texts, alternative roof/drawing candidates and CRM provenance.
+One targeted recovery pass revisits known unresolved values. A remaining null for a
+populated field fails publication; the raw value, translation and warnings remain in
+`performance_specifications.review_json` with status `unmapped`. A brand such as
+BauderROCK does not establish a particular CAD product variant without evidence.
 
 ## Scope and existing outputs
 
@@ -30,10 +36,44 @@ excluded from source ingestion to avoid treating generated data as new evidence.
 
 ## Source resolution
 
-Current readable Monday values take precedence over extracted evidence. Initially
-empty fields fall back to email evidence; an observed clear of a previously populated
-CRM source remains cleared on subsequent checks. Failed/incomplete reads preserve
+Current populated, readable Monday values take precedence over verified email and
+attachment evidence. Empty CRM fields, including deliberately cleared fields, fall
+back to that evidence on every refresh. Empty reads remain in provenance; they do
+not erase an available source fact. Failed/incomplete reads preserve
 the last published PDF and retry, exposing `last_error` in the refresh record.
+
+`specification_semantics.py` supplies the same business meanings to extraction and
+CAD translation. Drawing Reference means the **TaperedPlus-issued** reference; a
+manufacturer's drawing/reference is not automatically a TP reference. Revision is
+the **entire suffix after the underscore** (for example `26.01 - B`). It is derived
+after the final reference is selected. A compatible letter-only CRM revision is
+retained as provenance; an incompatible letter/suffix requires review. Company and
+Contact describe the direct requester. Requested U-values remain distinct from
+achieved calculations and unselected template options.
+
+Each extraction retains a source manifest and field candidates with source identity,
+content hash, page/table or worksheet/cell location, supporting excerpt, issuer,
+roof/drawing scope and selection rationale. Excerpts are checked against source
+text. Different roof values are not flattened into one specification: a confirmed
+matching roof/drawing selects its candidates; otherwise conflicts require review.
+A value common to all represented roofs can be used without selecting one roof.
+Actual outer email sent timestamps establish request chronology, independently of
+Monday asset IDs/upload order. The most recent outer request supplies the fallback
+Date Received, excluding earlier dates inside the forwarded chain.
+Forwarded-message facts retain their verified message-header dates and requester
+roles, so an earlier sender cannot replace the direct requester. Multiple email
+files with unreadable sent dates require chronology review.
+
+The reader supports plain text and HTML-only email bodies, PDF/image attachments,
+DOCX, text/CSV/TSV/JSON/XML/HTML and XLS/XLSX/**XLSM**. Workbook readers use cached
+values and never execute macros or formulas. The design reader excludes hidden
+worksheets and identifies visible selected values by worksheet/cell, so lookup
+catalogues do not become selected specifications. Uncached formulas, extraction
+limits, unreadable or unsupported sources hold extraction for retry/review rather
+than imply absent fields. Failed per-source manifests are retained in the design
+job's `result_json.sourceExtractionFailure`. PDFs are read individually to preserve
+attachment identity. The extraction model also makes one targeted second pass for
+missing/unverified fields before accepting the extraction.
 
 The holding item's confirmed TP Ref selects the project. Multiple linked projects
 or conflicting technical values fail the refresh rather than merge roofs. Drawing
@@ -49,7 +89,9 @@ IDs are supported for Company, Contact, Surveyor, U-values, product, deck and re
 Exact matching column titles cover other specification fields. Unconfigured missing
 columns allow email fallback; explicitly configured missing columns fail the read.
 Mirror reads retain typed values and linked item identities rather than splitting
-comma-separated display strings.
+comma-separated display strings. People fields/mirrors resolve person/team IDs to
+names through Monday's Users/Teams API and retain both identities and names. The
+token needs the corresponding read permissions; unavailable identities fail the read.
 
 For different board schemas, configure explicit IDs using JSON, for example:
 
@@ -61,23 +103,40 @@ Keys are exact PDF field labels; valid scopes are `holding`, `project`, `drawing
 Incoming Information is ignored even if mapped. Confirm live schema/token access
 against the deployed `MONDAY_API_VERSION` before enabling broad publication.
 
+Embedded email attachments are included automatically. To include additional source
+files on the holding item, configure their actual file-column IDs on **all** matching
+API/design/reconciliation/publisher services:
+
+```dotenv
+DESIGN_PROCESSING_SOURCE_FILE_COLUMN_IDS=["file_actual_source_documents"]
+```
+
+The default is `[]`. These files participate in the extraction revision, so adding,
+removing or replacing one triggers fresh extraction. Subscribe those columns to the
+existing holding-board column-change webhook. Email/AI Data/matched-output column
+IDs are rejected here; generated export filenames are also excluded. This setting
+does not automatically include attachments on linked boards.
+
 ## Deployment
 
 1. Stop/drain API and worker versions that will be replaced. Apply migration
-   `0017_performance_specification` with
+   through `0018_specification_evidence` with
    `python -m alembic -c backend/alembic.ini upgrade head`.
 2. Deploy matching API, ingestion/metadata/design workers and the new publisher.
    Initially configure `PERFORMANCE_SPECIFICATION_ENABLED=true` and
    `DESIGN_PROCESSING_MODE=shadow`. Keep existing extraction and reconciliation
    services running. The new publisher runs as another service:
    `python -m backend.app.services.performance_specification`.
-3. Extraction identity changes from `output-v7` to `output-v8` to collect raw
-   specification evidence and the optional roof number. Existing canonical CSV rows
+3. Extraction identity changes from `output-v8` to `output-v9`, and the CAD contract
+   from `performance-specification-v1` to `performance-specification-v2`. Existing canonical CSV rows
    remain unchanged. Run the normal design reconciliation sweep to re-extract eligible
-   historical projects. Old extraction records without `performanceParameters` wait
-   for this refresh instead of silently claiming to contain the new roof field.
+   historical projects. Old extraction records without the versioned source/evidence
+   contract wait for this refresh. Changing only the publisher flag does not refresh
+   historical extraction evidence.
 4. Review shadow artifacts and translation warnings in the private artifact bucket
-   and `performance_specification_artifacts`. Then use the existing design-processing
+   and `performance_specification_artifacts`, plus `performance_specifications.review_json`.
+   Review statuses distinguish `conflict`, `unmapped` and `source_failure`; a successful
+   refresh clears them. Then use the existing design-processing
    `allowlist` mode and `DESIGN_PROCESSING_ALLOWLIST_ITEM_IDS` to validate a few items
    before changing to `enabled`. These existing mode settings govern both workflows.
 5. Subscribe holding field/link/lifecycle changes and linked project/drawing changes
@@ -106,6 +165,10 @@ venv/Scripts/python.exe -m backend.app.services.performance_specification --once
 Source values, provenance, extraction identity and model/prompt/template version form
 the specification revision. Polling timestamps and unrelated CRM edits do not change
 it. Unchanged inputs reuse the persisted translation and verified PDF bytes.
+Each v2 artifact stores its immutable `source_json`, including field provenance and
+source texts; later refreshes cannot overwrite that revision's evidence. The current
+record's `source_json` remains the last successful source snapshot. Pre-v2 artifact
+snapshots are null because their historic inputs cannot be reconstructed reliably.
 Generation/lease checks fence superseded workers. Temporary source/model/storage
 failures retry with capped backoff and preserve the last successful document.
 
@@ -125,7 +188,7 @@ the database until all matching application/worker processes have stopped.
 ## Verification
 
 ```powershell
-venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py -q
+venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_sources.py -q
 ```
 
 Coverage includes LLM schema/semantic validation, optional values, exact PDF text
@@ -133,3 +196,7 @@ ordering, active-only scope, CRM clears, typed mirrors, revision ambiguity, cach
 translation, failed reads, stale generations, expired leases, source changes during
 translation/upload, lost upload responses, replacement safety and shadow mode.
 PDF text validation uses Poppler `pdftotext` or optional `pypdf`.
+Regression coverage also includes known-product translation review, recovery,
+full TP revision suffixes, conflicting roof decks, candidate recovery from a missing
+scalar, HTML-only mail, date ordering, XLSM/hidden catalogues, uncached formulas,
+source failures, People identity reads and immutable artifact snapshots.

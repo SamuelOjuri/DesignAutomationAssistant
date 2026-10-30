@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from .gemini_models import ThinkingLevel, validate_thinking_level
 from .services.legacy_enquiry import LEGACY_MANIFEST_DIGEST
 
-DESIGN_PROCESSING_PIPELINE_REVISION = "output-v8"
+DESIGN_PROCESSING_PIPELINE_REVISION = "output-v9"
 
 class Settings(BaseSettings):
     # monday
@@ -81,6 +81,16 @@ class Settings(BaseSettings):
     performance_specification_enabled: bool = False
     performance_specification_recheck_seconds: int = Field(default=3600, ge=30)
     performance_specification_column_map: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Optional holding-board source files in addition to embedded email attachments.
+    design_processing_source_file_column_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("design_processing_source_file_column_ids")
+    @classmethod
+    def _validate_source_file_columns(cls, values):
+        forbidden = {"file_mkza7y37", "file_mm59rntf", "file_mkpbm883"}
+        if any(not isinstance(value, str) or not value.strip() or value.strip() in forbidden for value in values):
+            raise ValueError("Source file columns must exclude Email, AI Data and generated matched-project outputs")
+        return list(dict.fromkeys(value.strip() for value in values))
 
     @field_validator("performance_specification_column_map")
     @classmethod

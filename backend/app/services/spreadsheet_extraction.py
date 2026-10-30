@@ -14,7 +14,7 @@ import xlrd
 
 logger = logging.getLogger(__name__)
 
-SPREADSHEET_EXTENSIONS = (".xls", ".xlsx")
+SPREADSHEET_EXTENSIONS = (".xls", ".xlsx", ".xlsm")
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 MAX_SHEETS = 20
@@ -46,7 +46,7 @@ def _format_value(value) -> str:
     return " ".join(str(value).replace("\x00", "").split())
 
 
-def _xlsx_rows(path: str, warnings: set[str]):
+def _xlsx_rows(path: str, warnings: set[str], *, visible_only: bool = False):
     with ZipFile(path) as archive:
         if sum(entry.file_size for entry in archive.infolist()) > MAX_UNCOMPRESSED_BYTES:
             raise ExtractionLimit("Workbook exceeds the uncompressed size limit.")
@@ -64,6 +64,8 @@ def _xlsx_rows(path: str, warnings: set[str]):
             books.append(book)
         values_book, formulas_book = books
         for sheet_index, values_sheet in enumerate(values_book.worksheets):
+            if visible_only and values_sheet.sheet_state != "visible":
+                continue  # Hidden option catalogues are not selected form values.
             if sheet_index >= MAX_SHEETS:
                 raise ExtractionLimit("Workbook exceeds the worksheet limit.")
             formulas_sheet = formulas_book[values_sheet.title]
@@ -81,11 +83,12 @@ def _xlsx_rows(path: str, warnings: set[str]):
                     if formula_cell.data_type == "f" and value_cell.value is None:
                         formula = _format_value(formula_cell.value)
                         value = f"Formula {formula} [cached result unavailable; not calculated]"
+                        warnings.add("Some formula results are unavailable; formulas were not calculated.")
                     cells.append(value)
                 yield values_sheet.title, row_number, cells
 
 
-def _xls_rows(path: str, warnings: set[str]):
+def _xls_rows(path: str, warnings: set[str], *, visible_only: bool = False):
     book = xlrd.open_workbook(path, on_demand=True, ragged_rows=True)
     try:
         for sheet_index in range(book.nsheets):
@@ -93,6 +96,8 @@ def _xls_rows(path: str, warnings: set[str]):
                 raise ExtractionLimit("Workbook exceeds the worksheet limit.")
             sheet = book.sheet_by_index(sheet_index)
             try:
+                if visible_only and sheet.visibility:
+                    continue
                 if sheet.ncols > MAX_COLUMNS:
                     warnings.add("Columns beyond the column limit were omitted.")
                 for row_index in range(sheet.nrows):
@@ -116,7 +121,7 @@ def _xls_rows(path: str, warnings: set[str]):
         book.release_resources()
 
 
-def extract_spreadsheet_documents(path: str, filename: str) -> list[dict[str, str]]:
+def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: bool = False) -> list[dict[str, str]]:
     """Return bounded, source-labelled text chunks, including any extraction limits.
 
     Bad/encrypted workbooks remain downloadable: parsing failures become a source
@@ -148,7 +153,8 @@ def extract_spreadsheet_documents(path: str, filename: str) -> list[dict[str, st
             raise ValueError("Unsupported spreadsheet extension")
         if os.path.getsize(path) > MAX_FILE_BYTES:
             raise ExtractionLimit("Workbook exceeds the file size limit.")
-        rows = _xlsx_rows(path, warnings) if filename.lower().endswith(".xlsx") else _xls_rows(path, warnings)
+        reader = _xlsx_rows if filename.lower().endswith((".xlsx", ".xlsm")) else _xls_rows
+        rows = reader(path, warnings, visible_only=visible_only)
         scanned_cells = 0
         with ExitStack() as stack:
             stack.callback(rows.close)

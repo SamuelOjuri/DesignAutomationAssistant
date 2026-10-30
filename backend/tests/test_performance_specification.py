@@ -25,12 +25,13 @@ from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.legacy_enquiry.parameter_extraction import DesignParameterExtraction
 from backend.app.services.design_processing_inputs import DesignEmailAsset, DesignProcessingTargetSnapshot
 from backend.app.services.performance_specification_contract import (
-    CADTranslation, FIELD_NAMES, OPTIONS, pdf_values, translate_specification,
+    CADTranslation, FIELD_NAMES, OPTIONS, UnresolvedSpecificationTranslation, pdf_values, translate_specification,
 )
 from backend.app.services.performance_specification_pdf import render_performance_specification_pdf
 from backend.app.services.performance_specification_sources import (
     SpecificationSourceError, active_specification_group_ids, resolve_specification_sources,
 )
+from backend.app.services.specification_semantics import EVIDENCE_VERSION, canonical_label
 from backend.app.services.sync_pipeline import _is_ai_data_pdf_preview
 
 
@@ -62,6 +63,19 @@ def translation_payload(raw):
         if values[label] is not None:
             values[label] = str(Decimal(values[label]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
     return {"values": values, "warnings": []}
+
+
+def with_evidence(extraction):
+    facts = {canonical_label(label): value for label, value in extraction["performanceParameters"].items() if value is not None}
+    text = "\n".join(f"{label}: {value}" for label, value in facts.items())
+    return {**extraction, "specificationEvidenceVersion": EVIDENCE_VERSION,
+            "specificationAssessedFields": list(FIELD_NAMES),
+            "sourceManifest": [{"sourceId": "email:body", "filename": "request.eml", "sourceType": "email_body",
+                                "contentSha256": "abc", "status": "read", "text": text, "observedAt": "2026-10-29T12:00:00+00:00"}],
+            "specificationEvidence": [{"field": label, "value": value, "source_id": "email:body",
+                                       "snippet": f"{label}: {value}", "location": "email body", "scope": None,
+                                       "issuer": "TaperedPlus" if label == "Drawing Reference" else None,
+                                       "role": "requested", "request_role": "direct_request", "rationale": "Explicit request"} for label, value in facts.items()]}
 
 
 class Storage:
@@ -144,8 +158,8 @@ def case(monkeypatch):
             id=uuid.uuid4(), board_id=BOARD, item_id=ITEM, state="ready_for_review", warnings_json=[],
             latest_desired_input_revision="email-v1", latest_analyzed_input_revision="email-v1",
             latest_desired_pipeline_version="extraction-v1", latest_analyzed_pipeline_version="extraction-v1",
-            extracted_parameters_json={"inputRevision": "email-v1", "pipelineVersion": "extraction-v1",
-                                       "performanceParameters": raw, "parameters": raw},
+            extracted_parameters_json=with_evidence({"inputRevision": "email-v1", "pipelineVersion": "extraction-v1",
+                                       "performanceParameters": raw, "parameters": raw}),
         )
         db.add(item)
         db.commit()
@@ -184,6 +198,135 @@ def test_resolves_current_crm_and_keeps_optional_roof_number_and_raw_insulation(
     assert source["raw"]["Tapered Insulation"] == "TR27"
     assert source["raw"]["Incoming Information"] == ""
     assert ["9000", "9101"] in source["dependencies"]
+
+
+@pytest.mark.parametrize("value,expected", [("A", "26.01 - A"), ("26.01 - A", "26.01 - A")])
+def test_revision_mirror_cannot_shorten_tp_reference_suffix(case, value, expected):
+    case.gateway.project["subitems"][0]["column_values"].append(column("mirror_1__1", "Revision", value))
+    source = resolve_specification_sources(case.gateway, case.item)
+    assert source["raw"]["Revision"] == expected
+    assert source["sources"]["Revision"]["observedRevision"] == value
+
+
+def test_conflicting_crm_revision_requires_review(case):
+    case.gateway.project["subitems"][0]["column_values"].append(column("mirror_1__1", "Revision", "B"))
+    assert run(case) == ["failed"]
+    assert current(case).review_json["issues"]["Revision"].startswith("Revision conflicts")
+    assert not case.gateway.uploads
+
+
+def test_known_unmapped_product_is_reviewed_without_overwriting_last_pdf(case):
+    assert run(case) == ["published"]
+    previous_revision = current(case).current_revision
+    case.gateway.project["subitems"][0]["column_values"][1]["text"] = "BauderROCK"
+    calls = []
+
+    def generate(model, prompt, config):
+        calls.append(prompt)
+        raw = json.loads(prompt.split("\nResolved values: ", 1)[1])
+        raw["Tapered Insulation"] = None
+        return SimpleNamespace(parsed=translation_payload(raw))
+
+    case.client = LegacyGeminiClient("gemini-3.8-flash", generate_content=generate)
+    assert run(case) == ["failed"]
+    assert len(calls) == 2  # One bounded evidence-aware recovery pass.
+    assert "Shared field meanings" in calls[0]
+    assert "sourceManifest" in calls[0]
+    assert current(case).current_revision == previous_revision
+    assert current(case).review_json["status"] == "unmapped"
+    assert current(case).review_json["source"]["raw"]["Tapered Insulation"] == "BauderROCK"
+    assert len(case.gateway.uploads) == 1 and not case.gateway.deletes
+
+
+def test_recovery_recovers_populated_text_instead_of_missing_marker(case):
+    raw = resolve_specification_sources(case.gateway, case.item)["raw"]
+    first, second = translation_payload(raw), translation_payload(raw)
+    first["values"]["Contact"] = None
+    responses = iter([first, second])
+    client = LegacyGeminiClient("gemini-3.8-flash", generate_content=lambda *args: SimpleNamespace(parsed=next(responses)))
+    assert pdf_values(translate_specification(raw, client))["Contact"] == "Alex Example"
+
+
+def test_extracted_candidate_is_used_even_if_flat_scalar_was_missing(case):
+    case.item.extracted_parameters_json["performanceParameters"]["Contact"] = None
+    assert resolve_specification_sources(case.gateway, case.item)["raw"]["Contact"] == "Alex Example"
+
+
+def test_forged_excerpt_and_incomplete_source_manifest_preserve_last_pdf(case):
+    assert run(case) == ["published"]
+    revision = current(case).current_revision
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    extraction["sourceManifest"][0]["status"] = "failed:TimeoutError"
+    case.item.extracted_parameters_json = extraction
+    case.db.commit()
+    assert run(case) == ["failed"]
+    assert current(case).current_revision == revision and len(case.gateway.uploads) == 1
+    extraction["sourceManifest"][0]["status"] = "read"
+    next(e for e in extraction["specificationEvidence"] if e["field"] == "Contact")["snippet"] = "An invented excerpt"
+    case.item.extracted_parameters_json = deepcopy(extraction)
+    case.db.commit()
+    assert run(case) == ["failed"]
+    assert "Contact" in current(case).review_json["issues"]
+
+
+def roof_evidence(case, values):
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    extraction["performanceParameters"]["Decking"] = None
+    extraction["specificationEvidence"] = [e for e in extraction["specificationEvidence"] if e["field"] != "Decking"]
+    for scope, value in values:
+        snippet = f"{scope}: Decking {value}"
+        extraction["sourceManifest"][0]["text"] += "\n" + snippet
+        extraction["specificationEvidence"].append({"field": "Decking", "value": value, "scope": scope,
+            "source_id": "email:body", "location": "roof schedule", "snippet": snippet,
+            "issuer": None, "role": "requested", "rationale": "Roof-specific requested deck"})
+    case.item.extracted_parameters_json = extraction
+
+
+def test_different_roof_values_are_not_flattened_and_confirmed_scope_resolves(case):
+    roof_evidence(case, [("Roof 1", "Timber (18mm)"), ("Roof 5", "Concrete")])
+    assert run(case) == ["failed"]
+    assert current(case).review_json["status"] == "conflict"
+    case.gateway.holding["column_values"].append(column("roof", "Bauder Roof Num", "5"))
+    assert run(case) == ["published"]
+    assert current(case).source_json["raw"]["Decking"] == "Concrete"
+
+
+def test_common_value_for_multiple_roofs_is_usable(case):
+    roof_evidence(case, [("Roof 1", "Concrete"), ("Roof 5", "Concrete")])
+    assert resolve_specification_sources(case.gateway, case.item)["raw"]["Decking"] == "Concrete"
+
+
+def test_people_mirror_preserves_name_with_comma_and_entity_identity(case):
+    case.gateway.resolve_person = lambda kind, identity: "Example, Alex"
+    case.gateway.project["subitems"][0]["column_values"].append({
+        "id": "mirror92__1", "type": "mirror", "column": {"title": "Surveyor"},
+        "mirrored_items": [{"linked_item": {"id": "777", "board": {"id": "888"}},
+                            "mirrored_value": {"__typename": "PeopleValue", "text": "Example, Alex",
+                                               "persons_and_teams": [{"id": "55", "kind": "person"}]}}]})
+    source = resolve_specification_sources(case.gateway, case.item)
+    assert source["raw"]["Surveyor"] == "Example, Alex"
+    assert ["888", "777"] in source["dependencies"]
+    saved = source["sources"]["Surveyor"]["columnValue"]["mirrored_items"][0]["mirrored_value"]["resolvedPeople"]
+    assert saved == [{"id": "55", "kind": "person", "name": "Example, Alex"}]
+
+
+def test_unreadable_people_is_not_a_missing_surveyor(case):
+    case.gateway.project["subitems"][0]["column_values"].append({
+        "id": "mirror92__1", "type": "people", "text": "Alex", "column": {"title": "Surveyor"}})
+    with pytest.raises(SpecificationSourceError, match="People"):
+        resolve_specification_sources(case.gateway, case.item)
+
+
+def test_artifact_keeps_immutable_input_snapshot_after_subsequent_refresh(case):
+    assert run(case) == ["published"]
+    original = case.db.get(PerformanceSpecificationArtifact, (BOARD, ITEM, current(case).current_revision))
+    saved = deepcopy(original.source_json)
+    case.gateway.project["column_values"][0]["text"] = "Changed title"
+    assert run(case) == ["published"]
+    case.db.refresh(original)
+    assert original.source_json == saved
+    assert original.source_json["raw"]["Drawing Title"] == "Warehouse South"
+    assert original.source_json["sources"]["Contact"]["selected"]["snippet"] == "Contact: Alex Example"
 
 
 def test_llm_translation_is_structured_and_strict(case):
@@ -228,6 +371,19 @@ def test_model_cannot_replace_an_unsupported_scale_with_a_nearest_allowed_scale(
     payload["values"]["Scale"] = "1:250"
     client = LegacyGeminiClient("gemini-3.8-flash", generate_content=lambda *args: SimpleNamespace(parsed=payload))
     with pytest.raises(ValueError, match="specified scale"):
+        translate_specification(raw, client)
+
+
+@pytest.mark.parametrize("label,source,changed", [("Page Size", "ISO A1", "ISO A3"),
+                                                ("Decking", "Concrete", "Metal"),
+                                                ("Scale", "Not to scale", "1:100")])
+def test_translation_cannot_change_a_canonical_option_or_invent_an_unspecified_ratio(case, label, source, changed):
+    raw = resolve_specification_sources(case.gateway, case.item)["raw"]
+    raw[label] = source
+    payload = translation_payload(raw)
+    payload["values"][label] = changed
+    client = LegacyGeminiClient("offline", generate_content=lambda *args: SimpleNamespace(parsed=payload))
+    with pytest.raises(ValueError, match="changed"):
         translate_specification(raw, client)
 
 
@@ -282,15 +438,16 @@ def test_crm_change_refreshes_without_extraction_and_replaces_only_prior_specifi
     assert len(case.gateway.files) == 3
 
 
-def test_confirmed_clear_does_not_resurrect_email_value(case):
+def test_confirmed_clear_uses_available_email_value_on_subsequent_refreshes(case):
     assert run(case) == ["published"]
     case.gateway.project["subitems"][0]["column_values"][0]["text"] = None
     assert run(case) == ["published"]
     record = current(case)
-    assert record.source_json["raw"]["Target U Value"] is None
-    assert record.source_json["sources"]["Target U Value"]["cleared"] is True
+    assert record.source_json["raw"]["Target U Value"] == "0.18"
+    assert record.source_json["sources"]["Target U Value"]["source"] == "Email/Attachment"
+    assert any(read["field"] == "Target U Value" and read["status"] == "empty" for read in record.source_json["crmReads"])
     artifact = case.db.get(PerformanceSpecificationArtifact, (BOARD, ITEM, record.current_revision))
-    assert artifact.translation_json["values"]["Target U Value"] is None
+    assert artifact.translation_json["values"]["Target U Value"] == "0.18"
     assert run(case) == ["unchanged"]
 
 
@@ -310,6 +467,7 @@ def test_unavailable_or_ambiguous_linked_project_is_not_silently_merged(case):
     extra.update(id="9102", name="TP00901_26.02 - A")
     case.gateway.project["subitems"].append(extra)
     case.item.extracted_parameters_json["performanceParameters"]["Drawing Reference"] = None
+    case.item.extracted_parameters_json = with_evidence(case.item.extracted_parameters_json)
     with pytest.raises(SpecificationSourceError, match="ambiguous"):
         resolve_specification_sources(case.gateway, case.item)
 
@@ -405,6 +563,7 @@ def test_linked_changes_enqueue_dependents(case):
 
 def test_missing_roof_number_is_optional_and_incoming_information_is_always_blank(case):
     case.item.extracted_parameters_json["performanceParameters"]["Bauder Roof Num"] = None
+    case.item.extracted_parameters_json = with_evidence(case.item.extracted_parameters_json)
     source = resolve_specification_sources(case.gateway, case.item)
     values = pdf_values(translate_specification(source["raw"], case.client))
     assert values["Bauder Roof Num"] == "Not Provided"
@@ -488,7 +647,7 @@ def test_old_extraction_waits_for_new_roof_aware_schema(case):
     case.item.extracted_parameters_json = old
     case.db.commit()
     assert run(case) == ["failed"]
-    assert "output-v8" in current(case).last_error
+    assert "output-v9" in current(case).last_error
     assert not case.calls
 
 

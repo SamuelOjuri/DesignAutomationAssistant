@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import hashlib
 from pathlib import Path
 from typing import Protocol, Sequence
@@ -17,6 +19,8 @@ from .parameter_extraction import (
     extract_parameters,
     extract_project_name_from_content,
 )
+from .source_documents import IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_document, source_record
+from ..specification_semantics import SpecificationEvidence
 
 
 class LegacyAnalysisClient(AttachmentTextExtractor, Protocol):
@@ -41,6 +45,9 @@ class LegacyAnalysisResult:
     email_content_audit: tuple[EmailContentAudit, ...]
     extracted_text_sha256: str
     performance_parameters: dict[str, str | None] = field(default_factory=dict)
+    specification_evidence: tuple[dict, ...] = ()
+    specification_assessed_fields: tuple[str, ...] = ()
+    source_manifest: tuple[dict, ...] = ()
 
 
 def analyze_downloaded_email_assets(
@@ -54,14 +61,9 @@ def analyze_downloaded_email_assets(
     all_text = ""
     first_email_text = ""
     audits: list[EmailContentAudit] = []
-    ordered_assets = sorted(
-        downloaded_assets,
-        key=lambda downloaded: (
-            int(downloaded.source.asset_id),
-            downloaded.source.filename,
-        ),
-    )
-    for downloaded in ordered_assets:
+    manifest = []
+    parsed_assets = []
+    for downloaded in downloaded_assets:
         content = Path(downloaded.temp_path).read_bytes()
         actual_digest = hashlib.sha256(content).hexdigest()
         if actual_digest != downloaded.content_sha256:
@@ -72,23 +74,48 @@ def analyze_downloaded_email_assets(
             raise ValueError(
                 f"downloaded Email asset {downloaded.source.asset_id} size changed on disk"
             )
-        header, body, attachments, inline_images = process_email_content(
-            content,
-            downloaded.source.filename,
-        )
+        if not downloaded.source.filename.lower().endswith((".eml", ".msg")):
+            try:
+                text, status = extract_document(content, downloaded.source.filename, client), "read"
+            except Exception as exc:
+                text, status = "", "failed:" + type(exc).__name__
+            record = source_record(
+                f"asset:{downloaded.source.asset_id}", downloaded.source.filename, content,
+                source_type="attachment", observed_at=None, text=text, status=status,
+            )
+            manifest.append(record)
+            continue
+        try:
+            header, body, attachments, inline_images = process_email_content(content, downloaded.source.filename)
+        except Exception as exc:
+            manifest.append(source_record(f"asset:{downloaded.source.asset_id}", downloaded.source.filename, content,
+                                          source_type="email_body", status="failed:" + type(exc).__name__))
+            continue
+        raw_date = next((line[6:] for line in header.splitlines() if line.startswith("Date: ")), "")
+        try:
+            request_time = parsedate_to_datetime(raw_date)
+            if request_time.tzinfo is None:
+                request_time = request_time.replace(tzinfo=timezone.utc)
+            request_time = request_time.astimezone(timezone.utc).isoformat()
+        except (TypeError, ValueError, OverflowError):
+            request_time = None  # Upload time is not the date of the request.
+        parsed_assets.append((request_time or "", downloaded.source.asset_id, downloaded, header, body, attachments, inline_images))
+    # Display chronologically. ID is only a stable tie-breaker, never recency.
+    for request_time, _, downloaded, header, body, attachments, inline_images in sorted(parsed_assets, key=lambda entry: (entry[0], int(entry[1]))):
         email_text = f"{header}\n{body}"
-        extracted = extract_text_from_email(
-            email_text,
-            attachments,
-            extractor=client,
-            inline_images=inline_images,
-        )
+        try:
+            extracted = extract_text_from_email(
+                email_text, attachments, extractor=client, inline_images=inline_images,
+                manifest=manifest, source_prefix=f"asset:{downloaded.source.asset_id}",
+                observed_at=request_time or None,
+            )
+        except IncompleteSourceExtraction:
+            continue  # Finish the inventory, then retry the incomplete extraction.
         all_text += (
             f"\n\nEMAIL FILE: {downloaded.source.filename}\n"
             f"{extracted}\n{'=' * 50}\n"
         )
-        if not first_email_text:
-            first_email_text = email_text
+        first_email_text = email_text  # Most recent request for title extraction.
         audits.append(
             EmailContentAudit(
                 asset_id=downloaded.source.asset_id,
@@ -98,7 +125,34 @@ def analyze_downloaded_email_assets(
             )
         )
 
+    if any(source["status"] != "read" for source in manifest):
+        raise IncompleteSourceExtraction(manifest)
+    if len(parsed_assets) > 1 and any(not entry[0] for entry in parsed_assets):
+        raise ValueError("Multiple email requests have unreadable sent dates; chronology requires review")
+    for record in manifest:
+        if record["sourceId"].count(":") == 1:  # Configured Monday source attachment.
+            all_text += f"\nSOURCE ID: {record['sourceId']}\nFILE: {record['filename']}\nATTACHMENT CONTENT:\n{record['text']}\n"
+    if len(all_text) > MAX_CONTEXT_CHARS:
+        raise ValueError("Combined source text exceeds extraction limit; review required")
+
     structured_parameters = client.extract_design_parameters(all_text)
+    dated_requests = [entry for entry in parsed_assets if entry[0]]
+    if dated_requests:
+        latest = max(dated_requests, key=lambda entry: (entry[0], int(entry[1])))
+        timestamp, asset_id, _, header, _, _, _ = latest
+        request_date = parsedate_to_datetime(next(line[6:] for line in header.splitlines() if line.startswith("Date: ")))
+        structured_parameters.date_received = request_date.strftime("%d %b %Y")
+        structured_parameters.hour_received = request_date.strftime("%H:%M")
+        structured_parameters.specification_evidence = [
+            e for e in structured_parameters.specification_evidence if e.field != "Date Received"
+        ] + [SpecificationEvidence(
+            field="Date Received", value=structured_parameters.date_received,
+            source_id=f"asset:{asset_id}:body", location="outer request Date header",
+            snippet=next(line for line in header.splitlines() if line.startswith("Date: ")),
+            scope=None, issuer=None, role="requested",
+            request_role="direct_request",
+            rationale="Latest actual outer request timestamp; earlier forwarded dates and upload times excluded",
+        )]
     parameters = extract_parameters(
         all_text,
         extracted_parameters=structured_parameters,
@@ -126,4 +180,7 @@ def analyze_downloaded_email_assets(
             "Date Received": parameters["Date Received"],
             "Bauder Roof Num": structured_parameters.bauder_roof_num,
         },
+        specification_evidence=tuple(e.model_dump() for e in structured_parameters.specification_evidence),
+        specification_assessed_fields=tuple(structured_parameters.specification_assessed_fields),
+        source_manifest=tuple(manifest),
     )

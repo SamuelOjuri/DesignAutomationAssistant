@@ -126,6 +126,7 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
         name: None for name in DesignParameterExtraction.model_fields
     }
     payload.update(
+        specification_evidence=[], specification_assessed_fields=[],
         fall_of_tapered=(
             "Not provided (The document states that a 1:80 fall for gutters will not "
             "be achieved, but does not specify a target fall for the tapered insulation "
@@ -139,6 +140,14 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
         membrane="SBS modified bitumen",
         vcl="BauderTEC KSA DUO",
     )
+    from backend.app.services.specification_semantics import FIELD_DEFINITIONS, missing
+    payload["specification_assessed_fields"] = list(FIELD_DEFINITIONS)
+    payload["specification_evidence"] = [
+        {"field": label, "value": payload[label.lower().replace(" ", "_")], "source_id": "email:body",
+         "location": "body", "snippet": str(payload[label.lower().replace(" ", "_")]),
+         "scope": None, "issuer": None, "role": "requested", "rationale": "Explicit source fact"}
+        for label in FIELD_DEFINITIONS if not missing(payload.get(label.lower().replace(" ", "_")))
+    ]
     captured = {}
 
     def generate_content(model, contents, config):
@@ -473,6 +482,22 @@ def _run_shadow(db_session, golden_input, *, storage=None):
         heartbeat_interval_seconds=0,
     )
     return result, gateway, client, downloader, storage
+
+
+def test_attachment_read_failure_retains_manifest_and_schedules_extraction_retry(db_session, golden, monkeypatch):
+    golden_input, _ = golden
+    _queue(db_session, _snapshot(golden_input))
+    def fail(*args):
+        raise TimeoutError("attachment service unavailable")
+    monkeypatch.setattr(FakeLegacyClient, "process_pdf", fail)
+    result, gateway, client, _, storage = _run_shadow(db_session, golden_input)
+    job = db_session.query(DesignProcessingJob).one()
+    assert result.retry_wait == 1
+    assert job.status == "retry_wait"
+    manifest = job.result_json["sourceExtractionFailure"]
+    assert any(source["status"] == "failed:TimeoutError" for source in manifest)
+    assert any(source["sourceType"] == "email_body" and source["status"] == "read" for source in manifest)
+    assert client.query_count == 0 and not storage.objects
 
 
 def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(

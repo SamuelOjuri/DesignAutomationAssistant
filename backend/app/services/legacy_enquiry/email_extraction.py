@@ -11,6 +11,10 @@ from zoneinfo import ZoneInfo
 
 import extract_msg
 
+from .source_documents import (
+    IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_document, html_text, source_record,
+)
+
 
 class AttachmentTextExtractor(Protocol):
     max_attachment_workers: int
@@ -43,7 +47,7 @@ def process_email_content(
                     f"Subject: {message.subject}\n"
                     f"Date: {format_email_date(message.date or '')}\n"
                 )
-                body = message.body
+                body = message.body or html_text(message.htmlBody or b"")
                 attachments: list[dict[str, Any]] = []
                 inline_images: list[dict[str, Any]] = []
                 for attachment in message.attachments:
@@ -84,18 +88,22 @@ def process_email_content(
             f"Subject: {message.get('subject', '')}\n"
             f"Date: {format_email_date(message.get('date', ''))}\n"
         )
-        body = ""
-        if message.is_multipart():
-            for part in message.walk():
-                if part.get_content_type() == "text/plain" and not part.get_filename():
-                    body += part.get_content() + "\n"
-        else:
-            body = message.get_content()
+        # get_body respects multipart/alternative and avoids treating an attached
+        # message as the current sender's body. Plain text is preferred to HTML.
+        body_part = message.get_body(preferencelist=("plain", "html"))
+        body = body_part.get_content() if body_part is not None else ""
+        if not body.strip():
+            body_part = message.get_body(preferencelist=("html",))
+            body = body_part.get_content() if body_part is not None else ""
+        if body_part is not None and body_part.get_content_type() == "text/html":
+            body = html_text(body)
 
         attachments = []
         inline_images = []
-        for part in message.iter_attachments():
+        for part in message.walk():
             attachment_filename = part.get_filename()
+            if not attachment_filename and part.get_content_maintype() == "image":
+                attachment_filename = "inline_image." + part.get_content_subtype()
             if not attachment_filename:
                 continue
             content = part.get_payload(decode=True)
@@ -157,97 +165,43 @@ def extract_text_from_email(
     *,
     extractor: AttachmentTextExtractor,
     inline_images: Optional[Sequence[dict[str, Any]]] = None,
+    manifest: Optional[list[dict[str, Any]]] = None,
+    source_prefix: str = "email",
+    observed_at: str | None = None,
 ) -> str:
-    combined_text = f"EMAIL CONTENT:\n{email_text}\n\n"
-    pdf_attachments = sorted(
-        [
-            attachment
-            for attachment in attachments_data
-            if attachment["filename"].lower().endswith(".pdf")
-        ],
-        key=lambda attachment: len(attachment["content"]),
-    )
-    visual_items: list[tuple[str, Any]] = []
-    if pdf_attachments and extractor.should_batch_pdfs(pdf_attachments):
-        visual_items.append(("pdf_batch", pdf_attachments))
-    else:
-        visual_items.extend(("pdf", pdf) for pdf in pdf_attachments)
-
-    image_attachments = [
-        attachment
-        for attachment in attachments_data
-        if any(
-            attachment["filename"].lower().endswith(extension)
-            for extension in (".jpg", ".jpeg", ".png", ".gif", ".bmp")
-        )
-    ]
-    visual_items.extend(("image", image) for image in image_attachments)
-    visual_items.extend(("inline", image) for image in (inline_images or ()))
-
-    non_visual = [
-        attachment
-        for attachment in attachments_data
-        if not any(
-            attachment["filename"].lower().endswith(extension)
-            for extension in (".pdf", ".jpg", ".jpeg", ".png", ".gif", ".bmp")
-        )
-    ]
-    for attachment in non_visual:
-        combined_text += (
-            f"\nATTACHMENT ({attachment['filename']}) "
-            "[Not processed - not a PDF or image]\n\n"
-        )
-
-    def process_visual(item_type: str, item: Any) -> tuple[str, str]:
-        if item_type == "pdf_batch":
-            text = extractor.process_pdf_batch(item)
-            return "batched_pdfs", f"\nBATCHED PDF ATTACHMENTS:\n{text}\n\n"
-        if item_type == "pdf":
-            text = extractor.process_pdf(item["content"], item["filename"])
-            return item["filename"], f"\nPDF ATTACHMENT ({item['filename']}):\n{text}\n\n"
-        if item_type == "inline":
-            text = extractor.process_image(
-                item["content"],
-                item["filename"],
-                "INLINE IMAGE",
-            )
-            return item["filename"], f"\nINLINE IMAGE ({item['filename']}):\n{text}\n\n"
-        text = extractor.process_image(
-            item["content"],
-            item["filename"],
-            "ATTACHMENT",
-        )
-        return item["filename"], f"\nIMAGE ATTACHMENT ({item['filename']}):\n{text}\n\n"
-
-    results: list[tuple[str, str]] = []
-    if visual_items:
-        with ThreadPoolExecutor(
-            max_workers=min(extractor.max_attachment_workers, len(visual_items)),
-        ) as executor:
-            future_items = {
-                executor.submit(process_visual, item_type, item): (item_type, item)
-                for item_type, item in visual_items
-            }
-            for future in as_completed(future_items):
-                item_type, item = future_items[future]
+    records = [source_record(
+        source_prefix + ":body", "Email body", email_text.encode("utf-8"),
+        source_type="email_body", observed_at=observed_at, text=email_text,
+    )]
+    attachments = list(attachments_data) + list(inline_images or ())
+    results = {}
+    if attachments:
+        with ThreadPoolExecutor(max_workers=min(getattr(extractor, "max_attachment_workers", 4), len(attachments))) as executor:
+            futures = {executor.submit(extract_document, a["content"], a["filename"], extractor): index
+                       for index, a in enumerate(attachments)}
+            for future in as_completed(futures):
+                index = futures[future]
                 try:
-                    results.append(future.result())
+                    results[index] = (future.result(), "read")
                 except Exception as exc:
-                    filename = (
-                        f"batch_of_{len(item)}_items"
-                        if isinstance(item, list)
-                        else item.get("filename", "unknown")
-                    )
-                    results.append((filename, f"Error processing {filename}: {exc}"))
-
-        order = {
-            (
-                "batched_pdfs"
-                if item_type == "pdf_batch"
-                else item["filename"]
-            ): index
-            for index, (item_type, item) in enumerate(visual_items)
-        }
-        for _, text in sorted(results, key=lambda result: order.get(result[0], 999999)):
-            combined_text += text
+                    # Do not place exception messages/URLs into model context.
+                    results[index] = ("", "failed:" + type(exc).__name__)
+    for index, attachment in enumerate(attachments):
+        text, status = results[index]
+        records.append(source_record(
+            f"{source_prefix}:attachment:{index}", attachment["filename"], attachment["content"],
+            source_type="attachment", observed_at=observed_at, text=text, status=status,
+        ))
+    if manifest is not None:
+        manifest.extend(records)
+    if any(record["status"] != "read" for record in records):
+        raise IncompleteSourceExtraction(records)
+    combined_text = "\n\n".join(
+        f"SOURCE ID: {record['sourceId']}\nSOURCE TYPE: {record['sourceType']}\n"
+        f"FILE: {record['filename']}\nREQUEST TIMESTAMP: {record['observedAt']}\n"
+        + ("EMAIL CONTENT:\n" if record["sourceType"] == "email_body" else "ATTACHMENT CONTENT:\n")
+        + record["text"] for record in records
+    )
+    if len(combined_text) > MAX_CONTEXT_CHARS:
+        raise ValueError("Combined source text exceeds extraction limit; review required")
     return combined_text

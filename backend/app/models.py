@@ -493,6 +493,7 @@ class PerformanceSpecification(Base):
     last_error = Column(Text, nullable=True)
     checked_at = Column(DateTime(timezone=True), nullable=True)
     source_json = Column(JSON, nullable=True)
+    review_json = Column(JSON, nullable=True)
     current_revision = Column(String, nullable=True)
 
 
@@ -527,6 +528,7 @@ class PerformanceSpecificationArtifact(Base):
     item_id = Column(String, primary_key=True)
     revision = Column(String, primary_key=True)
     translation_json = Column(JSON, nullable=False)
+    source_json = Column(JSON, nullable=True)  # Immutable snapshot; null only for pre-v2 artifacts.
     model_version = Column(String, nullable=False)
     filename = Column(String, nullable=False)
     storage_bucket = Column(String, nullable=False)

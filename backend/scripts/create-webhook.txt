@@ -127,3 +127,106 @@ query AuditWebhooks {
 }
 
 -- =======================
+
+
+mutation CreatePendingSpecificationWebhooks($webhookUrl: String!) {
+  holdingArchived: create_webhook(
+    board_id: 1882196103
+    url: $webhookUrl
+    event: item_archived
+  ) {
+    id
+    event
+    board_id
+  }
+
+  holdingDeleted: create_webhook(
+    board_id: 1882196103
+    url: $webhookUrl
+    event: item_deleted
+  ) {
+    id
+    event
+    board_id
+  }
+
+  holdingRestored: create_webhook(
+    board_id: 1882196103
+    url: $webhookUrl
+    event: item_restored
+  ) {
+    id
+    event
+    board_id
+  }
+
+  drawingCreated: create_webhook(
+    board_id: 1825117125
+    url: $webhookUrl
+    event: create_subitem
+  ) {
+    id
+    event
+    board_id
+  }
+
+  drawingNameChanged: create_webhook(
+    board_id: 1825117125
+    url: $webhookUrl
+    event: change_subitem_name
+  ) {
+    id
+    event
+    board_id
+  }
+
+  drawingColumnChanged: create_webhook(
+    board_id: 1825117125
+    url: $webhookUrl
+    event: change_subitem_column_value
+  ) {
+    id
+    event
+    board_id
+  }
+
+  drawingArchived: create_webhook(
+    board_id: 1825117125
+    url: $webhookUrl
+    event: subitem_archived
+  ) {
+    id
+    event
+    board_id
+  }
+
+  drawingMoved: create_webhook(
+    board_id: 1825117125
+    url: $webhookUrl
+    event: move_subitem
+  ) {
+    id
+    event
+    board_id
+  }
+
+  hiddenItemNameChanged: create_webhook(
+    board_id: 1825138260
+    url: $webhookUrl
+    event: change_name
+  ) {
+    id
+    event
+    board_id
+  }
+
+  hiddenItemArchived: create_webhook(
+    board_id: 1825138260
+    url: $webhookUrl
+    event: item_archived
+  ) {
+    id
+    event
+    board_id
+  }
+}

@@ -11,6 +11,8 @@ from .. import monday_client
 from .design_processing_inputs import parse_design_processing_target
 from .legacy_enquiry.formatting import format_date_for_monday
 from .performance_specification_contract import FIELD_NAMES, missing
+from .performance_specification_evidence import resolve_email_evidence
+from .specification_semantics import tp_reference_revision
 
 
 class SpecificationSourceError(ValueError):
@@ -19,6 +21,16 @@ class SpecificationSourceError(ValueError):
 
 class SpecificationIneligible(SpecificationSourceError):
     pass
+
+
+class SpecificationValueConflict(SpecificationSourceError):
+    pass
+
+
+class SpecificationReviewRequired(SpecificationSourceError):
+    def __init__(self, source, issues):
+        self.source, self.issues = source, issues
+        super().__init__("Specification needs review: " + "; ".join(f"{field}: {reason}" for field, reason in issues.items()))
 
 
 def active_specification_group_ids() -> frozenset[str]:
@@ -31,6 +43,7 @@ COLUMN_FIELDS = """
     id type text value column { title }
     ... on DateValue { date }
     ... on DropdownValue { values { id label } }
+    ... on PeopleValue { persons_and_teams { id kind } }
     ... on BoardRelationValue {
       linked_item_ids linked_items { id name board { id } }
     }
@@ -46,6 +59,7 @@ COLUMN_FIELDS = """
           ... on DateValue { date }
           ... on StatusValue { label }
           ... on DropdownValue { values { id label } }
+          ... on PeopleValue { text persons_and_teams { id kind } }
           ... on BoardRelationValue {
             linked_item_ids linked_items { id name board { id } }
           }
@@ -98,6 +112,17 @@ class MondaySpecificationGateway:
 
     def fetch_project(self, item_id):
         return self._read(PROJECT_QUERY, item_id)
+
+    def resolve_person(self, kind, entity_id):
+        root = {"person": "users", "team": "teams"}.get(kind)
+        if root is None:
+            raise SpecificationSourceError("Unsupported People identity kind")
+        query = f"query ($ids: [ID!]) {{ {root}(ids: $ids) {{ id name }} }}"
+        payload = monday_client.monday_graphql_request(self.access_token, query, {"ids": [str(entity_id)]}, timeout=30)
+        entries = (payload.get("data") or {}).get(root)
+        if not isinstance(entries, list) or len(entries) != 1 or str(entries[0].get("id")) != str(entity_id) or not entries[0].get("name"):
+            raise SpecificationSourceError("People identity is unavailable")
+        return entries[0]["name"]
 
     def inspect_files(self, item_id):
         return monday_client.inspect_design_processing_file_columns(self.access_token, item_id)["file_mkza7y37"]
@@ -156,11 +181,27 @@ def _relation(col, dependencies):
     return linked
 
 
-def _typed_value(value, dependencies):
+def _typed_value(value, dependencies, gateway=None):
+    if "persons_and_teams" in value or value.get("__typename") == "PeopleValue" or value.get("type") == "people":
+        entities = value.get("persons_and_teams")
+        if not isinstance(entities, list):
+            raise SpecificationSourceError("Incomplete People specification value")
+        if len(entities) > 1:
+            raise SpecificationValueConflict("A specification field has multiple People identities")
+        if not entities:
+            if value.get("text"):
+                raise SpecificationSourceError("People identities have not resolved")
+            return None
+        entity = entities[0]
+        if not entity.get("id") or entity.get("kind") not in {"person", "team"} or gateway is None:
+            raise SpecificationSourceError("Unreadable People specification identity")
+        name = gateway.resolve_person(entity["kind"], str(entity["id"]))
+        value["resolvedPeople"] = [{"id": str(entity["id"]), "kind": entity["kind"], "name": name}]
+        return _clean(name)
     if "linked_items" in value:
         linked = _relation(value, dependencies)
         if len(linked) > 1:
-            raise SpecificationSourceError("A specification field resolves to multiple linked values")
+            raise SpecificationValueConflict("A specification field resolves to multiple linked values")
         return _clean(linked[0]["name"]) if linked else None
     if "values" in value:
         options = value["values"]
@@ -168,7 +209,7 @@ def _typed_value(value, dependencies):
             raise SpecificationSourceError("Unreadable dropdown specification value")
         labels = {x["label"] for x in options}
         if len(labels) > 1:
-            raise SpecificationSourceError("A specification field has multiple dropdown selections")
+            raise SpecificationValueConflict("A specification field has multiple dropdown selections")
         return _clean(next(iter(labels))) if labels else None
     for key in ("date", "number", "label", "text"):
         if key in value:
@@ -176,7 +217,7 @@ def _typed_value(value, dependencies):
     raise SpecificationSourceError("Unsupported or unreadable mirrored specification value")
 
 
-def _read_column(col, dependencies):
+def _read_column(col, dependencies, gateway=None):
     if col.get("type") == "mirror":
         entries = col.get("mirrored_items")
         if not isinstance(entries, list):
@@ -189,12 +230,12 @@ def _read_column(col, dependencies):
             if not linked.get("id") or not (linked.get("board") or {}).get("id"):
                 raise SpecificationSourceError("Incomplete mirrored specification identity")
             dependencies.add((str(linked["board"]["id"]), str(linked["id"])))
-            values.add(_typed_value(entry.get("mirrored_value") or {}, dependencies))
+            values.add(_typed_value(entry.get("mirrored_value") or {}, dependencies, gateway))
         if len(values) > 1:
-            raise SpecificationSourceError("Conflicting mirrored specification values")
+            raise SpecificationValueConflict("Conflicting mirrored specification values")
         return next(iter(values)) if values else None
-    if col.get("type") in {"board_relation", "dropdown", "date"}:
-        return _typed_value(col, dependencies)
+    if col.get("type") in {"board_relation", "dropdown", "date", "people"}:
+        return _typed_value(col, dependencies, gateway)
     if "text" not in col:
         raise SpecificationSourceError("Specification column text is unreadable")
     return _clean(col["text"])
@@ -234,26 +275,38 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
         raise SpecificationSourceError("Waiting for current email extraction")
     extracted = extraction.get("performanceParameters")
     if not isinstance(extracted, dict) or not extracted:
-        raise SpecificationSourceError("Waiting for specification-aware email extraction (output-v8)")
-    raw = {label: _clean(extracted.get(label, extracted.get(label.replace("U Value", "U-Value"))))
-           for label in FIELD_NAMES}
-    raw["Incoming Information"] = ""
-    provenance = {label: {"source": "Email Content"} for label in FIELD_NAMES}
+        raise SpecificationSourceError("Waiting for evidence-aware email extraction (output-v9)")
+    try:
+        raw, provenance, issues = resolve_email_evidence(extraction)
+    except ValueError as exc:
+        raise SpecificationSourceError(str(exc)) from exc
     dependencies = set()
-    previous = previous or {}
+    crm_reads = []
+    selected_drawing = None
+
+    def snapshot():
+        return {
+            "raw": raw, "sources": provenance, "crmReads": crm_reads,
+            "sourceManifest": extraction["sourceManifest"],
+            "evidenceVersion": extraction["specificationEvidenceVersion"], "issues": issues,
+            "dependencies": [list(value) for value in sorted(dependencies)],
+            "emailRevision": target.input_revision, "extractionPipeline": extraction["pipelineVersion"],
+            "drawingItemId": str(selected_drawing["id"]) if selected_drawing else None,
+        }
+
+    def require_review(label, reason):
+        issues[label] = reason
+        raise SpecificationReviewRequired(snapshot(), issues)
 
     def apply(label, value, source_item, column_id):
         value = _clean(value)
         source = {"source": "Monday CRM", "boardId": str(source_item["board"]["id"]),
                   "itemId": str(source_item["id"]), "columnId": column_id}
-        old_source = (previous.get("sources") or {}).get(label) or {}
-        same_source = all(source.get(key) == old_source.get(key) for key in source)
-        cleared = value is None and same_source and (
-            (previous.get("raw") or {}).get(label) is not None or old_source.get("cleared") is True
-        )
-        if value is not None or cleared:
+        crm_reads.append({**source, "field": label, "value": value, "status": "empty" if value is None else "provided"})
+        if value is not None:
             raw[label] = value
-            provenance[label] = {**source, "cleared": cleared}
+            provenance[label] = {**source, "status": "provided", "rationale": "Current populated CRM value takes precedence"}
+            issues.pop(label, None)
 
     def apply_columns(source_item, scope):
         for label in FIELD_NAMES:
@@ -261,7 +314,14 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
                 continue
             column = _find_column(source_item, label, scope)
             if column is not None:
-                apply(label, _read_column(column, dependencies), source_item, column["id"])
+                try:
+                    value = _read_column(column, dependencies, gateway)
+                except SpecificationValueConflict as exc:
+                    require_review(label, str(exc))
+                apply(label, value, source_item, column["id"])
+                if value is not None:
+                    provenance[label]["columnValue"] = {key: value for key, value in column.items()
+                                                        if key not in {"value", "display_value"}}
 
     holding = gateway.fetch_holding(item.item_id)
     if (str((holding.get("board") or {}).get("id")) != target.board_id
@@ -276,8 +336,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
     if any(str(entry["board"]["id"]) != str(settings.design_processing_project_board_id) for entry in projects):
         raise SpecificationSourceError("TP Ref points to an unexpected project board")
     if len(projects) > 1:
-        raise SpecificationSourceError("Select a single TP Ref project for this specification")
-    selected_drawing = None
+        require_review("Drawing Reference", "Select a single TP Ref project for this specification")
     if projects:
         project = gateway.fetch_project(str(projects[0]["id"]))
         if (str(project.get("id")) != str(projects[0]["id"])
@@ -287,7 +346,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
         apply_columns(project, "project")
         title = next((col for col in _columns(project) if col["id"] == "text3__1"), None)
         if title is not None:
-            apply("Drawing Title", _read_column(title, dependencies), project, title["id"])
+            apply("Drawing Title", _read_column(title, dependencies, gateway), project, title["id"])
         drawings = []
         for drawing in project["subitems"]:
             board_id = (drawing.get("board") or {}).get("id")
@@ -321,29 +380,57 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
             if len(same_series) == 1:
                 selected_drawing = same_series[0]
             else:
-                raise SpecificationSourceError("Requested drawing/roof is missing or ambiguous")
+                require_review("Drawing Reference", "Requested drawing/roof is missing or ambiguous")
         if selected_drawing is not None:
             name = str(selected_drawing.get("name") or "")
             if re.match(r"^(?:TP)?\d+_", name, re.IGNORECASE):
                 apply("Drawing Reference", name, selected_drawing, "name")
-                apply("Revision", name.split("_", 1)[1].strip(), selected_drawing, "name")
             apply_columns(selected_drawing, "drawing")
 
     apply_columns(holding, "holding")
     accounts = _relation(columns["board_relation_mm3c4g5x"], dependencies)
     if len(accounts) > 1:
-        raise SpecificationSourceError("Several Accounts exist; specification Company is ambiguous")
+        require_review("Company", "Several Accounts exist; specification Company is ambiguous")
     apply("Company", accounts[0]["name"] if accounts else None, holding, "board_relation_mm3c4g5x")
-    apply("Date Received", _read_column(columns["date_mkpb23av"], dependencies), holding, "date_mkpb23av")
+    apply("Date Received", _read_column(columns["date_mkpb23av"], dependencies, gateway), holding, "date_mkpb23av")
+    # Re-evaluate attachment candidates with the now-confirmed CRM target. Only
+    # fallback fields change here; current non-empty CRM values keep precedence.
+    fallback, evidence_sources, scoped_issues = resolve_email_evidence(
+        extraction, (raw.get("Bauder Roof Num"), raw.get("Drawing Reference")),
+    )
+    for label in FIELD_NAMES:
+        if provenance[label].get("source") != "Monday CRM":
+            raw[label], provenance[label] = fallback[label], evidence_sources[label]
+            issues.pop(label, None)
+            if label in scoped_issues:
+                issues[label] = scoped_issues[label]
+    confirmed_reference = provenance["Drawing Reference"].get("source") == "Monday CRM" or any(
+        e.get("issuer") == "TaperedPlus" for e in provenance["Drawing Reference"].get("candidates", [])
+    )
+    suffix = tp_reference_revision(raw.get("Drawing Reference"), confirmed_crm=confirmed_reference)
+    if raw.get("Drawing Reference") and suffix is None:
+        issues["Drawing Reference"] = "Reference is not a verified TaperedPlus drawing"
+    if suffix:
+        revision_value = raw.get("Revision")
+        if provenance["Revision"].get("source") != "Monday CRM" and raw.get("Drawing Reference") != fallback.get("Drawing Reference"):
+            revision_value = None  # An older requested drawing does not define the replacement's revision.
+        # A compatible letter mirror is retained as provenance but cannot replace
+        # the full TP reference suffix. A conflicting suffix/letter requires review.
+        if revision_value and revision_value.casefold() not in {suffix.casefold(), suffix.rsplit("-", 1)[-1].strip().casefold()}:
+            issues["Revision"] = "Revision conflicts with the selected TaperedPlus drawing reference"
+        else:
+            issues.pop("Revision", None)
+        raw["Revision"] = suffix
+        provenance["Revision"] = {"source": "Derived", "status": "provided", "from": "Drawing Reference",
+                                  "referenceSource": provenance["Drawing Reference"], "observedRevision": revision_value}
+    elif raw.get("Revision"):
+        issues["Revision"] = "Revision requires a verified TaperedPlus Drawing Reference"
     if raw.get("Date Received"):
         formatted = format_date_for_monday(raw["Date Received"])
         if not formatted:
             raise SpecificationSourceError("Date Received is not a supported date")
         raw["Date Received"] = formatted
-    return {
-        "raw": raw, "sources": provenance,
-        "dependencies": [list(value) for value in sorted(dependencies)],
-        "emailRevision": target.input_revision,
-        "extractionPipeline": extraction["pipelineVersion"],
-        "drawingItemId": str(selected_drawing["id"]) if selected_drawing else None,
-    }
+    source = snapshot()
+    if issues:
+        raise SpecificationReviewRequired(source, issues)
+    return source

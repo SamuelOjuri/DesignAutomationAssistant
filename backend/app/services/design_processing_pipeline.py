@@ -165,6 +165,10 @@ def _extraction_payload(
         **_identity_payload(identity),
         "parameters": result.parameters,
         "performanceParameters": result.performance_parameters,
+        "specificationEvidenceVersion": 2,
+        "specificationEvidence": list(result.specification_evidence),
+        "specificationAssessedFields": list(result.specification_assessed_fields),
+        "sourceManifest": list(result.source_manifest),
         "sources": result.sources,
         "projectName": result.project_name,
         "emailContentHashes": [
@@ -300,7 +304,7 @@ def run_analysis_pipeline(
     if not _has_identity(extraction, identity):
         db.commit()
         downloaded_assets = download_design_email_assets(
-            snapshot.email_assets,
+            (*snapshot.email_assets, *snapshot.supplementary_assets),
             access_token,
             downloader=downloader,
             check_current=check_current,

@@ -27,11 +27,12 @@ from .design_processing_artifacts import SupabaseDesignArtifactStorage
 from .design_processing_queue import execution_allowed_for_item
 from .legacy_enquiry.llm import LegacyGeminiClient
 from .performance_specification_contract import (
-    CADTranslation, SPECIFICATION_VERSION, digest, translate_specification,
+    CADTranslation, SPECIFICATION_VERSION, UnresolvedSpecificationTranslation, digest, translate_specification,
 )
 from .performance_specification_pdf import render_performance_specification_pdf
 from .performance_specification_sources import (
     MondaySpecificationGateway, SpecificationIneligible, SpecificationSourceError,
+    SpecificationReviewRequired,
     active_specification_group_ids, resolve_specification_sources,
 )
 
@@ -211,6 +212,7 @@ def _finish(db, claim, source, *, revision=None):
     record.scheduled_for = utc_now() + timedelta(seconds=settings.performance_specification_recheck_seconds)
     record.lease_token = record.lease_until = None
     record.last_error, record.attempt_count = None, 0
+    record.review_json = None
     if revision is not None:
         record.current_revision = revision
     _replace_dependencies(db, record, source)
@@ -219,13 +221,14 @@ def _finish(db, claim, source, *, revision=None):
 
 def execute_specification(db, claim, *, gateway, client, storage):
     board_id, item_id, token, generation = claim
+    source = None
     try:
         record, source = _source(db, claim, gateway)
         model_version = f"{SPECIFICATION_VERSION}:{client.model}:thinking-{client.thinking_level}"
         revision = digest({"source": source, "modelVersion": model_version})
         artifact = db.get(PerformanceSpecificationArtifact, (board_id, item_id, revision))
         if artifact is None:
-            translation = translate_specification(source["raw"], client)
+            translation = translate_specification(source["raw"], client, evidence=source)
             _check_claim(db, claim)
             # Re-read source and group after translation; a late model response
             # cannot publish facts that were superseded during its request.
@@ -241,6 +244,7 @@ def execute_specification(db, claim, *, gateway, client, storage):
             artifact = PerformanceSpecificationArtifact(
                 board_id=board_id, item_id=item_id, revision=revision,
                 translation_json=translation.model_dump(by_alias=True), model_version=model_version,
+                source_json=source,
                 filename=filename, storage_bucket=settings.design_processing_artifact_bucket,
                 storage_object_key=object_key, content_sha256=hashlib.sha256(content).hexdigest(),
                 size_bytes=len(content), status="rendered",
@@ -304,6 +308,18 @@ def execute_specification(db, claim, *, gateway, client, storage):
             record.attempt_count += 1
             record.scheduled_for = utc_now() + timedelta(seconds=min(3600, 30 * 2 ** min(record.attempt_count, 7)))
             record.last_error = f"{type(exc).__name__}: {str(exc)[:400]}"
+            if isinstance(exc, SpecificationReviewRequired):
+                record.review_json = {"status": "conflict", "source": exc.source, "issues": exc.issues}
+                _replace_dependencies(db, record, exc.source)
+            elif isinstance(exc, UnresolvedSpecificationTranslation):
+                record.review_json = {
+                    "status": "unmapped", "source": source,
+                    "translation": exc.translation.model_dump(by_alias=True),
+                    "issues": {field: "Known value has no verified CAD translation" for field in exc.fields},
+                }
+                _replace_dependencies(db, record, source)
+            elif isinstance(exc, SpecificationSourceError):
+                record.review_json = {"status": "source_failure", "reason": str(exc)[:2000], "source": source}
             outcome = "failed"
             logger.warning("Specification refresh failed item=%s error_type=%s", item_id, type(exc).__name__)
         db.commit()

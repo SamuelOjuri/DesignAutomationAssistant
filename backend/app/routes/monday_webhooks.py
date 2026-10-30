@@ -562,7 +562,7 @@ def _design_trigger_type(normalized: NormalizedWebhookEvent) -> Optional[str]:
         return "webhook_create"
     if event_type in DESIGN_MOVE_EVENT_TYPES:
         return "webhook_move"
-    if column_id == EMAIL_COLUMN_ID:
+    if column_id == EMAIL_COLUMN_ID or column_id in settings.design_processing_source_file_column_ids:
         return "webhook_email"
     if column_id == "name" or event_type in DESIGN_NAME_EVENT_TYPES:
         return "webhook_name"

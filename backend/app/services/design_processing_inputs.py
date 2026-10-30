@@ -50,6 +50,7 @@ class DesignProcessingTargetSnapshot:
     # Missing entries are unreadable, not empty. Raw values retain malformed data
     # so active-group publication can conservatively preserve it.
     scalar_column_values: Mapping[str, Any] = field(default_factory=dict)
+    supplementary_assets: tuple[DesignEmailAsset, ...] = ()
 
     @property
     def missing_name(self) -> bool:
@@ -229,8 +230,24 @@ def parse_design_processing_target(
         raise DesignProcessingInputError("Email membership contains duplicate asset IDs")
 
     ordered_assets = tuple(email_assets)
+    supplemental = []
+    seen = {asset.asset_id for asset in ordered_assets}
+    for column_id in settings.design_processing_source_file_column_ids:
+        for member in _parse_email_membership(item, column_id):
+            asset_id = _required_decimal_id(member.get("assetId"), field_name=f"{column_id}.assetId")
+            if asset_id in seen:
+                continue
+            metadata = assets_by_id.get(asset_id)
+            if metadata is None:
+                raise DesignProcessingInputError(f"Source asset {asset_id} metadata is unavailable")
+            asset = _parse_supported_asset(asset_id, metadata)
+            if asset.filename.lower().startswith(("project_performance_specification_details_", "ai_data_", "matched_project")):
+                continue
+            supplemental.append(asset)
+            seen.add(asset_id)
+    supplemental.sort(key=lambda asset: (int(asset.asset_id), asset.filename))
     input_revision = (
-        compute_design_input_revision(ordered_assets) if ordered_assets else None
+        compute_design_input_revision((*ordered_assets, *supplemental)) if ordered_assets else None
     )
     return DesignProcessingTargetSnapshot(
         board_id=board_id,
@@ -239,6 +256,7 @@ def parse_design_processing_target(
         item_state=item_state,
         name=name_value or "",
         email_assets=ordered_assets,
+        supplementary_assets=tuple(supplemental),
         input_revision=input_revision,
         scalar_column_values={
             column["id"]: column["value"]
@@ -250,18 +268,18 @@ def parse_design_processing_target(
     )
 
 
-def _parse_email_membership(item: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+def _parse_email_membership(item: Mapping[str, Any], column_id: str = EMAIL_COLUMN_ID) -> list[Mapping[str, Any]]:
     column_values = item.get("column_values")
     if not isinstance(column_values, list):
         raise DesignProcessingInputError("item.column_values must be a list")
     email_columns = [
         value
         for value in column_values
-        if isinstance(value, Mapping) and value.get("id") == EMAIL_COLUMN_ID
+        if isinstance(value, Mapping) and value.get("id") == column_id
     ]
     if len(email_columns) != 1:
         raise DesignProcessingInputError(
-            f"item must contain exactly one {EMAIL_COLUMN_ID} column value"
+            f"item must contain exactly one {column_id} column value"
         )
 
     raw_value = email_columns[0].get("value")
