@@ -9,6 +9,7 @@ from google.genai import types
 
 from ...gemini_models import ThinkingLevel, validate_thinking_level
 from ..llm_interface import gemini_api_with_retry
+from ..gemini_schema import gemini_response_schema
 from .parameter_extraction import (
     DesignParameterExtraction,
     PARAMETER_EXTRACTION_PROMPT,
@@ -56,7 +57,7 @@ class LegacyGeminiClient:
                 thinking_level=types.ThinkingLevel(self.thinking_level),
             ),
             response_mime_type="application/json",
-            response_json_schema=DesignParameterExtraction.model_json_schema(),
+            response_json_schema=gemini_response_schema(DesignParameterExtraction),
         )
 
     def extract_design_parameters(self, context: str) -> DesignParameterExtraction:

@@ -19,6 +19,13 @@ populated field fails publication; the raw value, translation and warnings remai
 `performance_specifications.review_json` with status `unmapped`. A brand such as
 BauderROCK does not establish a particular CAD product variant without evidence.
 
+Gemini requests use the shared `gemini_response_schema` helper, which omits array
+`minItems`/`maxItems` constraints from the wire schema to avoid provider decoding
+complexity errors. Local Pydantic validation still enforces all evidence, assessed-field
+and warning limits; enum choices and field definitions remain in the API schema.
+Synthetic live checks reproduced HTTP 400 with the original evidence schema and
+succeeded after removing its array bounds. The same helper is used for CAD translation.
+
 ## Scope and existing outputs
 
 Only groups in `AUTO_SYNC_ACTIVE_GROUP_IDS` are eligible. The configured Landing Zone

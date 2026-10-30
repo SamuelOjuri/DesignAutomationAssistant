@@ -187,7 +187,10 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
     config = captured["config"]
     assert captured["model"] == "gemini-3.8-flash"
     assert config.response_mime_type == "application/json"
-    assert config.response_json_schema == DesignParameterExtraction.model_json_schema()
+    from backend.app.services.gemini_schema import gemini_response_schema
+    assert config.response_json_schema == gemini_response_schema(DesignParameterExtraction)
+    assert "maxItems" not in config.response_json_schema["properties"]["specification_evidence"]
+    assert DesignParameterExtraction.model_json_schema()["properties"]["specification_evidence"]["maxItems"] == 512
     schema_properties = config.response_json_schema["properties"]
     assert list(schema_properties).index("drawing_title") < list(
         schema_properties

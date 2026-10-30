@@ -12,6 +12,7 @@ from google.genai import types
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from .legacy_enquiry.llm import LegacyGeminiClient
+from .gemini_schema import gemini_response_schema
 from .specification_semantics import FIELD_DEFINITIONS, missing
 
 
@@ -180,7 +181,7 @@ def translate_specification(raw: dict[str, Any], client: LegacyGeminiClient, *, 
     config = types.GenerateContentConfig(
         thinking_config=client.generation_config.thinking_config,
         response_mime_type="application/json",
-        response_json_schema=CADTranslation.model_json_schema(),
+        response_json_schema=gemini_response_schema(CADTranslation),
     )
 
     def request(contents):
