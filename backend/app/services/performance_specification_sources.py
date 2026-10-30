@@ -11,7 +11,7 @@ from .. import monday_client
 from .design_processing_inputs import parse_design_processing_target
 from .legacy_enquiry.formatting import format_date_for_monday
 from .performance_specification_contract import FIELD_NAMES, missing
-from .performance_specification_evidence import resolve_email_evidence
+from .performance_specification_evidence import UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT, resolve_email_evidence
 from .specification_semantics import tp_reference_revision
 
 
@@ -431,6 +431,16 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
             raise SpecificationSourceError("Date Received is not a supported date")
         raw["Date Received"] = formatted
     source = snapshot()
-    if issues:
+    # Fully read, verified alternatives can be published as field review notes.
+    # Unverified evidence and incomplete/ambiguous CRM reads still fail the refresh.
+    publishable_conflicts = {
+        VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT,
+        "Revision conflicts with the selected TaperedPlus drawing reference",
+    }
+    if any(reason not in publishable_conflicts
+           or label not in extraction.get("specificationAssessedFields", [])
+           or any(candidate["status"] == "unverified"
+                  for candidate in provenance[label].get("rejectedCandidates", []))
+           for label, reason in issues.items()):
         raise SpecificationReviewRequired(source, issues)
     return source

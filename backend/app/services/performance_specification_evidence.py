@@ -13,8 +13,55 @@ from .specification_semantics import COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION,
 from .performance_specification_contract import FIELD_NAMES, missing
 
 
+VALUE_CONFLICT = "Conflicting roof/drawing/request values require a confirmed target"
+UNDATED_SCOPE_CONFLICT = "Undated project-wide value conflicts with the selected roof"
+
+
 def _normal(value):
     return re.sub(r"\s+", " ", str(value or "")).strip().casefold()
+
+
+def _excerpt_normal(value):
+    # PDF text readers may add Markdown emphasis/code around labels or cells.
+    # Ignore only paired presentation markers, preserving numbers, punctuation,
+    # table separators and word order. Never join excerpts across an ellipsis.
+    text = re.sub(r"\*\*([^*\n]+)\*\*|`([^`\n]+)`", lambda m: m[1] or m[2], str(value or ""))
+    return _normal(text)
+
+
+def _contains_excerpt(excerpt, text):
+    excerpt, text = _excerpt_normal(excerpt), _excerpt_normal(text)
+    if not excerpt:
+        return False
+    # A short value such as A1 or 1:10 cannot match the prefix of A10 or 1:100.
+    start = r"(?<!\w)" if re.match(r"\w", excerpt[0]) else ""
+    end = r"(?!\w)" if re.match(r"\w", excerpt[-1]) else ""
+    return re.search(start + re.escape(excerpt) + end, text) is not None
+
+
+def _candidate_key(evidence):
+    # A repaired excerpt may replace a rejected one only for the same claim.
+    # Different values, sources, scopes, roles or dates still require review.
+    return tuple(evidence.get(key) if key == "source_id" else _normal(evidence.get(key)) for key in (
+        "field", "value", "source_id", "scope", "issuer", "role", "request_role", "message_date",
+    ))
+
+
+def _has_parent_request_date(evidence, source, sources):
+    """Verify an attachment's inherited date against its own outer email header."""
+    source_id = source["sourceId"]
+    if (source.get("sourceType") != "attachment" or ":attachment:" not in source_id
+            or evidence["request_role"] == "forwarded_request" or not source.get("observedAt")):
+        return False
+    parent = sources.get(source_id.split(":attachment:", 1)[0] + ":body")
+    if (not parent or parent.get("sourceType") != "email_body" or parent["status"] != "read"
+            or parent.get("observedAt") != source["observedAt"]):
+        return False
+    # The reader puts the outer headers before the first blank line. Dates in
+    # forwarded bodies or unrelated emails cannot date an attachment candidate.
+    header = re.split(r"\r?\n[ \t]*\r?\n", parent["text"], maxsplit=1)[0]
+    dates = re.findall(r"^Date:[ \t]*([^\r\n]+)", header, flags=re.MULTILINE)
+    return len(dates) == 1 and _normal(dates[0]) == _normal(evidence["message_date"])
 
 
 def _scope_key(value):
@@ -38,20 +85,25 @@ def resolve_email_evidence(extraction, scopes=()):
         raise ValueError("Source manifest is empty or contains duplicate identities")
     assessed = set(extraction.get("specificationAssessedFields") or [])
     candidates = defaultdict(list)
+    rejected = defaultdict(list)
     issues = {}
     for value in extraction.get("specificationEvidence") or []:
         evidence = SpecificationEvidence.model_validate(value).model_dump()
         label = evidence["field"]
         if label not in FIELD_NAMES or label == "Incoming Information":
             continue
+        def reject(reason):
+            rejected[label].append({**evidence, "reason": reason})
+
         source = sources.get(evidence["source_id"])
-        if source is None or source["status"] != "read" or _normal(evidence["snippet"]) not in _normal(source["text"]):
-            issues[label] = "Supporting source/excerpt could not be verified"
+        if (source is None or source["status"] != "read"
+                or not _contains_excerpt(evidence["snippet"], source["text"])):
+            reject("Supporting source/excerpt could not be verified")
             continue
         if evidence["role"] != "requested":
             continue  # Achieved figures and unselected lookup options are not requests.
         if label in {"Bauder Roof Num", "Date Received"} and source["sourceType"] != "email_body":
-            issues[label] = "Evidence does not meet this field's required email/request scope"
+            reject("Evidence does not meet this field's required email/request scope")
             continue
         if label in {"Company", "Contact", "Date Received"} and evidence["request_role"] != "direct_request":
             continue
@@ -59,15 +111,16 @@ def resolve_email_evidence(extraction, scopes=()):
             # Unprefixed references require an explicit verified TP issuer claim.
             if (evidence["issuer"] != "TaperedPlus" or not re.search(r"Tapered\s*Plus", evidence["snippet"], re.IGNORECASE)
                     or not tp_reference_revision(evidence["value"], confirmed_crm=True)):
-                issues[label] = "Drawing Reference is not verified as TaperedPlus-issued"
+                reject("Drawing Reference is not verified as TaperedPlus-issued")
                 continue
-        if label != "Date Received" and _normal(evidence["value"]) not in _normal(evidence["snippet"]):
-            issues[label] = "Raw value is absent from the supporting excerpt"
+        if label != "Date Received" and not _contains_excerpt(evidence["value"], evidence["snippet"]):
+            reject("Raw value is absent from the supporting excerpt")
             continue
         observed_at = source.get("observedAt")
         if evidence["message_date"]:
             try:
-                if (_normal(evidence["message_date"]) not in _normal(source["text"])
+                if ((_normal(evidence["message_date"]) not in _normal(source["text"])
+                     and not _has_parent_request_date(evidence, source, sources))
                         or not re.search(r"\b(?:19|20)\d{2}\b", evidence["message_date"])):
                     raise ValueError("Unverified message date")
                 timestamp = parse_datetime(evidence["message_date"], dayfirst=True)
@@ -75,10 +128,17 @@ def resolve_email_evidence(extraction, scopes=()):
                     timestamp = timestamp.replace(tzinfo=ZoneInfo("Europe/London"))
                 observed_at = timestamp.astimezone(timezone.utc).isoformat()
             except (ValueError, OverflowError):
-                issues[label] = "Candidate request timestamp could not be verified"
+                reject("Candidate request timestamp could not be verified")
                 continue
         candidates[label].append({**evidence, "observedAt": observed_at,
                                   "filename": source["filename"], "contentSha256": source["contentSha256"]})
+
+    for label, failures in rejected.items():
+        verified = {_candidate_key(evidence) for evidence in candidates[label]}
+        for failure in failures:
+            failure["status"] = "repaired" if _candidate_key(failure) in verified else "unverified"
+            if failure["status"] == "unverified":
+                issues[label] = failure["reason"]
 
     raw, provenance = {}, {}
     extracted = extraction.get("performanceParameters") or {}
@@ -99,7 +159,7 @@ def resolve_email_evidence(extraction, scopes=()):
             later_general = [e for e in general if cutoff and e["observedAt"] and e["observedAt"] > cutoff]
             options = later_general or matched
             if any(e["observedAt"] is None and _normal(e["value"]) not in {_normal(m["value"]) for m in matched} for e in general):
-                issues[label] = "Undated project-wide value conflicts with the selected roof"
+                issues[label] = UNDATED_SCOPE_CONFLICT
         by_scope = defaultdict(list)
         for evidence in options:
             by_scope[_scope_key(evidence["scope"])].append(evidence)
@@ -121,7 +181,7 @@ def resolve_email_evidence(extraction, scopes=()):
             current.extend(scoped)
         distinct = {_normal(e["value"]) for e in current}
         if len(distinct) > 1:
-            issues[label] = "Conflicting roof/drawing/request values require a confirmed target"
+            issues[label] = VALUE_CONFLICT
         selected = current[0] if len(distinct) == 1 else None
         scalar = extracted.get(label, extracted.get(label.replace("U Value", "U-Value")))
         if selected is None and not missing(scalar):
@@ -130,6 +190,7 @@ def resolve_email_evidence(extraction, scopes=()):
         provenance[label] = {
             "source": "Email/Attachment", "status": "conflict" if label in issues else "provided" if selected else "missing",
             "selected": selected, "candidates": list(candidates[label]),
+            **({"rejectedCandidates": rejected[label]} if rejected[label] else {}),
             "rationale": "Most recent applicable request within the confirmed scope; common values may span roofs",
         }
     return raw, provenance, issues

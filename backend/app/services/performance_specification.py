@@ -27,7 +27,7 @@ from .design_processing_artifacts import SupabaseDesignArtifactStorage
 from .design_processing_queue import execution_allowed_for_item
 from .legacy_enquiry.llm import LegacyGeminiClient
 from .performance_specification_contract import (
-    CADTranslation, SPECIFICATION_VERSION, UnresolvedSpecificationTranslation, digest, translate_specification,
+    SPECIFICATION_VERSION, SpecificationPublication, digest, prepare_specification_publication,
 )
 from .performance_specification_pdf import render_performance_specification_pdf
 from .performance_specification_sources import (
@@ -205,7 +205,7 @@ def _adoptable(artifact, assets):
     return matches[0] if matches else None
 
 
-def _finish(db, claim, source, *, revision=None):
+def _finish(db, claim, source, publication, *, revision=None):
     _check_claim(db, claim)
     if revision is not None and not _publication_allowed(claim[1]):
         raise SupersededSpecification("Specification publication disabled before completion")
@@ -219,7 +219,11 @@ def _finish(db, claim, source, *, revision=None):
     record.scheduled_for = utc_now() + timedelta(seconds=settings.performance_specification_recheck_seconds)
     record.lease_token = record.lease_until = None
     record.last_error, record.attempt_count = None, 0
-    record.review_json = None
+    record.review_json = {
+        "status": "published_with_review" if revision is not None else "rendered_with_review",
+        "source": source, "issues": publication.field_reviews,
+        "translation": publication.model_dump(by_alias=True),
+    } if publication.field_reviews else None
     if revision is not None:
         record.current_revision = revision
     _replace_dependencies(db, record, source)
@@ -235,7 +239,7 @@ def execute_specification(db, claim, *, gateway, client, storage):
         revision = digest({"source": source, "modelVersion": model_version})
         artifact = db.get(PerformanceSpecificationArtifact, (board_id, item_id, revision))
         if artifact is None:
-            translation = translate_specification(source["raw"], client, evidence=source)
+            translation = prepare_specification_publication(source, client)
             _check_claim(db, claim)
             # Re-read source and group after translation; a late model response
             # cannot publish facts that were superseded during its request.
@@ -259,14 +263,14 @@ def execute_specification(db, claim, *, gateway, client, storage):
             db.add(artifact)
             db.commit()
         else:
-            CADTranslation.model_validate(artifact.translation_json)
+            translation = SpecificationPublication.model_validate(artifact.translation_json)
             db.commit()
             content = storage.read_private(artifact.storage_bucket, artifact.storage_object_key)
             if hashlib.sha256(content).hexdigest() != artifact.content_sha256 or len(content) != artifact.size_bytes:
                 raise SpecificationSourceError("Stored specification PDF failed its integrity check")
 
         if not _publication_allowed(item_id):
-            _finish(db, claim, source)
+            _finish(db, claim, source, translation)
             return "rendered"  # Existing shadow/allowlist policy also governs this publisher.
 
         _, current = _source(db, claim, gateway)
@@ -291,7 +295,7 @@ def execute_specification(db, claim, *, gateway, client, storage):
         artifact.status = "published"
         artifact.last_error = None
         db.commit()
-        _finish(db, claim, source, revision=revision)
+        _finish(db, claim, source, translation, revision=revision)
 
         # Cleanup takes a separate fenced claim after current publication commits.
         _cleanup_specifications(db, board_id, item_id, revision, gateway, source)
@@ -318,13 +322,6 @@ def execute_specification(db, claim, *, gateway, client, storage):
             if isinstance(exc, SpecificationReviewRequired):
                 record.review_json = {"status": "conflict", "source": exc.source, "issues": exc.issues}
                 _replace_dependencies(db, record, exc.source)
-            elif isinstance(exc, UnresolvedSpecificationTranslation):
-                record.review_json = {
-                    "status": "unmapped", "source": source,
-                    "translation": exc.translation.model_dump(by_alias=True),
-                    "issues": {field: "Known value has no verified CAD translation" for field in exc.fields},
-                }
-                _replace_dependencies(db, record, source)
             elif isinstance(exc, SpecificationSourceError):
                 record.review_json = {"status": "source_failure", "reason": str(exc)[:2000], "source": source}
             outcome = "failed"

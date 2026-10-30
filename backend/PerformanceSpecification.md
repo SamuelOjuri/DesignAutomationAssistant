@@ -2,10 +2,14 @@
 
 The additional PDF is published to **Project Holding Page** (`1882196103`),
 **AI Data** (`file_mkza7y37`). It contains selectable text with the exact 18 CAD
-labels in the requested order. Dropdowns contain exact permitted strings; U-values
-contain two decimal places (decimal HALF_UP rounding). Genuinely absent values
-display **Not Provided**. Known values with unresolved translations or conflicting
-evidence hold publication for review and retain the last successful PDF.
+labels in the requested order. Resolved dropdowns contain exact permitted strings;
+resolved U-values contain two decimal places (decimal HALF_UP rounding). Genuinely
+absent values display **Not Provided**. Verified conflicting values and unresolved
+translations publish **Review required** details beside the affected field, including
+the raw product or competing values and roof scopes. These fields keep null CAD
+values in `translation_json.values`; their PDF text is stored in
+`translation_json.fieldReviews`. Unverified evidence, incomplete source reads and
+invalid model responses still retain the last successful PDF and retry.
 **Incoming Information** is always blank. Bauder Roof Num
 is optional and extracted only when explicitly stated in email content.
 
@@ -15,9 +19,13 @@ translator. Backend checks reject unsupported enum strings, invented text/IDs,
 missing-value inventions and changed numeric facts. The model receives shared field
 definitions, the source texts, alternative roof/drawing candidates and CRM provenance.
 One targeted recovery pass revisits known unresolved values. A remaining null for a
-populated field fails publication; the raw value, translation and warnings remain in
-`performance_specifications.review_json` with status `unmapped`. A brand such as
-BauderROCK does not establish a particular CAD product variant without evidence.
+populated field publishes its raw value and translation warning in a field review
+note. The raw value, translation, warnings and field notes remain in
+`performance_specifications.review_json` with status `published_with_review`
+(`rendered_with_review` in shadow mode). A brand such as BauderROCK does not establish
+a particular CAD product variant without evidence; the PDF explains that unresolved
+mapping. The model's response schema remains strict; application code adds the review
+notes after validation. Resolving the fields clears the notes on the next refresh.
 
 Gemini requests use the shared `gemini_response_schema` helper, which omits array
 `minItems`/`maxItems` constraints from the wire schema to avoid provider decoding
@@ -29,8 +37,8 @@ succeeded after removing its array bounds. The same helper is used for CAD trans
 If Gemini still returns HTTP 400 for a structured extraction/translation request,
 the worker makes one compatibility attempt in JSON mode with the schema included
 in the task. Every returned value still passes the original Pydantic schema and
-semantic/evidence checks. Malformed JSON, invented values and unresolved known
-fields cannot pass publication through this path. The compatibility attempt is
+semantic/evidence checks. Malformed JSON and invented values cannot pass publication
+through this path; unresolved known fields publish review details. The compatibility attempt is
 not used for PDF/image requests, authentication, throttling or server errors.
 
 The design worker prints `design_extraction_runtime` at startup with its deployed
@@ -106,8 +114,19 @@ Each extraction retains a source manifest and field candidates with source ident
 content hash, page/table or worksheet/cell location, supporting excerpt, issuer,
 roof/drawing scope and selection rationale. Excerpts are checked against source
 text. Different roof values are not flattened into one specification: a confirmed
-matching roof/drawing selects its candidates; otherwise conflicts require review.
+matching roof/drawing selects its candidates; otherwise verified conflicts publish
+their alternatives in the field's review note.
 A value common to all represented roofs can be used without selecting one roof.
+Excerpt verification ignores paired Markdown bold/code markers added by PDF text
+extraction while retaining contiguous text, punctuation and token boundaries.
+It does not join excerpts across ellipses. A verified recovery candidate repairs a
+rejected excerpt only for the same field, value, source, scope, issuer, request role
+and date. Rejected candidates remain in provenance as `rejectedCandidates`, with
+`repaired` or `unverified` status; different unverified claims still require review.
+An attachment (including an archive member) may cite its own parent email's exact
+outer Date header when its inherited timestamp matches that parent's timestamp.
+An unrelated email or a date found only in a forwarded body cannot establish this
+attachment chronology.
 Actual outer email sent timestamps establish request chronology, independently of
 Monday asset IDs/upload order. The most recent outer request supplies the fallback
 Date Received, excluding earlier dates inside the forwarded chain.
@@ -170,7 +189,8 @@ field evidence; genuine failures in other sources still require retry/review. De
 the matching extraction and specification workers so both recognize this skip status.
 
 The holding item's confirmed TP Ref selects the project. Multiple linked projects
-or conflicting technical values fail the refresh rather than merge roofs. Drawing
+still fail the refresh. Verified conflicting technical values publish their roof
+scopes and alternatives for review. Drawing
 selection prefers an exact requested reference; a unique active replacement in the
 same numbered drawing series can supply a newer letter revision. An unrelated roof
 or ambiguous series requires review. With no requested reference, a sole active
@@ -223,16 +243,17 @@ does not automatically include attachments on linked boards.
    `python -m backend.app.services.performance_specification`.
 3. Extraction identity is now `output-v11` (`output-v9` introduced source evidence;
    `output-v10` added DWG skips and bounded ZIP extraction; `output-v11` preserves
-   long spreadsheet cells). The CAD contract remains
-   `performance-specification-v2`. Existing canonical CSV rows
+   long spreadsheet cells). The CAD publication contract is now
+   `performance-specification-v3`. Existing canonical CSV rows
    remain unchanged. Run the normal design reconciliation sweep to re-extract eligible
    historical projects. Old extraction records without the versioned source/evidence
    contract wait for this refresh. Changing only the publisher flag does not refresh
    historical extraction evidence.
 4. Review shadow artifacts and translation warnings in the private artifact bucket
    and `performance_specification_artifacts`, plus `performance_specifications.review_json`.
-   Review statuses distinguish `conflict`, `unmapped` and `source_failure`; a successful
-   refresh clears them. Then use the existing design-processing
+   Review statuses distinguish blocking `conflict`/`source_failure` from successful
+   `published_with_review`/`rendered_with_review` outputs. A fully resolved refresh
+   clears the review record. Then use the existing design-processing
    `allowlist` mode and `DESIGN_PROCESSING_ALLOWLIST_ITEM_IDS` to validate a few items
    before changing to `enabled`. These existing mode settings govern both workflows.
    `allowlist` now restricts extraction, CAD translation, private rendering and
@@ -286,6 +307,22 @@ The database's total backlog still includes held unlisted jobs; in allowlist mod
 only listed items are eligible to be claimed. Changing to `enabled` makes the other
 pending jobs eligible again. Historical uploaded files are preserved during the test.
 
+For the evidence-matching and inline-review updates, deploy the updated specification
+worker and rerun the specification check above. Existing `output-v11` extraction
+evidence can be reused; no migration, extraction-version bump or re-extraction is
+needed. The `performance-specification-v3` publication version creates a new PDF
+revision instead of reusing an older PDF that omitted unresolved field details.
+Read-only replay of item `3320074395`'s stored extraction and recorded CRM precedence
+cleared the scale, page size, title, contract-number and insulation evidence errors.
+Decking publishes a review note listing `Timber (18mm)` and `Concrete` with their
+roof scopes. `BauderROCK` is verified as the raw requested product; if translation
+cannot establish an exact permitted CAD product, its field publishes the raw value
+and unresolved mapping details. Confirming the target/current CRM values removes
+these review notes. The new PDF can be published while these decisions are pending.
+Check `review_json.status` and the artifact's `model_version`: a `published` older
+artifact joined through `current_revision` can also be a retained earlier PDF if
+an incomplete source read or invalid response blocks the latest refresh.
+
 The publisher polls its database every five seconds. Requests coalesce using the
 existing debounce setting; idle completed records are rechecked every
 `PERFORMANCE_SPECIFICATION_RECHECK_SECONDS` (default 3600). Existing active projects
@@ -301,7 +338,7 @@ venv/Scripts/python.exe -m backend.app.services.performance_specification --once
 Source values, provenance, extraction identity and model/prompt/template version form
 the specification revision. Polling timestamps and unrelated CRM edits do not change
 it. Unchanged inputs reuse the persisted translation and verified PDF bytes.
-Each v2 artifact stores its immutable `source_json`, including field provenance and
+Each v2/v3 artifact stores its immutable `source_json`, including field provenance and
 source texts; later refreshes cannot overwrite that revision's evidence. The current
 record's `source_json` remains the last successful source snapshot. Pre-v2 artifact
 snapshots are null because their historic inputs cannot be reconstructed reliably.
@@ -324,7 +361,7 @@ the database until all matching application/worker processes have stopped.
 ## Verification
 
 ```powershell
-venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_sources.py backend/tests/test_source_archives.py -q
+venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_source_archives.py -q
 ```
 
 Coverage includes LLM schema/semantic validation, optional values, exact PDF text
@@ -332,7 +369,8 @@ ordering, active-only scope, CRM clears, typed mirrors, revision ambiguity, cach
 translation, failed reads, stale generations, expired leases, source changes during
 translation/upload, lost upload responses, replacement safety and shadow mode.
 PDF text validation uses Poppler `pdftotext` or optional `pypdf`.
-Regression coverage also includes known-product translation review, recovery,
+Regression coverage also includes published field review details, combined roof
+conflicts and unresolved products, cached review notes, review resolution, recovery,
 full TP revision suffixes, conflicting roof decks, candidate recovery from a missing
 scalar, HTML-only mail, date ordering, XLSM/hidden catalogues, uncached formulas,
 source failures, People identity reads and immutable artifact snapshots.

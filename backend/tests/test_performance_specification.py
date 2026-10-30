@@ -25,7 +25,7 @@ from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.legacy_enquiry.parameter_extraction import DesignParameterExtraction
 from backend.app.services.design_processing_inputs import DesignEmailAsset, DesignProcessingTargetSnapshot
 from backend.app.services.performance_specification_contract import (
-    CADTranslation, FIELD_NAMES, OPTIONS, UnresolvedSpecificationTranslation, pdf_values, translate_specification,
+    CADTranslation, FIELD_NAMES, OPTIONS, SpecificationPublication, pdf_values, translate_specification,
 )
 from backend.app.services.performance_specification_pdf import render_performance_specification_pdf
 from backend.app.services.performance_specification_sources import (
@@ -76,6 +76,14 @@ def with_evidence(extraction):
                                        "snippet": f"{label}: {value}", "location": "email body", "scope": None,
                                        "issuer": "TaperedPlus" if label == "Drawing Reference" else None,
                                        "role": "requested", "request_role": "direct_request", "rationale": "Explicit request"} for label, value in facts.items()]}
+
+
+def pdf_text(content):
+    if shutil.which("pdftotext"):
+        result = subprocess.run(["pdftotext", "-", "-"], input=content, capture_output=True, check=True)
+        return " ".join(result.stdout.decode("utf-8").split())
+    pypdf = pytest.importorskip("pypdf")
+    return " ".join(" ".join(page.extract_text() for page in pypdf.PdfReader(io.BytesIO(content)).pages).split())
 
 
 class Storage:
@@ -208,14 +216,17 @@ def test_revision_mirror_cannot_shorten_tp_reference_suffix(case, value, expecte
     assert source["sources"]["Revision"]["observedRevision"] == value
 
 
-def test_conflicting_crm_revision_requires_review(case):
+def test_conflicting_crm_revision_publishes_both_values_for_review(case):
     case.gateway.project["subitems"][0]["column_values"].append(column("mirror_1__1", "Revision", "B"))
-    assert run(case) == ["failed"]
-    assert current(case).review_json["issues"]["Revision"].startswith("Revision conflicts")
-    assert not case.gateway.uploads
+    assert run(case) == ["published"]
+    assert current(case).review_json["status"] == "published_with_review"
+    assert "Revision conflicts" in current(case).review_json["issues"]["Revision"]
+    text = pdf_text(case.gateway.uploads[-1][1])
+    assert "Revision: Review required" in text
+    assert "Selected drawing revision: 26.01 - A" in text and "Reported revision: B" in text
 
 
-def test_known_unmapped_product_is_reviewed_without_overwriting_last_pdf(case):
+def test_known_unmapped_product_publishes_review_details_and_reuses_cached_pdf(case):
     assert run(case) == ["published"]
     previous_revision = current(case).current_revision
     case.gateway.project["subitems"][0]["column_values"][1]["text"] = "BauderROCK"
@@ -225,17 +236,28 @@ def test_known_unmapped_product_is_reviewed_without_overwriting_last_pdf(case):
         calls.append(prompt)
         raw = json.loads(prompt.split("\nResolved values: ", 1)[1])
         raw["Tapered Insulation"] = None
-        return SimpleNamespace(parsed=translation_payload(raw))
+        payload = translation_payload(raw)
+        payload["warnings"] = ["BauderROCK does not establish an exact CAD product variant."]
+        assert "fieldReviews" not in config.response_json_schema["properties"]
+        return SimpleNamespace(parsed=payload)
 
     case.client = LegacyGeminiClient("gemini-3.8-flash", generate_content=generate)
-    assert run(case) == ["failed"]
+    assert run(case) == ["published"]
     assert len(calls) == 2  # One bounded evidence-aware recovery pass.
     assert "Shared field meanings" in calls[0]
     assert "sourceManifest" in calls[0]
-    assert current(case).current_revision == previous_revision
-    assert current(case).review_json["status"] == "unmapped"
+    assert current(case).current_revision != previous_revision
+    assert current(case).review_json["status"] == "published_with_review"
     assert current(case).review_json["source"]["raw"]["Tapered Insulation"] == "BauderROCK"
-    assert len(case.gateway.uploads) == 1 and not case.gateway.deletes
+    assert len(case.gateway.uploads) == 2 and case.gateway.deletes
+    text = pdf_text(case.gateway.uploads[-1][1])
+    assert "Tapered Insulation: Review required" in text
+    assert "BauderROCK does not establish an exact CAD product variant." in text
+    assert "Tapered Insulation: Not Provided" not in text
+    assert "Target Min U Value: Not Provided" in text
+    assert current(case).last_error is None and current(case).checked_at is not None
+    assert run(case) == ["unchanged"]
+    assert len(calls) == 2 and current(case).review_json["status"] == "published_with_review"
 
 
 def test_recovery_recovers_populated_text_instead_of_missing_marker(case):
@@ -284,11 +306,92 @@ def roof_evidence(case, values):
 
 def test_different_roof_values_are_not_flattened_and_confirmed_scope_resolves(case):
     roof_evidence(case, [("Roof 1", "Timber (18mm)"), ("Roof 5", "Concrete")])
-    assert run(case) == ["failed"]
-    assert current(case).review_json["status"] == "conflict"
+    assert run(case) == ["published"]
+    assert current(case).review_json["status"] == "published_with_review"
+    artifact = case.db.get(PerformanceSpecificationArtifact, (BOARD, ITEM, current(case).current_revision))
+    assert artifact.translation_json["values"]["Decking"] is None
+    text = pdf_text(case.gateway.uploads[-1][1])
+    assert "Decking: Review required" in text
+    assert "Timber (18mm) (Roof 1)" in text and "Concrete (Roof 5)" in text
+    assert "Decking: Not Provided" not in text
     case.gateway.holding["column_values"].append(column("roof", "Bauder Roof Num", "5"))
     assert run(case) == ["published"]
     assert current(case).source_json["raw"]["Decking"] == "Concrete"
+    assert current(case).review_json is None
+    assert "Decking: Concrete" in pdf_text(case.gateway.uploads[-1][1])
+
+
+def test_roof_conflict_and_unmapped_material_publish_together(case):
+    roof_evidence(case, [("Roof 1", "Timber (18mm)"), ("Roof 5", "Concrete")])
+    case.gateway.project["subitems"][0]["column_values"][1]["text"] = "BauderROCK"
+    calls = []
+    def generate(model, prompt, config):
+        calls.append(prompt)
+        raw = json.loads(prompt.split("\nResolved values: ", 1)[1])
+        assert raw["Decking"] is None
+        raw["Tapered Insulation"] = None
+        return SimpleNamespace(parsed=translation_payload(raw))
+    case.client = LegacyGeminiClient("offline", generate_content=generate)
+    assert run(case) == ["published"] and len(calls) == 2
+    assert set(current(case).review_json["issues"]) == {"Decking", "Tapered Insulation"}
+    text = pdf_text(case.gateway.uploads[-1][1])
+    assert "Timber (18mm) (Roof 1)" in text and "Concrete (Roof 5)" in text
+    assert "Translation unresolved for requested value 'BauderROCK'" in text
+    assert "No verified CAD translation could be selected." in text
+
+
+def test_unverified_conflicting_candidate_still_prevents_publication(case):
+    roof_evidence(case, [("Roof 1", "Timber (18mm)"), ("Roof 5", "Concrete")])
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    bad = {**extraction["specificationEvidence"][-1], "scope": "Roof 9", "snippet": "Invented excerpt"}
+    extraction["specificationEvidence"].append(bad)
+    case.item.extracted_parameters_json = extraction
+    assert run(case) == ["failed"]
+    assert not case.gateway.uploads and current(case).review_json["status"] == "conflict"
+
+
+def test_model_cannot_choose_one_conflicting_deck_or_inject_review_notes(case):
+    roof_evidence(case, [("Roof 1", "Timber (18mm)"), ("Roof 5", "Concrete")])
+    def generate(model, prompt, config):
+        raw = json.loads(prompt.split("\nResolved values: ", 1)[1])
+        raw["Decking"] = "Concrete"
+        return SimpleNamespace(parsed=translation_payload(raw))
+    case.client = LegacyGeminiClient("offline", generate_content=generate)
+    assert run(case) == ["failed"] and not case.gateway.uploads
+    with pytest.raises(ValidationError):
+        CADTranslation.model_validate({**translation_payload({}), "fieldReviews": {"Decking": "Invented review"}})
+
+
+def test_shadow_review_and_lost_upload_reuse_review_notes(case, monkeypatch):
+    roof_evidence(case, [("Roof 1", "Timber (18mm)"), ("Roof 5", "Concrete")])
+    monkeypatch.setattr(settings, "design_processing_mode", "shadow")
+    assert run(case) == ["rendered"] and not case.gateway.uploads
+    assert current(case).review_json["status"] == "rendered_with_review"
+    monkeypatch.setattr(settings, "design_processing_mode", "enabled")
+    def timeout():
+        case.gateway.on_upload = None
+        raise TimeoutError("lost upload response")
+    case.gateway.on_upload = timeout
+    assert run(case) == ["failed"]
+    assert run(case) == ["unchanged"]
+    assert current(case).review_json["status"] == "published_with_review"
+    assert len(case.gateway.uploads) == len(case.calls) == 1
+
+
+def test_source_changes_during_review_translation_remain_fenced(case):
+    roof_evidence(case, [("Roof 1", "Timber (18mm)"), ("Roof 5", "Concrete")])
+    case.on_translate.append(lambda: case.gateway.holding["column_values"].append(column("roof", "Bauder Roof Num", "5")))
+    assert run(case) == ["superseded"] and not case.gateway.uploads
+
+
+def test_long_review_details_are_selectable_and_keep_field_order(case):
+    values = translation_payload({})
+    details = "Conflict: " + "; ".join(f"Roof {i} <north> & south: Timber (18mm)" for i in range(100))
+    publication = SpecificationPublication.model_validate({**values, "fieldReviews": {"Decking": details}})
+    text = pdf_text(render_performance_specification_pdf(publication, item_id=ITEM, revision="review"))
+    assert "Roof 0 <north> & south" in text and "Roof 99 <north> & south" in text
+    assert [text.index(label + ":") for label in FIELD_NAMES] == sorted(text.index(label + ":") for label in FIELD_NAMES)
+    assert "Decking: Not Provided" not in text
 
 
 def test_common_value_for_multiple_roofs_is_usable(case):

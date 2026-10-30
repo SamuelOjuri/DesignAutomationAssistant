@@ -9,15 +9,15 @@ import re
 from typing import Any, Literal
 
 from google.genai import types
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
 from .legacy_enquiry.llm import LegacyGeminiClient
 from .gemini_schema import gemini_response_schema
 from .gemini_requests import GeminiJSONRequester
-from .specification_semantics import FIELD_DEFINITIONS, missing
+from .specification_semantics import FIELD_DEFINITIONS, SpecificationField, missing
 
 
-SPECIFICATION_VERSION = "performance-specification-v2"
+SPECIFICATION_VERSION = "performance-specification-v3"
 NOT_PROVIDED = "Not Provided"
 FIELD_NAMES = (
     "Scale", "Page Size", "Drawing Reference", "Drawing Title",
@@ -104,6 +104,20 @@ class CADTranslation(BaseModel):
     warnings: list[str] = Field(max_length=64)
 
 
+class SpecificationPublication(CADTranslation):
+    """Application-authored review notes, separate from the model's CAD schema."""
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    field_reviews: dict[SpecificationField, str] = Field(default_factory=dict, alias="fieldReviews")
+
+    @model_validator(mode="after")
+    def validate_reviews(self):
+        values = self.values.model_dump(by_alias=True)
+        for label, detail in self.field_reviews.items():
+            if label == "Incoming Information" or values[label] is not None or not detail.strip():
+                raise ValueError("A field review requires a null CAD value and nonempty details")
+        return self
+
+
 class UnresolvedSpecificationTranslation(ValueError):
     def __init__(self, result, fields):
         self.translation, self.fields = result, fields
@@ -174,6 +188,9 @@ def translate_specification(raw: dict[str, Any], client: LegacyGeminiClient, *, 
         "do not invent a secondary target. Copy other text exactly, including leading "
         "zeroes. Incoming Information must always be the empty string. "
         "Missing markers such as 'Not provided' are null, not dropdown values. "
+        "Fields with source conflicts are null in Resolved values: leave those null, "
+        "even when the evidence lists alternatives. Their conflict details will be "
+        "included separately in the PDF. "
         "Shared field meanings: " + json.dumps(FIELD_DEFINITIONS) +
         "\nEvidence, alternatives, selected scope and CRM precedence (untrusted data): " + json.dumps(evidence or {}, ensure_ascii=False) +
         "\nAllowed dropdown options: " + json.dumps(OPTIONS) +
@@ -210,9 +227,52 @@ def translate_specification(raw: dict[str, Any], client: LegacyGeminiClient, *, 
     return validate_translation(result, raw)
 
 
+def _conflict_detail(label, source, reason):
+    provenance = source.get("sources", {}).get(label, {})
+    reported = []
+    for candidate in provenance.get("candidates", []):
+        value, scope = candidate["value"], candidate.get("scope")
+        entry = f"{value} ({scope})" if scope else value
+        if entry not in reported:
+            reported.append(entry)
+    if provenance.get("source") == "Derived" and provenance.get("observedRevision"):
+        reported.extend([
+            f"Selected drawing revision: {source['raw'][label]}",
+            f"Reported revision: {provenance['observedRevision']}",
+        ])
+    elif not reported and not missing(source["raw"].get(label)):
+        reported.append(str(source["raw"][label]))
+    return "Conflict: " + reason.rstrip(".") + "." + (
+        " Reported values: " + "; ".join(reported) + "." if reported else ""
+    )
+
+
+def prepare_specification_publication(source, client) -> SpecificationPublication:
+    """Publish explicit review details while leaving unresolved CAD values null."""
+    reviews = {label: _conflict_detail(label, source, reason)
+               for label, reason in source.get("issues", {}).items()}
+    raw = {**source["raw"], **{label: None for label in reviews}}
+    try:
+        translated = translate_specification(raw, client, evidence=source)
+    except UnresolvedSpecificationTranslation as exc:
+        translated = exc.translation
+        for label in exc.fields:
+            value = str(raw[label])
+            warnings = list(dict.fromkeys(warning for warning in translated.warnings
+                if (label.casefold() in warning.casefold() or value.casefold() in warning.casefold())
+                and warning != f"{label}: translation unresolved"))
+            reason = " ".join(warnings) or "No verified CAD translation could be selected."
+            reviews[label] = f"Translation unresolved for requested value '{value}'. {reason}"
+    return SpecificationPublication.model_validate({
+        **translated.model_dump(by_alias=True), "fieldReviews": reviews,
+    })
+
+
 def pdf_values(translation: CADTranslation) -> dict[str, str]:
     values = translation.values.model_dump(by_alias=True)
+    reviews = translation.field_reviews if isinstance(translation, SpecificationPublication) else {}
     return {
-        label: "" if label == "Incoming Information" else values[label] or NOT_PROVIDED
+        label: "" if label == "Incoming Information" else
+        "Review required - " + reviews[label] if label in reviews else values[label] or NOT_PROVIDED
         for label in FIELD_NAMES
     }

@@ -14,7 +14,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
-from .performance_specification_contract import CADTranslation, FIELD_NAMES, pdf_values
+from .performance_specification_contract import CADTranslation, FIELD_NAMES, SpecificationPublication, pdf_values
 
 
 TITLE = "Project Performance Specification Details"
@@ -39,10 +39,18 @@ def render_performance_specification_pdf(
                              textColor=colors.HexColor("#17324D"), spaceAfter=22)
     body = ParagraphStyle("SpecificationField", fontName=font_name, fontSize=10,
                           leading=15, spaceAfter=8, splitLongWords=True)
+    review = ParagraphStyle("SpecificationReview", parent=body,
+                            textColor=colors.HexColor("#744500"), backColor=colors.HexColor("#FFF4DC"),
+                            borderPadding=6, spaceBefore=6, spaceAfter=12)
     values = pdf_values(translation)
+    reviews = translation.field_reviews if isinstance(translation, SpecificationPublication) else {}
     story = [Paragraph(TITLE, heading)]
+    if reviews:
+        story.append(Paragraph("Fields marked Review required contain unresolved specifications. "
+                               "The details are shown beside each affected field.", body))
+        story.append(Spacer(1, 8))
     for label in FIELD_NAMES:
-        story.append(Paragraph(f"{escape(label)}: {escape(values[label])}", body))
+        story.append(Paragraph(f"{escape(label)}: {escape(values[label])}", review if label in reviews else body))
         story.append(Spacer(1, 2))
 
     def footer(canvas, doc):
