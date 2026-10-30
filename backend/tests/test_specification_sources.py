@@ -17,7 +17,7 @@ from backend.app.services.legacy_enquiry.analysis import analyze_downloaded_emai
 from backend.app.services.legacy_enquiry.email_extraction import extract_text_from_email, process_email_content
 from backend.app.services.legacy_enquiry.parameter_extraction import DesignParameterExtraction
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
-from backend.app.services.legacy_enquiry.source_documents import IncompleteSourceExtraction, extract_document
+from backend.app.services.legacy_enquiry.source_documents import AnimatedImageSkipped, IncompleteSourceExtraction, extract_document
 from backend.app.services.performance_specification_contract import FIELD_NAMES
 from backend.app.services.performance_specification_evidence import resolve_email_evidence
 from backend.app.services.spreadsheet_extraction import extract_spreadsheet_documents
@@ -27,6 +27,91 @@ from backend.app.services.specification_semantics import SpecificationEvidence
 def parameters():
     return DesignParameterExtraction(**{name: None for name in DesignParameterExtraction.model_fields
                                        if name not in {"specification_evidence", "specification_assessed_fields"}})
+
+
+def image_bytes(format_name, *, animated):
+    from PIL import Image, features
+    if format_name == "WEBP" and not features.check("webp"):
+        pytest.skip("Pillow was built without WebP support")
+    output = io.BytesIO()
+    first = Image.new("RGB", (4, 4), "red")
+    options = {"save_all": True, "append_images": [Image.new("RGB", (4, 4), "blue")],
+               "duration": 100, "loop": 0} if animated else {}
+    first.save(output, format=format_name, **options)
+    return output.getvalue()
+
+
+@pytest.mark.parametrize("format_name,suffix", [("GIF", "gif"), ("PNG", "png"), ("WEBP", "webp")])
+def test_animated_images_are_skipped_before_calling_the_model(format_name, suffix):
+    calls = []
+    client = SimpleNamespace(process_image=lambda *args: calls.append(args) or "unwanted text")
+    with pytest.raises(AnimatedImageSkipped):
+        extract_document(image_bytes(format_name, animated=True), "signature." + suffix, client)
+    assert not calls
+
+
+@pytest.mark.parametrize("format_name,suffix,expected_suffix", [("GIF", "gif", "gif.png"), ("PNG", "png", "png"),
+                                                              ("WEBP", "webp", "webp"), ("BMP", "bmp", "bmp.png")])
+def test_static_images_still_extract_information(format_name, suffix, expected_suffix):
+    calls = []
+    client = SimpleNamespace(process_image=lambda *args: calls.append(args) or "Scale: 1:100")
+    assert extract_document(image_bytes(format_name, animated=False), "drawing." + suffix, client) == "Scale: 1:100"
+    assert len(calls) == 1 and calls[0][1] == "drawing." + expected_suffix
+
+
+@pytest.mark.parametrize("inline", [False, True])
+def test_skipped_animation_is_audited_without_blocking_other_email_evidence(inline):
+    manifest, calls = [], []
+    client = SimpleNamespace(max_attachment_workers=2,
+                             process_image=lambda *args: calls.append(args) or "unwanted text",
+                             process_pdf=lambda *args: "Scale: 1:100")
+    animation = {"filename": "signature.gif", "content": image_bytes("GIF", animated=True)}
+    context = extract_text_from_email(
+        "Contact: Alex", [{"filename": "roof.pdf", "content": b"pdf"}] + ([] if inline else [animation]),
+        inline_images=[animation] if inline else [], extractor=client, manifest=manifest, source_prefix="mail",
+    )
+    assert "Contact: Alex" in context and "Scale: 1:100" in context
+    assert "signature.gif" not in context and not calls
+    skipped = next(source for source in manifest if source["filename"] == "signature.gif")
+    assert skipped["status"] == "skipped:animated_image" and skipped["text"] == ""
+    assert skipped["contentSha256"] == hashlib.sha256(animation["content"]).hexdigest()
+    extraction = {"specificationEvidenceVersion": 2, "specificationAssessedFields": list(FIELD_NAMES),
+                  "performanceParameters": {}, "sourceManifest": manifest, "specificationEvidence": [
+                      {"field": "Scale", "value": "1:100", "source_id": "mail:attachment:0", "snippet": "Scale: 1:100",
+                       "location": "page 1", "scope": None, "issuer": None, "role": "requested", "rationale": "Drawing scale"}]}
+    raw, _, issues = resolve_email_evidence(extraction)
+    assert raw["Scale"] == "1:100" and not issues
+    extraction["specificationEvidence"][0]["source_id"] = skipped["sourceId"]
+    assert "Scale" in resolve_email_evidence(extraction)[2]
+
+
+def test_animation_does_not_hide_real_attachment_failures():
+    manifest = []
+    with pytest.raises(IncompleteSourceExtraction) as captured:
+        extract_text_from_email("Request", [{"filename": "signature.gif", "content": image_bytes("GIF", animated=True)},
+                                            {"filename": "drawing.dwg", "content": b"CAD"}],
+                                extractor=SimpleNamespace(max_attachment_workers=2), manifest=manifest)
+    assert manifest[1]["status"] == "skipped:animated_image"
+    assert manifest[2]["status"] == "failed:ValueError"
+    assert "signature.gif" not in str(captured.value) and "drawing.dwg" in str(captured.value)
+
+
+def test_supplementary_animated_image_does_not_block_analysis(tmp_path):
+    sources = [("1", "request.eml", b"From: client@example.com\nSubject: Roof\n\nContact: Alex"),
+               ("2", "signature.gif", image_bytes("GIF", animated=True))]
+    downloaded, contexts, image_calls = [], [], []
+    for asset_id, filename, content in sources:
+        path = tmp_path / filename
+        path.write_bytes(content)
+        source = DesignEmailAsset(asset_id, filename, filename.rsplit(".", 1)[1], len(content), "2026-10-30T12:00:00Z", "unused", False)
+        downloaded.append(DownloadedDesignEmailAsset(source, str(path), "unused", hashlib.sha256(content).hexdigest(), len(content)))
+    result = analyze_downloaded_email_assets(downloaded, client=SimpleNamespace(
+        extract_design_parameters=lambda context: contexts.append(context) or parameters(),
+        query_llm=lambda *args: "Roof", process_image=lambda *args: image_calls.append(args),
+    ))
+    skipped = next(source for source in result.source_manifest if source["filename"] == "signature.gif")
+    assert skipped["status"] == "skipped:animated_image" and not image_calls
+    assert "signature.gif" not in contexts[0] and "Contact: Alex" in contexts[0]
 
 
 def test_parameter_recovery_revisits_missing_attachment_field_with_same_meaning():

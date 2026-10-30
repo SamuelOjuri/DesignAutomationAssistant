@@ -12,8 +12,10 @@ from zoneinfo import ZoneInfo
 import extract_msg
 
 from .source_documents import (
-    IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_document, html_text, source_record,
+    AnimatedImageSkipped, IncompleteSourceExtraction, MAX_CONTEXT_CHARS,
+    extract_document, html_text, source_record,
 )
+from ..specification_semantics import ANIMATED_IMAGE_SKIP_STATUS, COMPLETE_SOURCE_STATUSES
 
 
 class AttachmentTextExtractor(Protocol):
@@ -183,6 +185,8 @@ def extract_text_from_email(
                 index = futures[future]
                 try:
                     results[index] = (future.result(), "read")
+                except AnimatedImageSkipped:
+                    results[index] = ("", ANIMATED_IMAGE_SKIP_STATUS)
                 except Exception as exc:
                     # Do not place exception messages/URLs into model context.
                     results[index] = ("", "failed:" + type(exc).__name__)
@@ -194,13 +198,13 @@ def extract_text_from_email(
         ))
     if manifest is not None:
         manifest.extend(records)
-    if any(record["status"] != "read" for record in records):
+    if any(record["status"] not in COMPLETE_SOURCE_STATUSES for record in records):
         raise IncompleteSourceExtraction(records)
     combined_text = "\n\n".join(
         f"SOURCE ID: {record['sourceId']}\nSOURCE TYPE: {record['sourceType']}\n"
         f"FILE: {record['filename']}\nREQUEST TIMESTAMP: {record['observedAt']}\n"
         + ("EMAIL CONTENT:\n" if record["sourceType"] == "email_body" else "ATTACHMENT CONTENT:\n")
-        + record["text"] for record in records
+        + record["text"] for record in records if record["status"] == "read"
     )
     if len(combined_text) > MAX_CONTEXT_CHARS:
         raise ValueError("Combined source text exceeds extraction limit; review required")

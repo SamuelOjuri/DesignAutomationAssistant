@@ -19,8 +19,8 @@ from .parameter_extraction import (
     extract_parameters,
     extract_project_name_from_content,
 )
-from .source_documents import IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_document, source_record
-from ..specification_semantics import SpecificationEvidence
+from .source_documents import AnimatedImageSkipped, IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_document, source_record
+from ..specification_semantics import ANIMATED_IMAGE_SKIP_STATUS, COMPLETE_SOURCE_STATUSES, SpecificationEvidence
 
 
 class LegacyAnalysisClient(AttachmentTextExtractor, Protocol):
@@ -77,6 +77,8 @@ def analyze_downloaded_email_assets(
         if not downloaded.source.filename.lower().endswith((".eml", ".msg")):
             try:
                 text, status = extract_document(content, downloaded.source.filename, client), "read"
+            except AnimatedImageSkipped:
+                text, status = "", ANIMATED_IMAGE_SKIP_STATUS
             except Exception as exc:
                 text, status = "", "failed:" + type(exc).__name__
             record = source_record(
@@ -125,12 +127,12 @@ def analyze_downloaded_email_assets(
             )
         )
 
-    if any(source["status"] != "read" for source in manifest):
+    if any(source["status"] not in COMPLETE_SOURCE_STATUSES for source in manifest):
         raise IncompleteSourceExtraction(manifest)
     if len(parsed_assets) > 1 and any(not entry[0] for entry in parsed_assets):
         raise ValueError("Multiple email requests have unreadable sent dates; chronology requires review")
     for record in manifest:
-        if record["sourceId"].count(":") == 1:  # Configured Monday source attachment.
+        if record["sourceId"].count(":") == 1 and record["status"] == "read":  # Configured Monday source attachment.
             all_text += f"\nSOURCE ID: {record['sourceId']}\nFILE: {record['filename']}\nATTACHMENT CONTENT:\n{record['text']}\n"
     if len(all_text) > MAX_CONTEXT_CHARS:
         raise ValueError("Combined source text exceeds extraction limit; review required")

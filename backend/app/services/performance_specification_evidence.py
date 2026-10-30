@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from dateutil.parser import parse as parse_datetime
 
-from .specification_semantics import EVIDENCE_VERSION, SpecificationEvidence, tp_reference_revision
+from .specification_semantics import COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, SpecificationEvidence, tp_reference_revision
 from .performance_specification_contract import FIELD_NAMES, missing
 
 
@@ -29,12 +29,12 @@ def resolve_email_evidence(extraction, scopes=()):
         raise ValueError("Waiting for evidence-aware extraction (output-v9)")
     manifest = extraction.get("sourceManifest")
     if not isinstance(manifest, list) or any(
-        not isinstance(source, dict) or source.get("status") != "read"
+        not isinstance(source, dict) or source.get("status") not in COMPLETE_SOURCE_STATUSES
         or not isinstance(source.get("text"), str) or not source.get("sourceId") for source in manifest
     ):
         raise ValueError("Incomplete source manifest; retry extraction before publication")
     sources = {source["sourceId"]: source for source in manifest}
-    if len(sources) != len(manifest) or not sources:
+    if len(sources) != len(manifest) or not sources or not any(source["status"] == "read" for source in manifest):
         raise ValueError("Source manifest is empty or contains duplicate identities")
     assessed = set(extraction.get("specificationAssessedFields") or [])
     candidates = defaultdict(list)
@@ -45,7 +45,7 @@ def resolve_email_evidence(extraction, scopes=()):
         if label not in FIELD_NAMES or label == "Incoming Information":
             continue
         source = sources.get(evidence["source_id"])
-        if source is None or _normal(evidence["snippet"]) not in _normal(source["text"]):
+        if source is None or source["status"] != "read" or _normal(evidence["snippet"]) not in _normal(source["text"]):
             issues[label] = "Supporting source/excerpt could not be verified"
             continue
         if evidence["role"] != "requested":

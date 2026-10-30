@@ -15,6 +15,7 @@ from defusedxml import ElementTree
 from zipfile import ZipFile
 
 from ..spreadsheet_extraction import extract_spreadsheet_documents, is_spreadsheet
+from ..specification_semantics import COMPLETE_SOURCE_STATUSES
 
 
 MAX_SOURCE_BYTES = 20 * 1024 * 1024
@@ -22,10 +23,15 @@ MAX_CONTEXT_CHARS = 500_000
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
 
 
+class AnimatedImageSkipped(Exception):
+    """Animated images are excluded from extraction by the configured business rule."""
+
+
 class IncompleteSourceExtraction(ValueError):
     def __init__(self, manifest):
         self.manifest = manifest
-        failures = [f"{source['filename']}: {source['status']}" for source in manifest if source["status"] != "read"]
+        failures = [f"{source['filename']}: {source['status']}" for source in manifest
+                    if source["status"] not in COMPLETE_SOURCE_STATUSES]
         super().__init__("Incomplete source extraction; retry/review required: " + "; ".join(failures)[:1000])
 
 
@@ -74,14 +80,15 @@ def extract_document(content: bytes, filename: str, extractor) -> str:
         # Per-document calls retain identity and make individual failures retryable.
         text = extractor.process_pdf(content, filename)
     elif suffix in IMAGE_EXTENSIONS:
-        if suffix in {".gif", ".bmp"}:
-            from PIL import Image, ImageSequence
-            with Image.open(io.BytesIO(content)) as image:
-                # Do not silently ignore later frames of an animated document.
-                if getattr(image, "n_frames", 1) > 1:
-                    raise ValueError("Multi-frame image requires conversion/review")
+        from PIL import Image
+        with Image.open(io.BytesIO(content)) as image:
+            # Inspect metadata only. No frame is sent to the model for animations,
+            # including GIF, APNG and animated WebP.
+            if getattr(image, "is_animated", False):
+                raise AnimatedImageSkipped("Animated images are excluded from extraction")
+            if suffix in {".gif", ".bmp"}:
                 output = io.BytesIO()
-                next(ImageSequence.Iterator(image)).convert("RGB").save(output, format="PNG")
+                image.convert("RGB").save(output, format="PNG")
                 content, filename = output.getvalue(), filename + ".png"
         text = extractor.process_image(content, filename)
     elif suffix == ".docx":

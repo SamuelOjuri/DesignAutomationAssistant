@@ -75,6 +75,13 @@ job's `result_json.sourceExtractionFailure`. PDFs are read individually to prese
 attachment identity. The extraction model also makes one targeted second pass for
 missing/unverified fields before accepting the extraction.
 
+Animated images (including GIF, APNG and animated WebP) are intentionally excluded.
+They are recorded with their original identity/hash and `skipped:animated_image` in
+the source manifest, are not sent to the model, and do not block extraction or PDF
+publication. Static images continue to be processed. Skipped images cannot supply
+field evidence; genuine failures in other sources still require retry/review. Deploy
+the matching extraction and specification workers so both recognize this skip status.
+
 The holding item's confirmed TP Ref selects the project. Multiple linked projects
 or conflicting technical values fail the refresh rather than merge roofs. Drawing
 selection prefers an exact requested reference; a unique active replacement in the
