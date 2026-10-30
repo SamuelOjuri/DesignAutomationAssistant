@@ -6,19 +6,27 @@ evidence: callers retain their previous successful output and retry extraction.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 from html.parser import HTMLParser
 import io
 from pathlib import Path
 import tempfile
 from defusedxml import ElementTree
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
+import zlib
 
+from ..gemini_requests import source_failure_details as gemini_failure_details
 from ..spreadsheet_extraction import extract_spreadsheet_documents, is_spreadsheet
-from ..specification_semantics import COMPLETE_SOURCE_STATUSES
+from ..specification_semantics import (
+    ANIMATED_IMAGE_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS, COMPLETE_SOURCE_STATUSES, DWG_SKIP_STATUS,
+)
 
 
 MAX_SOURCE_BYTES = 20 * 1024 * 1024
+MAX_ARCHIVE_EXPANDED_BYTES = 100 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 200
+MAX_ARCHIVE_DEPTH = 3
 MAX_CONTEXT_CHARS = 500_000
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
 
@@ -27,12 +35,45 @@ class AnimatedImageSkipped(Exception):
     """Animated images are excluded from extraction by the configured business rule."""
 
 
+class DwgSkipped(Exception):
+    """DWG files are audited but intentionally excluded from design extraction."""
+
+
+class SourceDocumentError(ValueError):
+    """Actionable, application-owned diagnostics safe to persist in a manifest."""
+
+    def __init__(self, code, message):
+        self.details = {"stage": "source_document", "code": code, "message": message}
+        super().__init__(message)
+
+
+class UnsupportedSourceFormat(SourceDocumentError):
+    def __init__(self):
+        super().__init__("unsupported_source_format", "Unsupported source format; replace this extraction source with a readable export.")
+
+
+def source_failure_details(exc):
+    if isinstance(exc, SourceDocumentError):
+        return exc.details
+    # Arbitrary parser/provider messages can contain source text or signed URLs.
+    return gemini_failure_details(exc)
+
+
+def _failure_summary(source):
+    summary = f"{source['filename']}: {source['status']}"
+    error = source.get("error")
+    if isinstance(error, dict):
+        if error.get("stage") == "source_document":
+            summary += f" ({error['message']})"
+        else:
+            summary += f" (stage={error.get('stage')}, http_status={error.get('http_status')}, mode={error.get('mode')})"
+    return summary
+
+
 class IncompleteSourceExtraction(ValueError):
     def __init__(self, manifest):
         self.manifest = manifest
-        failures = [f"{source['filename']}: {source['status']}" + (
-                    f" (stage={source['error'].get('stage')}, http_status={source['error'].get('http_status')}, mode={source['error'].get('mode')})"
-                    if isinstance(source.get("error"), dict) else "") for source in manifest
+        failures = [_failure_summary(source) for source in manifest
                     if source["status"] not in COMPLETE_SOURCE_STATUSES]
         super().__init__("Incomplete source extraction; retry/review required: " + "; ".join(failures)[:1000])
 
@@ -67,9 +108,11 @@ def html_text(content: str | bytes) -> str:
 
 
 def extract_document(content: bytes, filename: str, extractor) -> str:
-    if len(content) > MAX_SOURCE_BYTES:
-        raise ValueError("Source exceeds the extraction size limit")
     suffix = Path(filename).suffix.lower()
+    if suffix == ".dwg":
+        raise DwgSkipped("DWG drawings are excluded from extraction")
+    if len(content) > MAX_SOURCE_BYTES:
+        raise SourceDocumentError("source_size_limit", "Source exceeds the 20 MiB extraction size limit; supply a smaller document.")
     if is_spreadsheet(filename):
         with tempfile.TemporaryDirectory(prefix="design-sheet-") as directory:
             path = Path(directory) / ("source" + suffix)
@@ -108,7 +151,7 @@ def extract_document(content: bytes, filename: str, extractor) -> str:
     elif suffix in {".html", ".htm"}:
         text = html_text(content)
     else:
-        raise ValueError("Unsupported source format; provide a readable export")
+        raise UnsupportedSourceFormat()
     if not isinstance(text, str) or not text.strip() or text.lstrip().lower().startswith((
         "error processing", "unable to process", "unsupported image format",
     )):
@@ -116,6 +159,85 @@ def extract_document(content: bytes, filename: str, extractor) -> str:
     if len(text) > MAX_CONTEXT_CHARS:
         raise ValueError("Source exceeds the extracted text limit")
     return text
+
+
+@dataclass
+class _ArchiveBudget:
+    members: int = 0
+    expanded_bytes: int = 0
+    text_chars: int = 0
+
+
+def extract_source_records(content, filename, extractor, *, source_id, observed_at=None,
+                           _archive_budget=None, _archive_depth=0):
+    """Extract a source and ZIP members without writing archive paths to disk."""
+    record = source_record(source_id, filename, content, source_type="attachment", observed_at=observed_at)
+    records = [record]
+    try:
+        if Path(filename).suffix.lower() == ".zip":
+            budget = _archive_budget if _archive_budget is not None else _ArchiveBudget()
+            _extract_archive(content, filename, extractor, source_id, observed_at, budget, _archive_depth, records)
+            record["status"] = ARCHIVE_EXPANDED_STATUS
+        else:
+            text = extract_document(content, filename, extractor)
+            if _archive_budget is not None:
+                _archive_budget.text_chars += len(text)
+                if _archive_budget.text_chars > MAX_CONTEXT_CHARS:
+                    raise SourceDocumentError("archive_text_limit", "ZIP document text exceeds the extraction context limit; split the archive.")
+            record["text"] = text
+    except AnimatedImageSkipped:
+        record["status"] = ANIMATED_IMAGE_SKIP_STATUS
+    except DwgSkipped:
+        record["status"] = DWG_SKIP_STATUS
+    except Exception as exc:
+        record["status"] = "failed:" + type(exc).__name__
+        error = source_failure_details(exc)
+        if error:
+            record["error"] = error
+    return records
+
+
+def _extract_archive(content, filename, extractor, source_id, observed_at, budget, depth, records):
+    if len(content) > MAX_SOURCE_BYTES:
+        raise SourceDocumentError("source_size_limit", "ZIP exceeds the 20 MiB source size limit; split the archive.")
+    if depth >= MAX_ARCHIVE_DEPTH:
+        raise SourceDocumentError("archive_depth_limit", "ZIP exceeds the three-level nesting limit; flatten the archive.")
+    try:
+        with ZipFile(io.BytesIO(content)) as archive:
+            entries = archive.infolist()
+            budget.members += len(entries)
+            if budget.members > MAX_ARCHIVE_MEMBERS:
+                raise SourceDocumentError("archive_member_limit", "ZIP exceeds the 200-entry limit including nested archives; split the archive.")
+            files = [entry for entry in entries if not entry.is_dir()]
+            if not files:
+                raise SourceDocumentError("empty_archive", "ZIP contains no documents; supply an archive with readable documents.")
+            if any(entry.file_size > MAX_SOURCE_BYTES for entry in files):
+                raise SourceDocumentError("archive_member_size_limit", "ZIP contains a file exceeding the 20 MiB source size limit; supply smaller documents.")
+            budget.expanded_bytes += sum(entry.file_size for entry in files)
+            if budget.expanded_bytes > MAX_ARCHIVE_EXPANDED_BYTES:
+                raise SourceDocumentError("archive_expansion_limit", "ZIP exceeds the 100 MiB total expansion limit including nested archives; split the archive.")
+            if any(entry.flag_bits & 1 for entry in files):
+                raise SourceDocumentError("encrypted_archive", "ZIP contains encrypted files; supply an unencrypted archive.")
+            for index, entry in enumerate(entries):
+                if entry.is_dir():
+                    continue
+                # Read by ZipInfo, not name: duplicate filenames remain separate
+                # evidence sources. The bound also protects against false headers.
+                with archive.open(entry) as member:
+                    member_content = member.read(MAX_SOURCE_BYTES + 1)
+                if len(member_content) > MAX_SOURCE_BYTES or len(member_content) != entry.file_size:
+                    raise SourceDocumentError("archive_member_size_limit", "ZIP member has an invalid or excessive expanded size; supply a valid, smaller archive.")
+                children = extract_source_records(
+                    member_content, f"{filename}!/{entry.filename}", extractor,
+                    source_id=f"{source_id}:member:{index}", observed_at=observed_at,
+                    _archive_budget=budget, _archive_depth=depth + 1,
+                )
+                children[0]["parentSourceId"] = source_id
+                records.extend(children)
+                if budget.text_chars > MAX_CONTEXT_CHARS:
+                    raise SourceDocumentError("archive_text_limit", "ZIP document text exceeds the extraction context limit; split the archive.")
+    except (BadZipFile, RuntimeError, NotImplementedError, zlib.error):
+        raise SourceDocumentError("unreadable_archive", "ZIP is corrupt, encrypted, or uses unsupported compression; supply a readable ZIP archive.") from None
 
 
 def source_record(source_id, filename, content, *, source_type, observed_at=None, text="", status="read", error=None):

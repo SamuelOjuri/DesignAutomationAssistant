@@ -108,6 +108,34 @@ job's `result_json.sourceExtractionFailure`. PDFs are read individually to prese
 attachment identity. The extraction model also makes one targeted second pass for
 missing/unverified fields before accepting the extraction.
 
+DWG drawings are intentionally skipped, including inside ZIP archives. Their
+identity/hash and `skipped:dwg` status remain in the source manifest; they are not
+sent to the model and cannot supply field evidence. The remaining readable sources
+can proceed to extraction and publication.
+
+ZIP attachments and configured source ZIPs are expanded in memory. Each member
+retains its own source ID, archive-qualified filename, content hash and parent
+source ID. Nested archives share a budget of 100 MiB expanded bytes, 200 entries
+(including directories) and three archive levels. Every archive and member must
+also fit the existing 20 MiB source limit, and extracted text remains subject to the
+500,000-character context limit. No archive paths are extracted to disk. Containers
+are recorded as `expanded:archive`; only readable members can supply evidence.
+Corrupt, encrypted, empty or oversized archives and failed/unsupported members
+(other than the intentional DWG/image skips) hold extraction for retry/review.
+Application-owned failure messages survive the process boundary in worker logs,
+`last_error` and `result_json.sourceExtractionFailure` without exposing arbitrary
+parser/provider exception text.
+
+Deploy matching API, design/reconciliation and specification workers to recognize
+the new statuses. Pipeline revision `output-v10` makes the normal reconciliation
+flow re-extract eligible items, including jobs previously blocked by DWG or ZIP
+attachments. No environment-variable or database migration change is needed for
+this update. For a job still marked failed after deployment, use the operator command:
+
+```bash
+python -m backend.app.services.design_processing_operations retry-failed-job --job-id <failed-job-uuid>
+```
+
 Animated images (including GIF, APNG and animated WebP) are intentionally excluded.
 They are recorded with their original identity/hash and `skipped:animated_image` in
 the source manifest, are not sent to the model, and do not block extraction or PDF
@@ -167,8 +195,9 @@ does not automatically include attachments on linked boards.
    `DESIGN_PROCESSING_MODE=shadow`. Keep existing extraction and reconciliation
    services running. The new publisher runs as another service:
    `python -m backend.app.services.performance_specification`.
-3. Extraction identity changes from `output-v8` to `output-v9`, and the CAD contract
-   from `performance-specification-v1` to `performance-specification-v2`. Existing canonical CSV rows
+3. Extraction identity is now `output-v10` (`output-v9` introduced source evidence;
+   `output-v10` adds DWG skips and bounded ZIP extraction). The CAD contract remains
+   `performance-specification-v2`. Existing canonical CSV rows
    remain unchanged. Run the normal design reconciliation sweep to re-extract eligible
    historical projects. Old extraction records without the versioned source/evidence
    contract wait for this refresh. Changing only the publisher flag does not refresh
@@ -228,7 +257,7 @@ the database until all matching application/worker processes have stopped.
 ## Verification
 
 ```powershell
-venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_sources.py -q
+venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_sources.py backend/tests/test_source_archives.py -q
 ```
 
 Coverage includes LLM schema/semantic validation, optional values, exact PDF text

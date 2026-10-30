@@ -1,3 +1,4 @@
+import hashlib
 import multiprocessing
 import os
 import signal
@@ -200,6 +201,21 @@ def test_child_reported_failure_keeps_error_and_process_details():
         execution._run_in_process(_report_error, (), check_current=lambda: None, poll_seconds=0.01)
     assert error.value.exit_code == 0
     assert error.value.pid > 0
+
+
+def test_unsupported_source_remediation_survives_extraction_process(tmp_path):
+    path = tmp_path / "roof.bin"
+    path.write_bytes(b"CAD")
+    downloaded = SimpleNamespace(
+        temp_path=str(path), content_sha256=hashlib.sha256(b"CAD").hexdigest(), size_bytes=3,
+        source=SimpleNamespace(asset_id="1", filename="roof.bin"),
+    )
+    with pytest.raises(execution.IncompleteSourceExtraction, match="readable export") as captured:
+        execution._run_in_process(
+            execution._analyze_in_child, ([downloaded], None),
+            check_current=lambda: None, poll_seconds=0.01,
+        )
+    assert captured.value.manifest[0]["error"]["code"] == "unsupported_source_format"
 
 
 def test_large_result_can_be_received_before_child_exits():

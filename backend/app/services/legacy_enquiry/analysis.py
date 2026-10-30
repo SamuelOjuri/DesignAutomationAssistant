@@ -19,9 +19,8 @@ from .parameter_extraction import (
     extract_parameters,
     extract_project_name_from_content,
 )
-from .source_documents import AnimatedImageSkipped, IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_document, source_record
-from ..specification_semantics import ANIMATED_IMAGE_SKIP_STATUS, COMPLETE_SOURCE_STATUSES, SpecificationEvidence
-from ..gemini_requests import source_failure_details
+from .source_documents import IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_source_records, source_record
+from ..specification_semantics import COMPLETE_SOURCE_STATUSES, SpecificationEvidence
 
 
 class LegacyAnalysisClient(AttachmentTextExtractor, Protocol):
@@ -63,6 +62,7 @@ def analyze_downloaded_email_assets(
     first_email_text = ""
     audits: list[EmailContentAudit] = []
     manifest = []
+    supplementary_records = []
     parsed_assets = []
     for downloaded in downloaded_assets:
         content = Path(downloaded.temp_path).read_bytes()
@@ -76,19 +76,12 @@ def analyze_downloaded_email_assets(
                 f"downloaded Email asset {downloaded.source.asset_id} size changed on disk"
             )
         if not downloaded.source.filename.lower().endswith((".eml", ".msg")):
-            error = None
-            try:
-                text, status = extract_document(content, downloaded.source.filename, client), "read"
-            except AnimatedImageSkipped:
-                text, status = "", ANIMATED_IMAGE_SKIP_STATUS
-            except Exception as exc:
-                text, status = "", "failed:" + type(exc).__name__
-                error = source_failure_details(exc)
-            record = source_record(
-                f"asset:{downloaded.source.asset_id}", downloaded.source.filename, content,
-                source_type="attachment", observed_at=None, text=text, status=status, error=error,
+            records = extract_source_records(
+                content, downloaded.source.filename, client,
+                source_id=f"asset:{downloaded.source.asset_id}",
             )
-            manifest.append(record)
+            manifest.extend(records)
+            supplementary_records.extend(records)
             continue
         try:
             header, body, attachments, inline_images = process_email_content(content, downloaded.source.filename)
@@ -134,8 +127,8 @@ def analyze_downloaded_email_assets(
         raise IncompleteSourceExtraction(manifest)
     if len(parsed_assets) > 1 and any(not entry[0] for entry in parsed_assets):
         raise ValueError("Multiple email requests have unreadable sent dates; chronology requires review")
-    for record in manifest:
-        if record["sourceId"].count(":") == 1 and record["status"] == "read":  # Configured Monday source attachment.
+    for record in supplementary_records:
+        if record["status"] == "read":
             all_text += f"\nSOURCE ID: {record['sourceId']}\nFILE: {record['filename']}\nATTACHMENT CONTENT:\n{record['text']}\n"
     if len(all_text) > MAX_CONTEXT_CHARS:
         raise ValueError("Combined source text exceeds extraction limit; review required")

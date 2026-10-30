@@ -12,11 +12,10 @@ from zoneinfo import ZoneInfo
 import extract_msg
 
 from .source_documents import (
-    AnimatedImageSkipped, IncompleteSourceExtraction, MAX_CONTEXT_CHARS,
-    extract_document, html_text, source_record,
+    IncompleteSourceExtraction, MAX_CONTEXT_CHARS,
+    extract_source_records, html_text, source_record,
 )
-from ..specification_semantics import ANIMATED_IMAGE_SKIP_STATUS, COMPLETE_SOURCE_STATUSES
-from ..gemini_requests import source_failure_details
+from ..specification_semantics import COMPLETE_SOURCE_STATUSES
 
 
 class AttachmentTextExtractor(Protocol):
@@ -180,23 +179,14 @@ def extract_text_from_email(
     results = {}
     if attachments:
         with ThreadPoolExecutor(max_workers=min(getattr(extractor, "max_attachment_workers", 4), len(attachments))) as executor:
-            futures = {executor.submit(extract_document, a["content"], a["filename"], extractor): index
+            futures = {executor.submit(extract_source_records, a["content"], a["filename"], extractor,
+                                       source_id=f"{source_prefix}:attachment:{index}", observed_at=observed_at): index
                        for index, a in enumerate(attachments)}
             for future in as_completed(futures):
                 index = futures[future]
-                try:
-                    results[index] = (future.result(), "read", None)
-                except AnimatedImageSkipped:
-                    results[index] = ("", ANIMATED_IMAGE_SKIP_STATUS, None)
-                except Exception as exc:
-                    # Do not place exception messages/URLs into model context.
-                    results[index] = ("", "failed:" + type(exc).__name__, source_failure_details(exc))
-    for index, attachment in enumerate(attachments):
-        text, status, error = results[index]
-        records.append(source_record(
-            f"{source_prefix}:attachment:{index}", attachment["filename"], attachment["content"],
-            source_type="attachment", observed_at=observed_at, text=text, status=status, error=error,
-        ))
+                results[index] = future.result()
+    for index in range(len(attachments)):
+        records.extend(results[index])
     if manifest is not None:
         manifest.extend(records)
     if any(record["status"] not in COMPLETE_SOURCE_STATUSES for record in records):

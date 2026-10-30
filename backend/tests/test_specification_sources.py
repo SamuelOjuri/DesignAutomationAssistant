@@ -89,11 +89,39 @@ def test_animation_does_not_hide_real_attachment_failures():
     manifest = []
     with pytest.raises(IncompleteSourceExtraction) as captured:
         extract_text_from_email("Request", [{"filename": "signature.gif", "content": image_bytes("GIF", animated=True)},
-                                            {"filename": "drawing.dwg", "content": b"CAD"}],
+                                            {"filename": "drawing.bin", "content": b"binary"}],
                                 extractor=SimpleNamespace(max_attachment_workers=2), manifest=manifest)
     assert manifest[1]["status"] == "skipped:animated_image"
-    assert manifest[2]["status"] == "failed:ValueError"
-    assert "signature.gif" not in str(captured.value) and "drawing.dwg" in str(captured.value)
+    assert manifest[2]["status"] == "failed:UnsupportedSourceFormat"
+    assert "signature.gif" not in str(captured.value) and "drawing.bin" in str(captured.value)
+
+
+@pytest.mark.parametrize("filename,remediation", [
+    ("request.bin", "readable export"),
+    ("request.rar", "readable export"),
+])
+@pytest.mark.parametrize("supplementary", [False, True])
+def test_unsupported_sources_retain_actionable_diagnostics(tmp_path, filename, remediation, supplementary):
+    client = SimpleNamespace(max_attachment_workers=1)
+    with pytest.raises(IncompleteSourceExtraction) as captured:
+        if supplementary:
+            content = b"unsupported source"
+            path = tmp_path / filename
+            path.write_bytes(content)
+            source = DesignEmailAsset("1", filename, filename.rsplit(".", 1)[1], len(content),
+                                      "2026-10-30T12:00:00Z", "unused", False)
+            downloaded = DownloadedDesignEmailAsset(source, str(path), "unused", hashlib.sha256(content).hexdigest(), len(content))
+            analyze_downloaded_email_assets([downloaded], client=client)
+        else:
+            extract_text_from_email("Contact: Alex", [{"filename": filename, "content": b"unsupported source"}],
+                                    extractor=client)
+    failure = captured.value
+    record = next(source for source in failure.manifest if source["filename"] == filename)
+    assert record["status"] == "failed:UnsupportedSourceFormat"
+    assert record["text"] == ""
+    assert record["error"]["code"] == "unsupported_source_format"
+    assert remediation in str(failure)
+    assert remediation in record["error"]["message"]
 
 
 def test_supplementary_animated_image_does_not_block_analysis(tmp_path):
@@ -172,7 +200,7 @@ def test_uncached_formula_and_unsupported_sources_require_review():
     with pytest.raises(ValueError, match="incomplete"):
         extract_document(output.getvalue(), "request.xlsx", None)
     with pytest.raises(ValueError, match="Unsupported"):
-        extract_document(b"binary", "drawing.dwg", None)
+        extract_document(b"binary", "drawing.bin", None)
 
 
 def test_docx_attachment_retains_table_text_and_does_not_expand_xml_entities():
@@ -187,15 +215,16 @@ def test_docx_attachment_retains_table_text_and_does_not_expand_xml_entities():
         extract_document(output.getvalue(), "request.docx", None)
 
 
-def test_failed_attachment_records_each_source_and_never_passes_error_as_evidence():
+@pytest.mark.parametrize("error_type", [TimeoutError, ValueError])
+def test_failed_attachment_records_each_source_and_never_passes_error_as_evidence(error_type):
     def fail(*args):
-        raise TimeoutError("private URL must not appear in model context")
+        raise error_type("private URL must not appear in model context")
     client = SimpleNamespace(max_attachment_workers=2, process_pdf=fail)
     manifest = []
     with pytest.raises(IncompleteSourceExtraction) as captured:
         extract_text_from_email("Request text", [{"filename": "roof.pdf", "content": b"pdf"}],
                                 extractor=client, manifest=manifest, source_prefix="asset:1")
-    assert [e["status"] for e in manifest] == ["read", "failed:TimeoutError"]
+    assert [e["status"] for e in manifest] == ["read", "failed:" + error_type.__name__]
     assert manifest[1]["sourceId"] == "asset:1:attachment:0"
     assert manifest[1]["text"] == "" and "private URL" not in str(captured.value)
 
