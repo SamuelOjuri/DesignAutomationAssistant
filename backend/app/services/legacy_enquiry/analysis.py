@@ -21,6 +21,7 @@ from .parameter_extraction import (
 )
 from .source_documents import AnimatedImageSkipped, IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_document, source_record
 from ..specification_semantics import ANIMATED_IMAGE_SKIP_STATUS, COMPLETE_SOURCE_STATUSES, SpecificationEvidence
+from ..gemini_requests import source_failure_details
 
 
 class LegacyAnalysisClient(AttachmentTextExtractor, Protocol):
@@ -75,15 +76,17 @@ def analyze_downloaded_email_assets(
                 f"downloaded Email asset {downloaded.source.asset_id} size changed on disk"
             )
         if not downloaded.source.filename.lower().endswith((".eml", ".msg")):
+            error = None
             try:
                 text, status = extract_document(content, downloaded.source.filename, client), "read"
             except AnimatedImageSkipped:
                 text, status = "", ANIMATED_IMAGE_SKIP_STATUS
             except Exception as exc:
                 text, status = "", "failed:" + type(exc).__name__
+                error = source_failure_details(exc)
             record = source_record(
                 f"asset:{downloaded.source.asset_id}", downloaded.source.filename, content,
-                source_type="attachment", observed_at=None, text=text, status=status,
+                source_type="attachment", observed_at=None, text=text, status=status, error=error,
             )
             manifest.append(record)
             continue

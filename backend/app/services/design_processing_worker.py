@@ -4,6 +4,7 @@ import argparse
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 import logging
+import json
 import socket
 import threading
 import time
@@ -55,6 +56,7 @@ from .design_processing_target import (
     refresh_current_target,
 )
 from .legacy_enquiry.llm import LegacyGeminiClient
+from .gemini_requests import runtime_diagnostics
 
 
 logger = logging.getLogger(__name__)
@@ -1121,6 +1123,11 @@ def main() -> int:
     if not settings.design_processing_worker_enabled:
         logger.info("Design-processing worker is disabled")
         return 0
+    print(json.dumps({"event": "design_extraction_runtime", **runtime_diagnostics(
+        settings.design_processing_extraction_model, settings.design_processing_thinking_level,
+        LegacyGeminiClient(settings.design_processing_extraction_model,
+                           thinking_level=settings.design_processing_thinking_level).parameter_extraction_config.response_json_schema,
+    )}), flush=True)
     worker_id = args.worker_id or default_worker_id()
     while True:
         db = SessionLocal()

@@ -364,6 +364,24 @@ def test_model_cannot_invent_missing_values_change_identifiers_or_numbers(case):
             translate_specification(raw, client)
 
 
+def test_cad_schema_rejection_recovers_without_weakening_value_validation(case):
+    class SchemaRejected(Exception):
+        code = 400
+    raw = resolve_specification_sources(case.gateway, case.item)["raw"]
+    calls = []
+    def generate(model, prompt, config):
+        calls.append(config)
+        if config.response_json_schema:
+            raise SchemaRejected()
+        payload = translation_payload(raw)
+        payload["values"]["Bauder Roof Num"] = "7"  # Original is 007.
+        return SimpleNamespace(parsed=None, text=json.dumps(payload))
+    client = LegacyGeminiClient("offline", generate_content=generate)
+    with pytest.raises(ValueError, match="changed source text"):
+        translate_specification(raw, client)
+    assert len(calls) == 2 and calls[1].response_json_schema is None
+
+
 def test_model_cannot_replace_an_unsupported_scale_with_a_nearest_allowed_scale(case):
     raw = resolve_specification_sources(case.gateway, case.item)["raw"]
     raw["Scale"] = "1:200"

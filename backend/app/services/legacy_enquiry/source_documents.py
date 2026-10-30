@@ -30,7 +30,9 @@ class AnimatedImageSkipped(Exception):
 class IncompleteSourceExtraction(ValueError):
     def __init__(self, manifest):
         self.manifest = manifest
-        failures = [f"{source['filename']}: {source['status']}" for source in manifest
+        failures = [f"{source['filename']}: {source['status']}" + (
+                    f" (stage={source['error'].get('stage')}, http_status={source['error'].get('http_status')}, mode={source['error'].get('mode')})"
+                    if isinstance(source.get("error"), dict) else "") for source in manifest
                     if source["status"] not in COMPLETE_SOURCE_STATUSES]
         super().__init__("Incomplete source extraction; retry/review required: " + "; ".join(failures)[:1000])
 
@@ -116,9 +118,12 @@ def extract_document(content: bytes, filename: str, extractor) -> str:
     return text
 
 
-def source_record(source_id, filename, content, *, source_type, observed_at=None, text="", status="read"):
-    return {
+def source_record(source_id, filename, content, *, source_type, observed_at=None, text="", status="read", error=None):
+    record = {
         "sourceId": source_id, "filename": filename, "sourceType": source_type,
         "contentSha256": hashlib.sha256(content).hexdigest(), "sizeBytes": len(content),
         "observedAt": observed_at, "status": status, "text": text,
     }
+    if error:
+        record["error"] = error
+    return record

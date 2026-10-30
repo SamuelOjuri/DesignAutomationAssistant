@@ -16,6 +16,7 @@ from .source_documents import (
     extract_document, html_text, source_record,
 )
 from ..specification_semantics import ANIMATED_IMAGE_SKIP_STATUS, COMPLETE_SOURCE_STATUSES
+from ..gemini_requests import source_failure_details
 
 
 class AttachmentTextExtractor(Protocol):
@@ -184,17 +185,17 @@ def extract_text_from_email(
             for future in as_completed(futures):
                 index = futures[future]
                 try:
-                    results[index] = (future.result(), "read")
+                    results[index] = (future.result(), "read", None)
                 except AnimatedImageSkipped:
-                    results[index] = ("", ANIMATED_IMAGE_SKIP_STATUS)
+                    results[index] = ("", ANIMATED_IMAGE_SKIP_STATUS, None)
                 except Exception as exc:
                     # Do not place exception messages/URLs into model context.
-                    results[index] = ("", "failed:" + type(exc).__name__)
+                    results[index] = ("", "failed:" + type(exc).__name__, source_failure_details(exc))
     for index, attachment in enumerate(attachments):
-        text, status = results[index]
+        text, status, error = results[index]
         records.append(source_record(
             f"{source_prefix}:attachment:{index}", attachment["filename"], attachment["content"],
-            source_type="attachment", observed_at=observed_at, text=text, status=status,
+            source_type="attachment", observed_at=observed_at, text=text, status=status, error=error,
         ))
     if manifest is not None:
         manifest.extend(records)

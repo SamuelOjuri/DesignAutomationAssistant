@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from .legacy_enquiry.llm import LegacyGeminiClient
 from .gemini_schema import gemini_response_schema
+from .gemini_requests import GeminiJSONRequester
 from .specification_semantics import FIELD_DEFINITIONS, missing
 
 
@@ -184,13 +185,15 @@ def translate_specification(raw: dict[str, Any], client: LegacyGeminiClient, *, 
         response_json_schema=gemini_response_schema(CADTranslation),
     )
 
-    def request(contents):
-        response = client.generate_content(client.model, contents, config)
+    requester = GeminiJSONRequester(client.generate_content, client.model, config, CADTranslation)
+
+    def request(contents, stage):
+        response = requester(contents, stage=stage)
         parsed = getattr(response, "parsed", None)
         result = parsed if isinstance(parsed, CADTranslation) else CADTranslation.model_validate(parsed) if isinstance(parsed, dict) else CADTranslation.model_validate_json(getattr(response, "text", None) or "")
         return validate_translation(result, raw, allow_unresolved=True)
 
-    result = request(prompt)
+    result = request(prompt, "cad_translation")
     unresolved = [label for label, value in result.values.model_dump(by_alias=True).items()
                   if label != "Incoming Information" and value is None and not missing(raw.get(label))]
     if unresolved:
@@ -203,7 +206,7 @@ def translate_specification(raw: dict[str, Any], client: LegacyGeminiClient, *, 
             "For dropdowns require evidence of the permitted product/category; retain "
             "null with a warning if unsupported. Do not guess to make the export pass.\n" + prompt
         )
-        result = request(recovery)
+        result = request(recovery, "cad_recovery")
     return validate_translation(result, raw)
 
 

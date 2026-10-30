@@ -10,6 +10,7 @@ from google.genai import types
 from ...gemini_models import ThinkingLevel, validate_thinking_level
 from ..llm_interface import gemini_api_with_retry
 from ..gemini_schema import gemini_response_schema
+from ..gemini_requests import GeminiJSONRequester, request_gemini
 from .parameter_extraction import (
     DesignParameterExtraction,
     PARAMETER_EXTRACTION_PROMPT,
@@ -72,8 +73,10 @@ class LegacyGeminiClient:
 
         Information may be found in any content source, including text from image descriptions.
         """
-        def request(contents):
-            response = self.generate_content(self.model, contents, self.parameter_extraction_config)
+        requester = GeminiJSONRequester(self.generate_content, self.model, self.parameter_extraction_config, DesignParameterExtraction)
+
+        def request(contents, stage):
+            response = requester(contents, stage=stage)
             parsed = getattr(response, "parsed", None)
             if isinstance(parsed, DesignParameterExtraction):
                 return parsed
@@ -84,7 +87,7 @@ class LegacyGeminiClient:
                 raise ValueError("parameter extraction returned no structured response")
             return DesignParameterExtraction.model_validate_json(response_text)
 
-        result = request(prompt)
+        result = request(prompt, "parameter_extraction")
         required = set(FIELD_DEFINITIONS) - {"Incoming Information"}
         fields = {canonical_label(key): value for key, value in result.as_canonical_parameters().items()}
         fields["Bauder Roof Num"] = result.bauder_roof_num
@@ -97,7 +100,8 @@ class LegacyGeminiClient:
                 "and selected spreadsheet cell again for these missing/unverified fields: "
                 + str(sorted(gaps)) + ". Retain roof-specific alternatives, requested vs "
                 "achieved distinctions, and exact source IDs/excerpts. Do not infer a "
-                "TP reference from a manufacturer drawing. Absent facts stay null.\n" + prompt
+                "TP reference from a manufacturer drawing. Absent facts stay null.\n" + prompt,
+                "parameter_recovery",
             )
             # Fill previously absent scalars only; retain every competing evidence
             # candidate for scope-aware resolution rather than choosing arbitrarily.
@@ -130,7 +134,7 @@ class LegacyGeminiClient:
         Note that information may be found in any of the content sources, including text from image descriptions.
         """
         )
-        response = self.generate_content(self.model, prompt, self.generation_config)
+        response = request_gemini(self.generate_content, self.model, prompt, self.generation_config, stage="project_name")
         return response.text
 
     @staticmethod
@@ -139,9 +143,8 @@ class LegacyGeminiClient:
         return total_size <= 100 * 1024 * 1024 and 1 < len(pdf_files) <= 3
 
     def process_pdf(self, pdf_content: bytes, filename: str) -> str:
-        del filename
-        response = self.generate_content(
-            self.model,
+        response = request_gemini(
+            self.generate_content, self.model,
             [
                 types.Part.from_bytes(data=pdf_content, mime_type="application/pdf"),
                 (
@@ -153,6 +156,7 @@ class LegacyGeminiClient:
                 ),
             ],
             self.generation_config,
+            stage="pdf_text", input_bytes=len(pdf_content),
         )
         return response.text
 
@@ -174,10 +178,11 @@ class LegacyGeminiClient:
                     "Including text from tables, diagrams, and charts. "
                     "For each document, start with '=== PDF: [filename] ===' header and then provide the extracted content."
                 )
-                return self.generate_content(
-                    self.model,
+                return request_gemini(
+                    self.generate_content, self.model,
                     parts,
                     self.generation_config,
+                    stage="pdf_batch", input_bytes=sum(len(pdf["content"]) for pdf in pdf_files),
                 ).text
             except Exception:
                 pass
@@ -226,8 +231,8 @@ class LegacyGeminiClient:
         if extension not in supported_formats:
             raise ValueError(f"Unsupported image format: {extension}")
         try:
-            response = self.generate_content(
-                self.model,
+            response = request_gemini(
+                self.generate_content, self.model,
                 [
                     types.Part.from_bytes(
                         data=image_content,
@@ -240,6 +245,7 @@ class LegacyGeminiClient:
                     ),
                 ],
                 self.generation_config,
+                stage="image_text", input_bytes=len(image_content),
             )
             return response.text
         except Exception:

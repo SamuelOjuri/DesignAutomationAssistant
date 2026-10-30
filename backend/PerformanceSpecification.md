@@ -26,6 +26,32 @@ and warning limits; enum choices and field definitions remain in the API schema.
 Synthetic live checks reproduced HTTP 400 with the original evidence schema and
 succeeded after removing its array bounds. The same helper is used for CAD translation.
 
+If Gemini still returns HTTP 400 for a structured extraction/translation request,
+the worker makes one compatibility attempt in JSON mode with the schema included
+in the task. Every returned value still passes the original Pydantic schema and
+semantic/evidence checks. Malformed JSON, invented values and unresolved known
+fields cannot pass publication through this path. The compatibility attempt is
+not used for PDF/image requests, authentication, throttling or server errors.
+
+The design worker prints `design_extraction_runtime` at startup with its deployed
+commit, Python/SDK/Pydantic versions, model and wire-schema fingerprint. API failures
+retain stage, status, mode, input size and runtime information across the extraction
+process boundary; failed attachment manifests retain the same safe metadata. These
+diagnostics do not contain source text, signed URLs, credentials or provider bodies.
+
+After deploying matching workers, run this in the Render design-worker shell:
+
+```bash
+python -m backend.scripts.check_design_processing_gemini --live
+```
+
+This checks the actual service environment using synthetic text only, without
+reading email, attachments or CRM records. Expected output includes `array_bounds: 0`
+and `status: ok`, `response_validated: true`. Add `--json-mode` to test the recovery
+transport directly. Without `--live`, it prints runtime metadata without an API call.
+If the test succeeds but a real job fails, its stage and prompt/input sizes identify
+the next request to investigate rather than attributing every HTTP 400 to the schema.
+
 ## Scope and existing outputs
 
 Only groups in `AUTO_SYNC_ACTIVE_GROUP_IDS` are eligible. The configured Landing Zone
