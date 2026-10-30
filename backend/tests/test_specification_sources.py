@@ -203,6 +203,43 @@ def test_uncached_formula_and_unsupported_sources_require_review():
         extract_document(b"binary", "drawing.bin", None)
 
 
+@pytest.mark.parametrize("in_archive", [False, True])
+def test_long_workbook_cells_remain_readable_evidence(in_archive):
+    book = openpyxl.Workbook()
+    book.active.title = "Specification"
+    book.active.append(["Scope", "Long description " * 100 + "Target U-value: 0.25"])
+    output = io.BytesIO()
+    book.save(output)
+    book.close()
+    content, filename = output.getvalue(), "schedule.xlsx"
+    if in_archive:
+        output = io.BytesIO()
+        with ZipFile(output, "w") as archive:
+            archive.writestr(filename, content)
+        content, filename = output.getvalue(), "request.zip"
+    manifest = []
+    context = extract_text_from_email("Request", [{"filename": filename, "content": content}],
+                                      extractor=SimpleNamespace(), manifest=manifest)
+    assert "Target U-value: 0.25" in context
+    assert "[truncated]" not in context and "Extraction notice" not in context
+    record = next(source for source in manifest if source["filename"].endswith("schedule.xlsx"))
+    assert record["status"] == "read" and "Worksheet: Specification" in record["text"]
+
+
+def test_workbook_failure_keeps_safe_reason_in_manifest_and_worker_error():
+    book = openpyxl.Workbook()
+    book.active.append(["PRIVATE CONTENT", "=1/4"])
+    output = io.BytesIO()
+    book.save(output)
+    book.close()
+    with pytest.raises(IncompleteSourceExtraction, match="formula results are unavailable") as captured:
+        extract_text_from_email("Request", [{"filename": "request.xlsx", "content": output.getvalue()}],
+                                extractor=SimpleNamespace())
+    record = captured.value.manifest[1]
+    assert record["error"]["code"] == "workbook_incomplete" and record["text"] == ""
+    assert "PRIVATE CONTENT" not in str(captured.value) and "=1/4" not in str(captured.value)
+
+
 def test_docx_attachment_retains_table_text_and_does_not_expand_xml_entities():
     output = io.BytesIO()
     with ZipFile(output, "w") as archive:

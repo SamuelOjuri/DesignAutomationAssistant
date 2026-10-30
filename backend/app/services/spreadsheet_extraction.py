@@ -121,12 +121,15 @@ def _xls_rows(path: str, warnings: set[str], *, visible_only: bool = False):
         book.release_resources()
 
 
-def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: bool = False) -> list[dict[str, str]]:
+def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: bool = False,
+                                  preserve_full_cells: bool = False) -> list[dict[str, str]]:
     """Return bounded, source-labelled text chunks, including any extraction limits.
 
     Bad/encrypted workbooks remain downloadable: parsing failures become a source
     notice. Storage and embedding failures are handled by the caller, not hidden.
     XLS uses the results cached by Excel; XLSX also reports uncached formulas.
+    Design extraction preserves full cell text in labelled continuation chunks;
+    search retains its existing cell excerpt limit. Both retain workbook limits.
     """
     documents: list[dict[str, str]] = []
     warnings: set[str] = set()
@@ -170,7 +173,7 @@ def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: boo
                 for column, value in enumerate(cells, start=1):
                     if not value:
                         continue
-                    if len(value) > MAX_CELL_CHARS:
+                    if not preserve_full_cells and len(value) > MAX_CELL_CHARS:
                         warnings.add("Long cell values were truncated.")
                         value = value[:MAX_CELL_CHARS] + " [truncated]"
                     entries.append(f"{get_column_letter(column)}{row_number}={value}")
@@ -184,13 +187,30 @@ def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: boo
                     f"First populated row (excerpt): {first_populated_row}\n"
                 )
                 for entry in entries:
-                    separator = " | " if last_row == row_number else "\n"
-                    if body and len(prefix + body + separator + entry) > MAX_DOCUMENT_CHARS:
-                        flush()
-                    if not body:
-                        first_row = row_number
-                    body += (separator if body else "") + entry
-                    last_row = row_number
+                    label, _, remaining = entry.partition("=")
+                    continuation = False
+                    while remaining:
+                        marker = f"{label}{' (continued)' if continuation else ''}="
+                        capacity = MAX_DOCUMENT_CHARS - len(prefix) - len(marker)
+                        if capacity < 1:
+                            raise ExtractionLimit("Workbook cell labels exceed the text chunk limit.")
+                        length = min(len(remaining), capacity)
+                        if length < len(remaining):
+                            # Preserve all characters, preferring word boundaries
+                            # so technical values remain readable in each chunk.
+                            boundary = remaining.rfind(" ", 0, length)
+                            if boundary >= 0:
+                                length = boundary + 1
+                        piece = marker + remaining[:length]
+                        separator = " | " if last_row == row_number else "\n"
+                        if body and len(prefix + body + separator + piece) > MAX_DOCUMENT_CHARS:
+                            flush()
+                        if not body:
+                            first_row = row_number
+                        body += (separator if body else "") + piece
+                        last_row = row_number
+                        remaining = remaining[length:]
+                        continuation = True
         flush()
     except ExtractionLimit as exc:
         warnings.add(str(exc))
@@ -209,6 +229,7 @@ def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: boo
                 "Extracted evidence may be incomplete. Consult the original workbook for full details."
             ),
             "section": "spreadsheet:extraction-notice",
+            "notice": detail,
         })
         logger.warning("[SPREADSHEET] %s: %s", filename, detail)
     return documents

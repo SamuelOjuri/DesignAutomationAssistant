@@ -24,6 +24,7 @@ from .design_processing_artifacts import (
 )
 from .design_processing_locks import lock_design_processing_item_and_job
 from .design_processing_observability import log_design_processing_event
+from .design_processing_diagnostics import source_runtime_diagnostics
 from .design_processing_policy import design_scope_exclusion
 from .design_processing_pipeline import (
     AssetDownloader,
@@ -971,7 +972,11 @@ def execute_claimed_analysis_job(
         except Exception:
             db.rollback()
             logger.warning("Could not check current eligibility after job %s failed", job_id)
-        logger.exception("Design-processing job %s failed", job_id)
+        logger.exception("Design-processing job %s failed runtime=%s", job_id, json.dumps({
+            "worker_id": worker_id,
+            **runtime_diagnostics(settings.design_processing_extraction_model, settings.design_processing_thinking_level),
+            **source_runtime_diagnostics(),
+        }))
         return _record_execution_failure_safely(
             db,
             job_id,
@@ -1123,12 +1128,13 @@ def main() -> int:
     if not settings.design_processing_worker_enabled:
         logger.info("Design-processing worker is disabled")
         return 0
-    print(json.dumps({"event": "design_extraction_runtime", **runtime_diagnostics(
+    worker_id = args.worker_id or default_worker_id()
+    print(json.dumps({"event": "design_extraction_runtime", "worker_id": worker_id,
+                     **source_runtime_diagnostics(), **runtime_diagnostics(
         settings.design_processing_extraction_model, settings.design_processing_thinking_level,
         LegacyGeminiClient(settings.design_processing_extraction_model,
                            thinking_level=settings.design_processing_thinking_level).parameter_extraction_config.response_json_schema,
     )}), flush=True)
-    worker_id = args.worker_id or default_worker_id()
     while True:
         db = SessionLocal()
         try:

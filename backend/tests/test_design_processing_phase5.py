@@ -487,7 +487,8 @@ def _run_shadow(db_session, golden_input, *, storage=None):
     return result, gateway, client, downloader, storage
 
 
-def test_attachment_read_failure_retains_manifest_and_schedules_extraction_retry(db_session, golden, monkeypatch):
+def test_attachment_read_failure_retains_manifest_and_schedules_extraction_retry(db_session, golden, monkeypatch, caplog):
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "a" * 40)
     golden_input, _ = golden
     _queue(db_session, _snapshot(golden_input))
     def fail(*args):
@@ -501,6 +502,12 @@ def test_attachment_read_failure_retains_manifest_and_schedules_extraction_retry
     assert any(source["status"] == "failed:TimeoutError" for source in manifest)
     assert any(source["sourceType"] == "email_body" and source["status"] == "read" for source in manifest)
     assert client.query_count == 0 and not storage.objects
+    failure_log = next(record.getMessage() for record in caplog.records if "failed runtime=" in record.getMessage())
+    runtime = json.loads(failure_log.split("runtime=", 1)[1])
+    assert runtime["worker_id"] == "phase5-worker"
+    assert runtime["pipeline_revision"] == "output-v11"
+    assert runtime["commit"] == "a" * 12 and runtime["pid"] > 0
+    assert "test-token" not in failure_log
 
 
 def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(

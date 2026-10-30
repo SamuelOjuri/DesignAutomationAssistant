@@ -117,11 +117,13 @@ def extract_document(content: bytes, filename: str, extractor) -> str:
         with tempfile.TemporaryDirectory(prefix="design-sheet-") as directory:
             path = Path(directory) / ("source" + suffix)
             path.write_bytes(content)
-            documents = extract_spreadsheet_documents(str(path), filename, visible_only=True)
-        if any(doc["section"] == "spreadsheet:extraction-notice" for doc in documents):
-            raise ValueError("Workbook extraction incomplete (limits, unreadable cells, or uncached formulas)")
-        return "\n\n".join(doc["text"] for doc in documents)
-    if suffix == ".pdf":
+            documents = extract_spreadsheet_documents(str(path), filename, visible_only=True, preserve_full_cells=True)
+        notices = [doc["notice"] for doc in documents if doc["section"] == "spreadsheet:extraction-notice"]
+        if notices:
+            raise SourceDocumentError("workbook_incomplete", "Workbook extraction incomplete: " + " ".join(notices)
+                                      + " Recalculate and save uncached formulas in Excel, or supply a smaller readable export.")
+        text = "\n\n".join(doc["text"] for doc in documents)
+    elif suffix == ".pdf":
         # Per-document calls retain identity and make individual failures retryable.
         text = extractor.process_pdf(content, filename)
     elif suffix in IMAGE_EXTENSIONS:

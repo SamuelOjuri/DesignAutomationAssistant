@@ -34,7 +34,10 @@ fields cannot pass publication through this path. The compatibility attempt is
 not used for PDF/image requests, authentication, throttling or server errors.
 
 The design worker prints `design_extraction_runtime` at startup with its deployed
-commit, Python/SDK/Pydantic versions, model and wire-schema fingerprint. API failures
+commit, worker ID, PID, pipeline revision, source capabilities, Python/SDK/Pydantic
+versions, model and wire-schema fingerprint. Each failed job also logs its worker
+ID, PID, commit and pipeline revision, so failures from different workers or deploys
+can be distinguished. API failures
 retain stage, status, mode, input size and runtime information across the extraction
 process boundary; failed attachment manifests retain the same safe metadata. These
 diagnostics do not contain source text, signed URLs, credentials or provider bodies.
@@ -51,6 +54,21 @@ and `status: ok`, `response_validated: true`. Add `--json-mode` to test the reco
 transport directly. Without `--live`, it prints runtime metadata without an API call.
 If the test succeeds but a real job fails, its stage and prompt/input sizes identify
 the next request to investigate rather than attributing every HTTP 400 to the schema.
+
+To check the deployed source readers independently of Gemini, run:
+
+```bash
+python -m backend.scripts.check_design_processing_sources
+```
+
+This uses only synthetic DWG, ZIP and XLSX bytes with no database or network calls.
+Expected output includes `status: ok`, `pipeline_revision: output-v11`, and all
+three checks with `passed: true`. It verifies that DWG is skipped, ZIP members are
+read and long spreadsheet cells retain their final technical values. A `.dwg`
+failure reported as `failed:ValueError` is inconsistent with the current DWG skip
+path. Check the runtime fields on that failing job and ensure all design-worker
+services run the matching release; a nearby startup message alone does not identify
+which process produced an earlier/in-flight failure.
 
 ## Scope and existing outputs
 
@@ -108,6 +126,14 @@ job's `result_json.sourceExtractionFailure`. PDFs are read individually to prese
 attachment identity. The extraction model also makes one targeted second pass for
 missing/unverified fields before accepting the extraction.
 
+Design extraction retains long spreadsheet cells in full, splitting them across
+1,000-character chunks with repeated worksheet/cell references and continuation
+labels. The search ingestion reader keeps its existing 400-character cell excerpt
+limit. The design reader still enforces the workbook file, decompression, row,
+column, cell and document limits, plus the overall 500,000-character context limit.
+Uncached formulas and actual extraction limits still block incomplete evidence;
+their safe reason is now retained in the job's error and source manifest.
+
 DWG drawings are intentionally skipped, including inside ZIP archives. Their
 identity/hash and `skipped:dwg` status remain in the source manifest; they are not
 sent to the model and cannot supply field evidence. The remaining readable sources
@@ -127,9 +153,9 @@ Application-owned failure messages survive the process boundary in worker logs,
 parser/provider exception text.
 
 Deploy matching API, design/reconciliation and specification workers to recognize
-the new statuses. Pipeline revision `output-v10` makes the normal reconciliation
+the new statuses. Pipeline revision `output-v11` makes the normal reconciliation
 flow re-extract eligible items, including jobs previously blocked by DWG or ZIP
-attachments. No environment-variable or database migration change is needed for
+attachments or long spreadsheet cells. No environment-variable or database migration change is needed for
 this update. For a job still marked failed after deployment, use the operator command:
 
 ```bash
@@ -195,8 +221,9 @@ does not automatically include attachments on linked boards.
    `DESIGN_PROCESSING_MODE=shadow`. Keep existing extraction and reconciliation
    services running. The new publisher runs as another service:
    `python -m backend.app.services.performance_specification`.
-3. Extraction identity is now `output-v10` (`output-v9` introduced source evidence;
-   `output-v10` adds DWG skips and bounded ZIP extraction). The CAD contract remains
+3. Extraction identity is now `output-v11` (`output-v9` introduced source evidence;
+   `output-v10` added DWG skips and bounded ZIP extraction; `output-v11` preserves
+   long spreadsheet cells). The CAD contract remains
    `performance-specification-v2`. Existing canonical CSV rows
    remain unchanged. Run the normal design reconciliation sweep to re-extract eligible
    historical projects. Old extraction records without the versioned source/evidence

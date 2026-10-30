@@ -12,6 +12,7 @@ from google.genai import types
 
 from backend.app.config import settings
 from backend.app.services.gemini_requests import GeminiJSONRequester, runtime_diagnostics
+from backend.app.services.design_processing_diagnostics import source_runtime_diagnostics
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.legacy_enquiry.parameter_extraction import DesignParameterExtraction
 
@@ -23,7 +24,7 @@ def main():
     args = parser.parse_args()
     legacy = LegacyGeminiClient(settings.design_processing_extraction_model, thinking_level=settings.design_processing_thinking_level)
     config = legacy.parameter_extraction_config
-    print(json.dumps({"event": "design_extraction_runtime", **runtime_diagnostics(legacy.model, legacy.thinking_level,
+    print(json.dumps({"event": "design_extraction_runtime", **source_runtime_diagnostics(), **runtime_diagnostics(legacy.model, legacy.thinking_level,
                                                                                   config.response_json_schema)}), flush=True)
     if not args.live:
         return 0

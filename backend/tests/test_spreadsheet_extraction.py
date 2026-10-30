@@ -90,6 +90,45 @@ def test_chunks_repeat_workbook_and_initial_labels_without_losing_rows(tmp_path)
     assert "B201=2010" in docs[-1]["text"]
 
 
+@pytest.mark.parametrize("length", [450, 2400, 32767])
+def test_design_chunks_preserve_entire_long_cell_and_its_location(tmp_path, length):
+    path = tmp_path / "schedule.xlsx"
+    suffix = "Target U-value: 0.25!!"
+    value = ("Long technical description with spaces; " * 1000)[:length - len(suffix)] + suffix
+    book = openpyxl.Workbook()
+    book.active.title = "Scope of works"
+    book.active["A1"] = value
+    book.save(path)
+    book.close()
+    docs = excel.extract_spreadsheet_documents(str(path), path.name, preserve_full_cells=True)
+    assert all(doc["section"] == "sheet:Scope of works:rows:1-1" for doc in docs)
+    assert all(len(doc["text"]) <= excel.MAX_DOCUMENT_CHARS for doc in docs)
+    bodies = [doc["text"].split("\n", 3)[3] for doc in docs]
+    assert bodies[0].startswith("A1=")
+    assert all(body.startswith("A1 (continued)=") for body in bodies[1:])
+    assert "".join(body.partition("=")[2] for body in bodies) == excel._format_value(value)
+    assert "Target U-value: 0.25!!" in docs[-1]["text"]
+    search_docs = excel.extract_spreadsheet_documents(str(path), path.name)
+    assert search_docs[-1]["section"] == "spreadsheet:extraction-notice"
+    assert search_docs[-1]["notice"] == "Long cell values were truncated."
+    path.unlink()
+
+
+def test_full_cells_still_enforce_total_document_budget(tmp_path, monkeypatch):
+    path = tmp_path / "oversized.xlsx"
+    book = openpyxl.Workbook()
+    book.active["A1"] = "Long specification " * 400
+    book.save(path)
+    book.close()
+    monkeypatch.setattr(excel, "MAX_DOCUMENTS", 3)
+    docs = excel.extract_spreadsheet_documents(str(path), path.name, preserve_full_cells=True)
+    assert len(docs) == 3
+    assert docs[-1]["section"] == "spreadsheet:extraction-notice"
+    assert "searchable text limit" in docs[-1]["notice"]
+    assert all(len(doc["text"]) <= excel.MAX_DOCUMENT_CHARS for doc in docs)
+    path.unlink()
+
+
 @pytest.mark.parametrize("limit,value,notice", [
     ("MAX_FILE_BYTES", 1, "file size limit"),
     ("MAX_UNCOMPRESSED_BYTES", 1, "uncompressed size limit"),
