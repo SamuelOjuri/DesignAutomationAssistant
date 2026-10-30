@@ -232,6 +232,11 @@ def reconcile_landing_zone_once(
 
         due_candidates = []
         for candidate in candidates_by_id.values():
+            if configured_mode == "allowlist" and candidate.item_id not in settings.design_processing_allowlist_item_ids:
+                prefiltered_results.append(DesignProcessingReconciliationItemResult(
+                    item_id=candidate.item_id, action="excluded", reason="not_allowlisted",
+                ))
+                continue
             check = checks.get(candidate.item_id)
             # The old registration requirement no longer excludes active items.
             # Recheck rediscovered candidates now, while preserving all other

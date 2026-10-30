@@ -510,6 +510,30 @@ def test_attachment_read_failure_retains_manifest_and_schedules_extraction_retry
     assert "test-token" not in failure_log
 
 
+def test_allowlist_removal_during_extraction_holds_execution_without_rendering(db_session, golden, monkeypatch):
+    golden_input, _ = golden
+    snapshot = _snapshot(golden_input)
+    monkeypatch.setattr(settings, "design_processing_mode", "allowlist")
+    monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", [snapshot.item_id])
+    _queue(db_session, snapshot)
+    client = FakeLegacyClient(golden_input)
+    original = client.extract_design_parameters
+    def remove_after_response(context):
+        response = original(context)
+        monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", [])
+        return response
+    client.extract_design_parameters = remove_after_response
+    storage = MemoryArtifactStorage()
+    result = run_worker_once(db_session, worker_id="allowlist-test", access_token="test-token",
+        gateway=FakeReadGateway(snapshot, golden_input), analysis_client=client, artifact_storage=storage,
+        downloader=FixtureDownloader(WORKSPACE_ROOT / golden_input["sourceEmail"]["path"]),
+        recover_leases=False, heartbeat_interval_seconds=0)
+    job = db_session.query(DesignProcessingJob).one()
+    assert result.deferred == 1 and result.analyzed == result.published == 0
+    assert job.status == "scheduled" and job.locked_by is None and job.execution_kind == "analysis"
+    assert not storage.objects and db_session.query(DesignProcessingArtifact).count() == 0
+
+
 def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
     db_session,
     golden,

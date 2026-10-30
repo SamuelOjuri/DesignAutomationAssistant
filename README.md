@@ -434,10 +434,17 @@ cleanup only targets recorded `delete_pending` artifacts.
 
 Operational mode and allowlist policy are re-evaluated at worker checkpoints
 and before every Monday side effect. `off` prevents new claims, `shadow`
-permits analysis only, `allowlist` permits publication only for configured item
-IDs, and `enabled` permits all in-scope publication. Run mode-transition
+permits analysis only, `allowlist` restricts analysis, CAD translation, rendering
+and publication to configured item IDs, and `enabled` permits all in-scope work.
+Existing jobs for other items stay pending; both workers filter before claiming
+so older unlisted jobs cannot delay the test item. An owned execution removed
+from the allowlist releases its lease at the next checkpoint. Run mode-transition
 reconciliation after changing mode or allowlist configuration so already
 analyzed identities can receive publication-only work.
+
+Repeated notifications preserve an already-queued job's earliest due time rather
+than postponing it behind newer arrivals. A newly available name/email can still
+wake a future readiness deadline.
 
 Worker, webhook, reconciliation, cleanup, and operator events are logged as
 canonical JSON after the `design_processing_event=` prefix. The `metrics`

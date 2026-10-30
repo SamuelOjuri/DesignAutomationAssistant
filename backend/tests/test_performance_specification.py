@@ -542,6 +542,67 @@ def test_shadow_mode_renders_without_monday_mutations_then_publishes_cached_resu
     assert len(case.calls) == 1
 
 
+def test_allowlist_holds_older_unlisted_specification_without_model_or_crm_calls(case, monkeypatch):
+    # Queue work while enabled, then isolate a different test item.
+    worker.enqueue_specification(case.db, BOARD, ITEM, immediate=True)
+    case.db.commit()
+    pending = current(case)
+    due, generation = pending.scheduled_for, pending.requested_generation
+    monkeypatch.setattr(settings, "design_processing_mode", "allowlist")
+    monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", ["3320074395"])
+    case.gateway.fetch_target = lambda *args: pytest.fail("Unlisted item read Monday")
+    assert worker.claim_specification(case.db) is None
+    assert worker.run_specifications_once(case.db, gateway=case.gateway, client=case.client, storage=case.storage) == []
+    case.db.refresh(pending)
+    assert pending.scheduled_for == due and pending.requested_generation == generation
+    assert pending.lease_token is None and not case.calls and not case.storage.objects
+
+
+def test_allowlisted_item_can_translate_and_publish(case, monkeypatch):
+    monkeypatch.setattr(settings, "design_processing_mode", "allowlist")
+    monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", [ITEM])
+    assert run(case) == ["published"]
+    assert len(case.calls) == len(case.gateway.uploads) == 1
+
+
+def test_specification_claim_filters_before_older_unlisted_work(case, monkeypatch):
+    case.db.add(DesignProcessingItem(id=uuid.uuid4(), board_id=BOARD, item_id="100", state="scheduled", warnings_json=[]))
+    case.db.commit()
+    other = worker.enqueue_specification(case.db, BOARD, "100", immediate=True)
+    other.scheduled_for = worker.utc_now() - timedelta(hours=1)
+    worker.enqueue_specification(case.db, BOARD, ITEM, immediate=True)
+    case.db.commit()
+    monkeypatch.setattr(settings, "design_processing_mode", "allowlist")
+    monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", [ITEM])
+    assert worker.claim_specification(case.db)[1] == ITEM
+    case.db.refresh(other)
+    assert other.lease_token is None and other.completed_generation == 0
+
+
+def test_specification_discovery_filters_before_limit(case, monkeypatch):
+    case.db.add(DesignProcessingItem(id=uuid.uuid4(), board_id=BOARD, item_id="100", state="scheduled", warnings_json=[]))
+    for item_id in ("100", ITEM):
+        case.db.add(Task(external_task_key=f"acct:{BOARD}:{item_id}", account_id="acct", board_id=BOARD,
+            item_id=item_id, auto_sync_state="active", auto_sync_enabled=True, source_group_id="topics", sync_status="completed"))
+    case.db.commit()
+    monkeypatch.setattr(settings, "design_processing_mode", "allowlist")
+    monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", [ITEM])
+    assert worker.discover_specifications(case.db, limit=1) == 1
+    assert current(case) is not None
+    assert case.db.get(PerformanceSpecification, (BOARD, "100")) is None
+
+
+def test_allowlist_change_after_claim_fences_translation(case, monkeypatch):
+    worker.enqueue_specification(case.db, BOARD, ITEM, immediate=True)
+    case.db.commit()
+    claim = worker.claim_specification(case.db)
+    monkeypatch.setattr(settings, "design_processing_mode", "allowlist")
+    monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", ["3320074395"])
+    case.gateway.fetch_target = lambda *args: pytest.fail("Unlisted claimed item read Monday")
+    assert worker.execute_specification(case.db, claim, gateway=case.gateway, client=case.client, storage=case.storage) == "superseded"
+    assert not case.calls and not case.gateway.uploads and current(case).scheduled_for is not None
+
+
 def test_expired_worker_is_fenced_from_publication(case):
     worker.enqueue_specification(case.db, BOARD, ITEM, immediate=True)
     case.db.commit()

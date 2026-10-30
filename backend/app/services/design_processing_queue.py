@@ -63,7 +63,9 @@ def execution_allowed_for_item(
     allowlist_item_ids: Iterable[str] = (),
 ) -> bool:
     if execution_kind == "analysis":
-        return mode != "off"
+        return mode in {"shadow", "enabled"} or (
+            mode == "allowlist" and str(item_id) in {str(value) for value in allowlist_item_ids}
+        )
     if execution_kind == "publication":
         return publication_allowed_for_item(
             mode=mode,
@@ -231,7 +233,12 @@ def _wake_unclaimed_job(
         return
     job.trigger_type = trigger_type
     job.status = "scheduled"
-    job.scheduled_for = now
+    # Repeated notifications must not move already-due work behind newer jobs.
+    # A newly available input can still wake a future readiness/retry deadline.
+    previous_due = job.scheduled_for
+    if previous_due is not None and previous_due.tzinfo is None:
+        previous_due = previous_due.replace(tzinfo=now.tzinfo)
+    job.scheduled_for = min(previous_due, now) if previous_due is not None else now
     job.next_retry_at = None
     job.locked_at = None
     job.locked_by = None
@@ -342,6 +349,14 @@ def queue_design_processing_snapshot(
             job=None,
             outcome="excluded",
             readiness=refreshed.readiness,
+        )
+
+    if not execution_allowed_for_item(
+        mode=mode, execution_kind="analysis", item_id=snapshot.item_id,
+        allowlist_item_ids=allowlist_item_ids,
+    ):
+        return DesignProcessingQueueResult(
+            item=stored_item, job=None, outcome="excluded", readiness="not_allowlisted",
         )
 
     item, created_item = upsert_design_processing_item(

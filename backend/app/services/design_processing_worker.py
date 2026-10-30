@@ -72,6 +72,7 @@ class DesignProcessingWorkerResult:
     readiness_wait: int = 0
     redundant: int = 0
     retry_wait: int = 0
+    deferred: int = 0
     failed: int = 0
     cancelled: int = 0
 
@@ -139,9 +140,13 @@ def claim_due_analysis_jobs(
     worker_id: str,
     limit: int = 1,
     now: Optional[datetime] = None,
+    mode: DesignProcessingMode = "enabled",
+    allowlist_item_ids: Iterable[str] = (),
 ) -> list[DesignProcessingJob]:
     if limit < 1:
         raise ValueError("limit must be at least 1")
+    if mode == "off":
+        return []
     claimed_at = now or utc_now()
     query = (
         db.query(DesignProcessingJob)
@@ -168,6 +173,7 @@ def claim_due_analysis_jobs(
             ),
             _analysis_or_readiness_filter(),
         )
+        .filter(DesignProcessingJob.item_id.in_([str(value) for value in allowlist_item_ids]) if mode == "allowlist" else True)
         .order_by(
             DesignProcessingJob.scheduled_for.asc(),
             DesignProcessingJob.created_at.asc(),
@@ -189,9 +195,13 @@ def claim_due_design_processing_jobs(
     worker_id: str,
     limit: int = 1,
     now: Optional[datetime] = None,
+    mode: DesignProcessingMode = "enabled",
+    allowlist_item_ids: Iterable[str] = (),
 ) -> list[DesignProcessingJob]:
     if limit < 1:
         raise ValueError("limit must be at least 1")
+    if mode == "off":
+        return []
     claimed_at = now or utc_now()
     query = (
         db.query(DesignProcessingJob)
@@ -210,6 +220,7 @@ def claim_due_design_processing_jobs(
                 ),
             ),
         )
+        .filter(DesignProcessingJob.item_id.in_([str(value) for value in allowlist_item_ids]) if mode == "allowlist" else True)
         .order_by(
             DesignProcessingJob.scheduled_for.asc(),
             DesignProcessingJob.created_at.asc(),
@@ -350,6 +361,16 @@ def _is_analysis_or_readiness_job(
     )
 
 
+def _defer_unlisted_execution(item, job, *, now):
+    """Release an owned/expired lease without dropping the saved execution."""
+    job.status = "scheduled"
+    job.locked_at = job.locked_by = job.heartbeat_at = None
+    job.next_retry_at = None
+    job.updated_at = now
+    item.state = "analyzed" if job.execution_kind == "publication" else "scheduled"
+    item.updated_at = now
+
+
 def _recover_locked_expired_job(
     db: Session,
     item: DesignProcessingItem,
@@ -368,6 +389,9 @@ def _recover_locked_expired_job(
         allowlist_item_ids=allowlist_item_ids,
     )
     if not execution_allowed:
+        if mode == "allowlist":
+            _defer_unlisted_execution(item, job, now=now)
+            return
         cancel_job(
             item,
             job,
@@ -552,6 +576,13 @@ def _cancel_or_replace_mismatched_job(
     if job.status != "running" or job.locked_by != worker_id:
         db.rollback()
         return "not_claimed"
+    if mode == "allowlist" and not execution_allowed_for_item(
+        mode=mode, execution_kind=job.execution_kind or "analysis", item_id=item.item_id,
+        allowlist_item_ids=settings.design_processing_allowlist_item_ids,
+    ):
+        _defer_unlisted_execution(item, job, now=now)
+        db.commit()
+        return "deferred"
     refreshed = refresh_current_target(
         item,
         gateway=gateway,
@@ -573,6 +604,10 @@ def _cancel_or_replace_mismatched_job(
         )
     )
     if not execution_allowed:
+        if mode == "allowlist":
+            _defer_unlisted_execution(item, job, now=now)
+            db.commit()
+            return "deferred"
         cancel_job(
             item,
             job,
@@ -770,6 +805,10 @@ def execute_claimed_analysis_job(
     publication_allowed = policy_allows("publication")
 
     if not policy_allows("analysis"):
+        if mode == "allowlist":
+            _defer_unlisted_execution(item, job, now=execution_now)
+            db.commit()
+            return "deferred"
         cancel_job(
             item,
             job,
@@ -1055,6 +1094,8 @@ def run_worker_once(
         db,
         worker_id=resolved_worker_id,
         limit=claim_limit,
+        mode=configured_mode,
+        allowlist_item_ids=settings.design_processing_allowlist_item_ids,
     )
     outcomes: dict[str, int] = {}
     for job in jobs:
@@ -1103,6 +1144,7 @@ def run_worker_once(
         readiness_wait=outcomes.get("readiness_wait", 0),
         redundant=outcomes.get("redundant", 0),
         retry_wait=outcomes.get("retry_wait", 0),
+        deferred=outcomes.get("deferred", 0),
         failed=outcomes.get("failed", 0),
         cancelled=outcomes.get("cancelled", 0),
     )

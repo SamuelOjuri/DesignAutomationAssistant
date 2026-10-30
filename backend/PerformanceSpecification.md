@@ -235,6 +235,10 @@ does not automatically include attachments on linked boards.
    refresh clears them. Then use the existing design-processing
    `allowlist` mode and `DESIGN_PROCESSING_ALLOWLIST_ITEM_IDS` to validate a few items
    before changing to `enabled`. These existing mode settings govern both workflows.
+   `allowlist` now restricts extraction, CAD translation, private rendering and
+   publication, rather than publication alone. Queued work outside the list remains
+   pending and is filtered before claims. Owned work removed from the allowlist is
+   fenced at checkpoints; already-sent external requests may finish.
 5. Subscribe holding field/link/lifecycle changes and linked project/drawing changes
    to the existing authenticated Monday webhook endpoint. Include project subitem
    creation, name/column changes, archive/delete and restoration events. Mirror-source
@@ -245,6 +249,42 @@ No credentials are stored in queue records. The publisher uses
 `MONDAY_INGESTION_ACCESS_TOKEN`, configured Gemini credentials, and private
 `DESIGN_PROCESSING_ARTIFACT_BUCKET` storage. It requires no CAD integration or public
 artifact URLs. Enabling this setting does not provision webhooks or start a process.
+
+For an isolated Render test of holding item `3320074395`, deploy the same updated
+commit to the API, design-processing worker, reconciliation service and specification
+worker. Configure their shared design settings consistently:
+
+```dotenv
+DESIGN_PROCESSING_MODE=allowlist
+DESIGN_PROCESSING_ALLOWLIST_ITEM_IDS=3320074395
+DESIGN_PROCESSING_WORKER_ENABLED=true
+PERFORMANCE_SPECIFICATION_ENABLED=true
+```
+
+This policy update needs no database migration or extraction-version bump. Ensure
+old worker instances have stopped; a worker on older code still uses its old claim
+policy. Other ingestion/search services keep their existing scope.
+
+In the deployed design-worker shell, run:
+
+```bash
+python -m backend.scripts.check_design_processing_gemini --live
+python -m backend.app.services.design_processing_reconciliation --item-id 3320074395
+```
+
+Leave the design and specification workers running. The first command is a synthetic
+provider check; the second queues or coalesces the item's extraction. When extraction
+is current, the specification workflow runs automatically. To request an immediate
+specification check after extraction finishes:
+
+```bash
+python -m backend.app.services.performance_specification --once --item-id 3320074395
+```
+
+Check the target's design job and `performance_specifications.last_error/review_json`.
+The database's total backlog still includes held unlisted jobs; in allowlist mode
+only listed items are eligible to be claimed. Changing to `enabled` makes the other
+pending jobs eligible again. Historical uploaded files are preserved during the test.
 
 The publisher polls its database every five seconds. Requests coalesce using the
 existing debounce setting; idle completed records are rechecked every

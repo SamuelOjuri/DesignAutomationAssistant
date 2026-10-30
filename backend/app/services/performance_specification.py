@@ -116,6 +116,8 @@ def discover_specifications(db, limit=100):
         DesignProcessingItem.board_id == str(settings.design_processing_board_id),
         Task.auto_sync_state == "active", Task.source_group_id.in_(active_specification_group_ids()),
         PerformanceSpecification.item_id.is_(None),
+    ).filter(DesignProcessingItem.item_id.in_(settings.design_processing_allowlist_item_ids)
+             if settings.design_processing_mode == "allowlist" else True
     ).order_by(DesignProcessingItem.item_id).limit(limit).all()
     for board_id, item_id in candidates:
         enqueue_specification(db, board_id, item_id, immediate=True)
@@ -124,10 +126,14 @@ def discover_specifications(db, limit=100):
 
 
 def claim_specification(db):
+    if not settings.performance_specification_enabled or settings.design_processing_mode == "off":
+        return None
     now = utc_now()
     query = db.query(PerformanceSpecification).filter(
         PerformanceSpecification.scheduled_for <= now,
         or_(PerformanceSpecification.lease_until.is_(None), PerformanceSpecification.lease_until <= now),
+    ).filter(PerformanceSpecification.item_id.in_(settings.design_processing_allowlist_item_ids)
+             if settings.design_processing_mode == "allowlist" else True
     ).order_by(PerformanceSpecification.scheduled_for, PerformanceSpecification.item_id)
     if db.get_bind().dialect.name == "postgresql":
         query = query.with_for_update(skip_locked=True)
@@ -155,6 +161,7 @@ def _check_claim(db, claim):
         raise SupersededSpecification("Specification refresh lease/generation changed")
     if not settings.performance_specification_enabled or not execution_allowed_for_item(
         mode=settings.design_processing_mode, execution_kind="analysis", item_id=item_id,
+        allowlist_item_ids=settings.design_processing_allowlist_item_ids,
     ):
         db.rollback()
         raise SupersededSpecification("Specification processing disabled")
