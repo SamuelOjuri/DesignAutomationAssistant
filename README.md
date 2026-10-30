@@ -1,5 +1,9 @@
 # Design Automation Assistant
 
+The additional active-project CAD handoff PDF, LLM translation, deployment settings,
+and refresh/recovery behaviour are documented in
+[PerformanceSpecification.md](backend/PerformanceSpecification.md).
+
 Task chat supports authenticated response streaming through a native Netlify Edge
 relay. Deployment order, timeout settings, and the protected 120-second transport
 probe are documented in [ChatStreaming.md](backend/ChatStreaming.md).
