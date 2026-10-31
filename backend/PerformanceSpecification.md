@@ -231,6 +231,35 @@ same numbered drawing series can supply a newer letter revision. An unrelated ro
 or ambiguous series requires review. With no requested reference, a sole active
 drawing can be selected. Candidate project-match scores do not select a project.
 
+A verified baseline TP/AX drawing reference may identify the existing drawing being
+amended when no requested reference is present. It passes the same source, excerpt,
+value, issuer and date checks as requested evidence. Distinct baseline references
+remain blocking even if their dates differ. This lookup does not promote historical
+materials, calculated U-values or revision fields into requested specifications;
+the selected drawing's current CRM fields retain the established precedence rules.
+The baseline citations are retained under `source_json.drawingSelection`.
+
+When a linked project has several drawings but the request has neither a requested
+TP reference nor a verified baseline identity, the publisher now produces a PDF
+with **Drawing Reference: Review required**. It uses verified email/attachment and
+holding-item values plus the linked project's title, and skips project specification
+rollups and all drawing-specific fields. Drawing Reference and Revision remain null
+when absent; manufacturer references such as `RLTF-002` are not treated as TP refs.
+`drawingSelection.status = unassigned` records the candidate drawing identities and
+`drawingItemId` stays null. A populated holding Drawing Reference participates in
+selection before drawing fields are read, so confirmation can resolve the review
+on a later refresh. A conflicting or unverified requested/baseline TP identity,
+an unmatched specified drawing among existing drawings, multiple linked projects,
+or an incomplete source read still blocks replacement.
+
+The October 31 two-email replay resolved `3312713363` through its verified baseline
+`TP18675_26.01 - C`. For `3315502554`, the email-only review path retained the Atrium
+request's `0.13` / `0.35` U-values and requester instead of importing another drawing's
+CRM specification. These are local source-resolution checks, not production uploads.
+Deploy the updated specification publisher; its existing retry schedule picks up
+these items. This change uses the retained `output-v15` evidence and requires no
+database migration, extraction rerun or environment-variable change.
+
 Holding Date Received and Accounts supply current enquiry date and Company. The
 linked project's `text3__1` supplies its current title. These mappings assume Accounts
 represents the company that should appear on the CAD drawing. Legacy drawing mirror
@@ -530,8 +559,9 @@ and can flag a title-block size for review; they never replace its stated paper 
 An ambiguous `ISO AB` is reviewable, not automatically converted to `ISO A3`.
 
 Fully read CRM material multi-selections publish a null CAD value and the alternatives
-as review details. Unreadable mirrors, ambiguous drawing selection, and unverified
-facts still prevent replacement. Verified dimensional limits, exclusions, allocations,
+as review details. Unreadable required mirrors, conflicting or unmatched specified
+drawing identities, and unverified facts still prevent replacement. Requests without
+a TP drawing identity can use the unassigned review path described above. Verified dimensional limits, exclusions, allocations,
 options and source-link excerpts appear after the 18 CAD fields under **Request
 constraints and context**. They remain review excerpts, including source/date context;
 external linked files are not downloaded or claimed to have been inspected. Notes
@@ -539,7 +569,7 @@ are stored in `source_json.requestNotes` and `translation_json.requestNotes` and
 `published_with_review`/`rendered_with_review` status even if all scalar fields resolve.
 
 ```powershell
-venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_specification_publication_hardening.py backend/tests/test_specification_recovery_regressions.py backend/tests/test_pdf_detail_views.py backend/tests/test_source_archives.py backend/tests/test_encrypted_pdf_sources.py -q
+venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_drawing_selection.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_specification_publication_hardening.py backend/tests/test_specification_recovery_regressions.py backend/tests/test_pdf_detail_views.py backend/tests/test_source_archives.py backend/tests/test_encrypted_pdf_sources.py -q
 ```
 
 Coverage includes LLM schema/semantic validation, optional values, exact PDF text

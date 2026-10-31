@@ -188,7 +188,7 @@ def _scope_key(value):
     return drawing_reference_key(value)
 
 
-def resolve_email_evidence(extraction, scopes=()):
+def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_references=False):
     if extraction.get("specificationEvidenceVersion") != EVIDENCE_VERSION:
         raise ValueError("Waiting for evidence-aware extraction")
     manifest = extraction.get("sourceManifest")
@@ -212,7 +212,11 @@ def resolve_email_evidence(extraction, scopes=()):
         def reject(reason):
             rejected[label].append({**evidence, "reason": reason})
 
-        if evidence["role"] != "requested":
+        baseline_reference = (
+            _include_baseline_references and label == "Drawing Reference" and evidence["role"] == "baseline"
+            and tp_reference_revision(evidence["value"], confirmed_crm=evidence["issuer"] == "TaperedPlus")
+        )
+        if evidence["role"] != "requested" and not baseline_reference:
             continue  # Non-request facts are retained in extraction, not published.
         source = sources.get(evidence["source_id"])
         if (source is None or source["status"] != "read"
@@ -327,3 +331,20 @@ def resolve_email_evidence(extraction, scopes=()):
             "rationale": "Most recent applicable request within the confirmed scope; common values may span roofs",
         }
     return raw, provenance, issues
+
+
+def resolve_baseline_drawing_identity(extraction):
+    """Verify an amendment's existing drawing identity, without promoting its specs.
+
+    Historical manufacturer/architect references are not TP drawing identities.
+    Every accepted baseline reference passes the normal citation, value, issuer
+    and date checks. Different references remain ambiguous even across dates:
+    chronology alone does not establish which existing drawing is being amended.
+    """
+    _, provenance, issues = resolve_email_evidence(extraction, _include_baseline_references=True)
+    reference = provenance["Drawing Reference"]
+    candidates = reference["candidates"]
+    reason = issues.get("Drawing Reference")
+    if len({drawing_reference_key(candidate["value"]) for candidate in candidates}) > 1:
+        reason = VALUE_CONFLICT
+    return candidates, reason

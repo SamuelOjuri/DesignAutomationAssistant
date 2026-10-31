@@ -11,7 +11,10 @@ from .. import monday_client
 from .design_processing_inputs import parse_design_processing_target
 from .legacy_enquiry.formatting import format_date_for_monday
 from .performance_specification_contract import FIELD_NAMES, missing
-from .performance_specification_evidence import PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT, resolve_email_evidence, resolve_request_notes
+from .performance_specification_evidence import (
+    PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
+    resolve_baseline_drawing_identity, resolve_email_evidence, resolve_request_notes,
+)
 from .specification_semantics import drawing_reference_key, tp_reference_revision
 
 
@@ -30,6 +33,10 @@ class SpecificationValueConflict(SpecificationSourceError):
 
 
 MULTI_MATERIAL = "Multiple CRM material selections require a scoped specification"
+UNASSIGNED_DRAWING = (
+    "No requested TaperedPlus drawing reference identifies a single linked drawing. "
+    "Confirm the drawing reference; drawing-specific CRM values have not been used"
+)
 
 
 class SpecificationReviewRequired(SpecificationSourceError):
@@ -307,6 +314,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
     dependencies = set()
     crm_reads = []
     selected_drawing = None
+    drawing_selection = None
 
     def snapshot():
         return {
@@ -318,6 +326,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
             "dependencies": [list(value) for value in sorted(dependencies)],
             "emailRevision": target.input_revision, "extractionPipeline": extraction["pipelineVersion"],
             "drawingItemId": str(selected_drawing["id"]) if selected_drawing else None,
+            **({"drawingSelection": drawing_selection} if drawing_selection else {}),
         }
 
     def require_review(label, reason):
@@ -334,8 +343,8 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
             provenance[label] = {**source, "status": "provided", "rationale": "Current populated CRM value takes precedence"}
             issues.pop(label, None)
 
-    def apply_columns(source_item, scope):
-        for label in FIELD_NAMES:
+    def apply_columns(source_item, scope, labels=FIELD_NAMES):
+        for label in labels:
             if label == "Incoming Information":
                 continue
             column = _find_column(source_item, label, scope)
@@ -379,10 +388,10 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
                 or str((project.get("board") or {}).get("id")) != str(settings.design_processing_project_board_id)
                 or project.get("state") != "active" or not isinstance(project.get("subitems"), list)):
             raise SpecificationSourceError("Linked project is incomplete or inactive")
-        apply_columns(project, "project")
-        title = next((col for col in _columns(project) if col["id"] == "text3__1"), None)
-        if title is not None:
-            apply("Drawing Title", _read_column(title, dependencies, gateway), project, title["id"])
+        # Resolve identity before reading project rollups or drawing-specific
+        # fields. An unassigned request must not inherit another roof's specs.
+        apply_columns(project, "project", ("Drawing Reference",))
+        apply_columns(holding, "holding", ("Drawing Reference",))
         drawings = []
         for drawing in project["subitems"]:
             board_id = (drawing.get("board") or {}).get("id")
@@ -393,20 +402,42 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
                 drawings.append(drawing)
         def reference(value):
             return drawing_reference_key(value)
-        requested = reference(raw.get("Drawing Reference"))
+        requested_value = raw.get("Drawing Reference")
+        if not requested_value:
+            if "Drawing Reference" in issues:
+                require_review("Drawing Reference", issues["Drawing Reference"])
+            identity_candidates, identity_issue = resolve_baseline_drawing_identity(extraction)
+            if identity_issue:
+                require_review("Drawing Reference", identity_issue)
+            if identity_candidates:
+                requested_value = identity_candidates[0]["value"]
+                drawing_selection = {
+                    "status": "baseline_reference", "reference": requested_value,
+                    "evidence": identity_candidates,
+                }
+        requested = reference(requested_value)
         matches = [drawing for drawing in drawings if requested and
                    reference(drawing.get("name")) == requested]
         if len(matches) == 1:
             selected_drawing = matches[0]
         elif len(drawings) == 1 and not requested:
             selected_drawing = drawings[0]
+        elif drawings and not requested:
+            drawing_selection = {
+                "status": "unassigned", "reason": UNASSIGNED_DRAWING,
+                "candidates": [
+                    {"boardId": str(drawing["board"]["id"]), "itemId": str(drawing["id"]),
+                     "reference": str(drawing.get("name") or "")}
+                    for drawing in sorted(drawings, key=lambda drawing: str(drawing["id"]))
+                ],
+            }
         elif drawings:
             # A newer letter revision of the same drawing may replace an archived
             # request. Never select a different numbered roof/drawing series.
             def series(name):
                 match = re.fullmatch(r"((?:(?:tp|ax)|d\.s-)?\d+_\d+\.\d+)-([a-z]+)", reference(name))
                 return (match[1].lower(), match[2].upper()) if match else None
-            wanted = series(raw.get("Drawing Reference"))
+            wanted = series(requested_value)
             same_series = []
             for drawing in drawings:
                 candidate = series(drawing.get("name"))
@@ -417,13 +448,21 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
                 selected_drawing = same_series[0]
             else:
                 require_review("Drawing Reference", "Requested drawing/roof is missing or ambiguous")
+        elif drawing_selection and drawing_selection["status"] == "baseline_reference":
+            require_review("Drawing Reference", "Requested drawing/roof is missing or ambiguous")
+        if drawing_selection is None or drawing_selection["status"] != "unassigned":
+            apply_columns(project, "project", tuple(label for label in FIELD_NAMES if label != "Drawing Reference"))
+        title = next((col for col in _columns(project) if col["id"] == "text3__1"), None)
+        if title is not None:
+            apply("Drawing Title", _read_column(title, dependencies, gateway), project, title["id"])
         if selected_drawing is not None:
             name = str(selected_drawing.get("name") or "")
             if tp_reference_revision(name, confirmed_crm=True):
                 apply("Drawing Reference", name, selected_drawing, "name")
             apply_columns(selected_drawing, "drawing")
 
-    apply_columns(holding, "holding")
+    apply_columns(holding, "holding", tuple(label for label in FIELD_NAMES if label != "Drawing Reference")
+                  if projects else FIELD_NAMES)
     accounts = _relation(columns["board_relation_mm3c4g5x"], dependencies)
     if len(accounts) > 1:
         require_review("Company", "Several Accounts exist; specification Company is ambiguous")
@@ -440,6 +479,9 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
             issues.pop(label, None)
             if label in scoped_issues:
                 issues[label] = scoped_issues[label]
+    if drawing_selection and drawing_selection["status"] == "unassigned":
+        issues["Drawing Reference"] = UNASSIGNED_DRAWING
+        provenance["Drawing Reference"]["status"] = "conflict"
     confirmed_reference = provenance["Drawing Reference"].get("source") == "Monday CRM" or any(
         e.get("issuer") == "TaperedPlus" for e in provenance["Drawing Reference"].get("candidates", [])
     )
@@ -473,6 +515,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
     # Unverified evidence and incomplete/ambiguous CRM reads still fail the refresh.
     publishable_conflicts = {
         VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT, PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, MULTI_MATERIAL,
+        UNASSIGNED_DRAWING,
         "Revision conflicts with the selected TaperedPlus drawing reference",
     }
     if any(reason not in publishable_conflicts

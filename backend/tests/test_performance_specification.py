@@ -742,14 +742,17 @@ def test_read_failure_preserves_last_successful_pdf_and_retries(case):
     assert not case.gateway.deletes
 
 
-def test_unavailable_or_ambiguous_linked_project_is_not_silently_merged(case):
+def test_request_without_drawing_reference_does_not_merge_linked_drawings(case):
     extra = deepcopy(case.gateway.project["subitems"][0])
     extra.update(id="9102", name="TP00901_26.02 - A")
     case.gateway.project["subitems"].append(extra)
     case.item.extracted_parameters_json["performanceParameters"]["Drawing Reference"] = None
     case.item.extracted_parameters_json = with_evidence(case.item.extracted_parameters_json)
-    with pytest.raises(SpecificationSourceError, match="ambiguous"):
-        resolve_specification_sources(case.gateway, case.item)
+    source = resolve_specification_sources(case.gateway, case.item)
+    assert source["drawingItemId"] is None
+    assert source["drawingSelection"]["status"] == "unassigned"
+    assert "Drawing Reference" in source["issues"]
+    assert source["raw"]["Target U Value"] == "0.18"
 
 
 def test_schema_valid_translation_cannot_publish_after_sources_change(case):
