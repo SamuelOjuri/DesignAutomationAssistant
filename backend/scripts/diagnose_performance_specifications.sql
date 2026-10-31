@@ -1,6 +1,8 @@
 -- Read-only diagnostics for the performance-specification publication test.
 -- Pipeline identities must match in full, not only their output-vN suffix.
 -- Stored extraction readiness cannot verify the current Monday email revision.
+-- Artifact source identities describe the retained PDF, not the latest extraction.
+-- Missing artifact source identities cannot establish freshness.
 -- checked_at is the last successful specification completion, not the last attempt.
 -- Generations count refresh notifications, not separate queued jobs or PDFs.
 -- The lease expiry below assumes the worker's default 3600-second timeout.
@@ -15,6 +17,7 @@ SELECT
     CURRENT_TIMESTAMP AS observed_at,
     t.item_id,
     i.state AS design_state,
+    s.review_json->'source' AS review_source,
     i.latest_desired_input_revision,
     i.latest_analyzed_input_revision,
     i.latest_desired_pipeline_version,
@@ -60,7 +63,11 @@ SELECT
     s.review_json->>'status' AS review_status,
     s.review_json->'issues' AS review_issues,
     s.last_error AS specification_last_error,
+    s.current_revision,
     a.status AS current_artifact_status,
+    a.model_version AS artifact_model_version,
+    a.source_json->>'emailRevision' AS artifact_email_revision,
+    a.source_json->>'extractionPipeline' AS artifact_extraction_pipeline,
     a.filename,
     a.monday_asset_id,
     artifacts.artifact_count,

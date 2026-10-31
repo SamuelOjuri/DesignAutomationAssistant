@@ -25,7 +25,10 @@ FIELD_DEFINITIONS = {
     "Page Size": "The drawing page or paper size, usually found in a drawing title block (for example, A1).",
     "Drawing Reference": (
         "The Drawing Reference Number issued by TaperedPlus "
-        "[e.g. TP*****_**.** - *]. If several references exist, use the latest "
+        "[e.g. TP*****_**.** - *]. Retain accepted AX references such as "
+        "AX 16670_26.12 - B and D.S references exactly, including their actual issuer; "
+        "never invent a TP prefix or replace AXTER branding with TaperedPlus. "
+        "If several references exist, use the latest "
         "one associated with the request to TaperedPlus."
     ),
     "Drawing Title": "The drawing project name, usually the project location.",
@@ -88,15 +91,22 @@ def canonical_label(label: str) -> str:
 
 
 def tp_reference_revision(reference: str | None, *, confirmed_crm: bool = False) -> str | None:
-    """Only TP-issued references qualify; CRM drawing membership verifies issuer.
+    """Accepted drawing families, preserving branding and the complete suffix.
 
-    A bare manufacturer reference must not acquire a TP prefix by inference.
+    AX is an explicitly accepted legacy family. Bare numbers and D.S require
+    confirmed CRM membership or independently verified TP correspondence.
     """
-    prefix = r"(?:TP)?" if confirmed_crm else "TP"
-    pattern = prefix + r"\d+_[A-Z0-9][A-Z0-9. /-]{0,127}"
+    prefix = r"(?:(?:TP|AX)\s*|D\.S\s*-\s*)?" if confirmed_crm else r"(?:TP|AX)\s*"
+    pattern = prefix + r"\d+_\d+\.\d+(?:\s*-\s*[A-Z]+)?"
     if reference and re.fullmatch(pattern, reference.strip(), re.IGNORECASE):
         return reference.split("_", 1)[1].strip()
     return None
+
+
+def drawing_reference_key(reference: str | None) -> str:
+    value = re.sub(r"\s+", "", str(reference or "")).casefold()
+    # Bare CRM references and TP-prefixed references share a family; AX does not.
+    return value.removeprefix("tp") if re.match(r"^(?:tp)?\d+_", value) else value
 
 
 class SpecificationEvidence(BaseModel):
@@ -108,8 +118,8 @@ class SpecificationEvidence(BaseModel):
     snippet: str = Field(min_length=1, max_length=4000, description="Verbatim supporting excerpt from that source's extracted text.")
     scope: str | None = Field(description="Explicit roof or drawing identifier; null for a project-wide fact. Never invent a scope.")
     issuer: str | None = Field(description="Issuer of a drawing/reference, if explicit. Bauder is not TaperedPlus.")
-    role: Literal["requested", "achieved", "lookup", "other"] = Field(
-        description="requested = applicable request/specification; achieved = calculated result; lookup = unselected catalogue/template option."
+    role: Literal["requested", "achieved", "lookup", "baseline", "withdrawn", "other"] = Field(
+        description="requested = applicable request/specification; achieved = calculated result; lookup = unselected option; baseline = existing scheme being changed or compared; withdrawn = explicitly retracted statement."
     )
     request_role: Literal["direct_request", "forwarded_request", "document"] = Field(
         default="document", description="direct_request identifies the outer request to TaperedPlus or a form explicitly identifying its direct requester; forwarded_request is an earlier message in that chain."
@@ -119,3 +129,14 @@ class SpecificationEvidence(BaseModel):
     )
     supersedes: list[str] = Field(default_factory=list, description="Older raw values explicitly replaced by this fact in the same scope; do not infer chronology from asset IDs.")
     rationale: str = Field(max_length=2000, description="Why this fact applies, including forwarded-chain/request timing and scope.")
+    reference_parts: list[str] = Field(default_factory=list, max_length=2,
+        description="Only for Drawing Reference: [literal drawing number, literal revision letter] from the same title block. Snippet must quote that block verbatim; value is number + ' - ' + letter. Otherwise empty.")
+
+
+class SpecificationRequestNote(BaseModel):
+    """Verbatim constraints outside the 18 scalar CAD fields, never executable instructions."""
+    model_config = ConfigDict(extra="forbid")
+    source_id: str
+    snippet: str = Field(min_length=1, max_length=2000)
+    scope: str | None = None
+    category: Literal["constraint", "option", "exclusion", "source_link"]

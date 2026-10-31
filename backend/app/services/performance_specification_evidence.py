@@ -9,12 +9,18 @@ from zoneinfo import ZoneInfo
 
 from dateutil.parser import parse as parse_datetime
 
-from .specification_semantics import COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, SpecificationEvidence, tp_reference_revision
-from .performance_specification_contract import FIELD_NAMES, missing
+from .specification_semantics import (
+    COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, FIELD_DEFINITIONS, SpecificationEvidence,
+    SpecificationRequestNote, drawing_reference_key, missing, tp_reference_revision,
+)
+
+FIELD_NAMES = tuple(FIELD_DEFINITIONS)
 
 
 VALUE_CONFLICT = "Conflicting roof/drawing/request values require a confirmed target"
 UNDATED_SCOPE_CONFLICT = "Undated project-wide value conflicts with the selected roof"
+PAGE_SIZE_CONFLICT = "Title-block paper size differs from the PDF page dimensions; confirm the intended drawing size"
+PAGE_SIZE_UNCERTAIN = "Ambiguous title-block paper size requires confirmation"
 
 
 def _normal(value):
@@ -25,7 +31,9 @@ def _excerpt_normal(value):
     # PDF text readers may add Markdown emphasis/code around labels or cells.
     # Ignore only paired presentation markers, preserving numbers, punctuation,
     # table separators and word order. Never join excerpts across an ellipsis.
-    text = re.sub(r"\*\*([^*\n]+)\*\*|`([^`\n]+)`", lambda m: m[1] or m[2], str(value or ""))
+    text = re.sub(r"\\([*`])", r"\1", str(value or ""))
+    text = re.sub(r"(?<!\*)\*\*([^*\n]+)\*\*(?!\*)|`([^`\n]+)`", lambda m: m[1] or m[2], text)
+    text = re.sub(r"(?<=\d)\s*:\s*(?=\d)", ":", text)
     return _normal(text)
 
 
@@ -45,6 +53,58 @@ def _candidate_key(evidence):
     return tuple(evidence.get(key) if key == "source_id" else _normal(evidence.get(key)) for key in (
         "field", "value", "source_id", "scope", "issuer", "role", "request_role", "message_date",
     ))
+
+
+def _value_supported(evidence):
+    value, snippet = evidence["value"], evidence["snippet"]
+    if evidence.get("reference_parts"):
+        parts = evidence["reference_parts"]
+        return (evidence["field"] == "Drawing Reference" and len(parts) == 2
+                and re.fullmatch(r"[A-Z]+", parts[1], re.IGNORECASE) is not None
+                and tp_reference_revision(parts[0], confirmed_crm=True) is not None
+                and _normal(value) == _normal(parts[0] + " - " + parts[1])
+                and all(_contains_excerpt(part, snippet) for part in parts)
+                and len(set(re.findall(r"\d+_\d+\.\d+", snippet))) == 1
+                and len(re.findall(r"\brev(?:ision)?[\s:|=.-]*[A-Z]+(?!\w)",
+                                   _excerpt_normal(snippet), re.IGNORECASE)) == 1
+                and re.search(r"\b(?:rev(?:ision)?)[\s:|=.-]*" + re.escape(parts[1]) + r"(?!\w)",
+                              _excerpt_normal(snippet), re.IGNORECASE) is not None)
+    if evidence["field"] == "Revision":
+        # A suffix follows '_' inside an identifier, where a word-boundary
+        # substring check would otherwise reject a perfectly literal revision.
+        for match in re.finditer(r"(?<!\w)(?:(?:TP|AX)\s*|D\.S\s*-\s*)?\d+_\d+\.\d+(?:\s*-\s*[A-Z]+)?(?!\w)", snippet, re.IGNORECASE):
+            if _normal(tp_reference_revision(match[0], confirmed_crm=True)) == _normal(value):
+                return True
+    return evidence["field"] == "Date Received" or _contains_excerpt(value, snippet)
+
+
+def _equivalent_description(shorter, longer):
+    """Only duplicate descriptions of the SAME source passage, scope and request.
+
+    This is not a product alias map. Both values must already be literal and the
+    shorter description must occur as complete words inside the longer one.
+    """
+    return (shorter["field"] in {"Membrane", "VCL", "Tapered Insulation"}
+            and all(shorter.get(k) == longer.get(k) for k in
+                    ("source_id", "scope", "role", "request_role", "message_date", "issuer"))
+            and _excerpt_normal(shorter["snippet"]) == _excerpt_normal(longer["snippet"])
+            and _contains_excerpt(shorter["value"], longer["value"]))
+
+
+def resolve_request_notes(extraction):
+    sources = {entry["sourceId"]: entry for entry in extraction.get("sourceManifest", [])}
+    notes = []
+    for value in extraction.get("specificationRequestNotes") or []:
+        note = SpecificationRequestNote.model_validate(value).model_dump()
+        source = sources.get(note["source_id"])
+        if not source or source["status"] != "read" or not _contains_excerpt(note["snippet"], source["text"]):
+            raise ValueError("Request note has an unverified source/excerpt")
+        if note["scope"] and not _contains_excerpt(note["scope"], source["text"]):
+            raise ValueError("Request note has an unverified roof scope")
+        note.update(filename=source["filename"], contentSha256=source["contentSha256"], observedAt=source.get("observedAt"))
+        if note not in notes:
+            notes.append(note)
+    return notes
 
 
 def _has_parent_request_date(evidence, source, sources):
@@ -68,12 +128,12 @@ def _scope_key(value):
     value = _normal(value)
     value = re.sub(r"^(?:bauder\s+)?roof\s*(?:num(?:ber)?\s*)?[:#-]?\s*", "", value)
     value = re.sub(r"\s+", "", value)
-    return value.removeprefix("tp") if re.match(r"^(?:tp)?\d+_", value) else value
+    return drawing_reference_key(value)
 
 
 def resolve_email_evidence(extraction, scopes=()):
     if extraction.get("specificationEvidenceVersion") != EVIDENCE_VERSION:
-        raise ValueError("Waiting for evidence-aware extraction (output-v9)")
+        raise ValueError("Waiting for evidence-aware extraction")
     manifest = extraction.get("sourceManifest")
     if not isinstance(manifest, list) or any(
         not isinstance(source, dict) or source.get("status") not in COMPLETE_SOURCE_STATUSES
@@ -95,13 +155,13 @@ def resolve_email_evidence(extraction, scopes=()):
         def reject(reason):
             rejected[label].append({**evidence, "reason": reason})
 
+        if evidence["role"] != "requested":
+            continue  # Non-request facts are retained in extraction, not published.
         source = sources.get(evidence["source_id"])
         if (source is None or source["status"] != "read"
                 or not _contains_excerpt(evidence["snippet"], source["text"])):
             reject("Supporting source/excerpt could not be verified")
             continue
-        if evidence["role"] != "requested":
-            continue  # Achieved figures and unselected lookup options are not requests.
         if label in {"Bauder Roof Num", "Date Received"} and source["sourceType"] != "email_body":
             reject("Evidence does not meet this field's required email/request scope")
             continue
@@ -113,7 +173,14 @@ def resolve_email_evidence(extraction, scopes=()):
                     or not tp_reference_revision(evidence["value"], confirmed_crm=True)):
                 reject("Drawing Reference is not verified as TaperedPlus-issued")
                 continue
-        if label != "Date Received" and not _contains_excerpt(evidence["value"], evidence["snippet"]):
+        if (label == "Drawing Reference" and evidence["issuer"]
+                and not _contains_excerpt(evidence["issuer"], evidence["snippet"])
+                and not (evidence["issuer"] == "TaperedPlus" and (
+                    re.match(r"TP\s*\d", evidence["value"], re.IGNORECASE)
+                    or re.search(r"Tapered\s*Plus", evidence["snippet"], re.IGNORECASE)))):
+            reject("Drawing issuer is absent from the supporting excerpt")
+            continue
+        if not _value_supported(evidence):
             reject("Raw value is absent from the supporting excerpt")
             continue
         observed_at = source.get("observedAt")
@@ -132,6 +199,12 @@ def resolve_email_evidence(extraction, scopes=()):
                 continue
         candidates[label].append({**evidence, "observedAt": observed_at,
                                   "filename": source["filename"], "contentSha256": source["contentSha256"]})
+        if label == "Page Size" and re.fullmatch(r"(?:ISO\s*)?[ABC][A-Z]", evidence["value"].strip(), re.IGNORECASE):
+            issues[label] = PAGE_SIZE_UNCERTAIN
+        if label == "Page Size" and source.get("pdfPageSizes"):
+            size = re.fullmatch(r"(?:ISO\s*)?(A[0-6])", evidence["value"].strip(), re.IGNORECASE)
+            if size and size[1].upper() not in source["pdfPageSizes"]:
+                issues[label] = PAGE_SIZE_CONFLICT
 
     for label, failures in rejected.items():
         verified = {_candidate_key(evidence) for evidence in candidates[label]}
@@ -179,7 +252,10 @@ def resolve_email_evidence(extraction, scopes=()):
                 newest = max(times)
                 scoped = [e for e in scoped if e["observedAt"] == newest]
             current.extend(scoped)
-        distinct = {_normal(e["value"]) for e in current}
+        current = [e for e in current if not any(
+            _normal(e["value"]) != _normal(other["value"]) and _equivalent_description(e, other)
+            for other in current)]
+        distinct = {_excerpt_normal(e["value"]) for e in current}
         if len(distinct) > 1:
             issues[label] = VALUE_CONFLICT
         selected = current[0] if len(distinct) == 1 else None

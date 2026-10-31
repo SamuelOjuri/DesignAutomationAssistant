@@ -319,7 +319,7 @@ def test_extraction_process_returns_result_and_rechecks_eligibility():
 def _offline_generate(model, contents, config):
     if config.response_mime_type == "application/json":
         from backend.app.services.specification_semantics import FIELD_DEFINITIONS
-        payload = {name: None for name in DesignParameterExtraction.model_fields}
+        payload = {name: None for name in DesignParameterExtraction.model_fields if not name.startswith("specification_")}
         payload.update(specification_evidence=[], specification_assessed_fields=list(FIELD_DEFINITIONS))
         return SimpleNamespace(text=json.dumps(payload))
     return SimpleNamespace(text="Test Roof")

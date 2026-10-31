@@ -17,7 +17,7 @@ from .gemini_requests import GeminiJSONRequester
 from .specification_semantics import FIELD_DEFINITIONS, SpecificationField, missing
 
 
-SPECIFICATION_VERSION = "performance-specification-v3"
+SPECIFICATION_VERSION = "performance-specification-v4"
 NOT_PROVIDED = "Not Provided"
 FIELD_NAMES = (
     "Scale", "Page Size", "Drawing Reference", "Drawing Title",
@@ -108,6 +108,7 @@ class SpecificationPublication(CADTranslation):
     """Application-authored review notes, separate from the model's CAD schema."""
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     field_reviews: dict[SpecificationField, str] = Field(default_factory=dict, alias="fieldReviews")
+    request_notes: list[str] = Field(default_factory=list, alias="requestNotes", max_length=64)
 
     @model_validator(mode="after")
     def validate_reviews(self):
@@ -272,6 +273,11 @@ def prepare_specification_publication(source, client) -> SpecificationPublicatio
             reviews[label] = f"Translation unresolved for requested value '{value}'. {reason}"
     return SpecificationPublication.model_validate({
         **translated.model_dump(by_alias=True), "fieldReviews": reviews,
+        "requestNotes": [
+            (f"{note['scope']}: " if note.get("scope") else "") + note["snippet"]
+            + f" (Source: {note['filename']}" + (f"; {note['observedAt']}" if note.get("observedAt") else "") + ")"
+            for note in source.get("requestNotes", [])
+        ],
     })
 
 

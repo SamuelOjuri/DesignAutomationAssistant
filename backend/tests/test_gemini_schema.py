@@ -39,9 +39,10 @@ def test_extraction_wire_schema_keeps_field_meanings_and_local_evidence_limits()
     assert "maxItems" not in wire["properties"]["specification_evidence"]
     assert "maxItems" not in wire["properties"]["specification_assessed_fields"]
     assert wire["properties"]["revision"] == original["properties"]["revision"]
-    assert wire["$defs"]["SpecificationEvidence"] == original["$defs"]["SpecificationEvidence"]
+    assert wire["$defs"]["SpecificationEvidence"]["properties"]["role"] == original["$defs"]["SpecificationEvidence"]["properties"]["role"]
+    assert "maxItems" not in wire["$defs"]["SpecificationEvidence"]["properties"]["reference_parts"]
     data = {name: None for name in DesignParameterExtraction.model_fields
-            if name not in {"specification_evidence", "specification_assessed_fields"}}
+            if not name.startswith("specification_")}
     data["specification_assessed_fields"] = ["Scale"] * 19
     with pytest.raises(ValidationError):
         DesignParameterExtraction.model_validate(data)

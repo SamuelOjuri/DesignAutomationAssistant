@@ -167,6 +167,8 @@ def _extraction_payload(
         "performanceParameters": result.performance_parameters,
         "specificationEvidenceVersion": 2,
         "specificationEvidence": list(result.specification_evidence),
+        "specificationRequestNotes": list(result.specification_request_notes),
+        "specificationEvidenceRepairs": list(result.specification_evidence_repairs),
         "specificationAssessedFields": list(result.specification_assessed_fields),
         "sourceManifest": list(result.source_manifest),
         "sources": result.sources,

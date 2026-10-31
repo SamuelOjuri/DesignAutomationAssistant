@@ -223,7 +223,7 @@ def _finish(db, claim, source, publication, *, revision=None):
         "status": "published_with_review" if revision is not None else "rendered_with_review",
         "source": source, "issues": publication.field_reviews,
         "translation": publication.model_dump(by_alias=True),
-    } if publication.field_reviews else None
+    } if publication.field_reviews or publication.request_notes else None
     if revision is not None:
         record.current_revision = revision
     _replace_dependencies(db, record, source)

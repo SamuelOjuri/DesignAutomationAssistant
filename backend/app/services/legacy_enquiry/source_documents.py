@@ -97,6 +97,10 @@ class _HTMLText(HTMLParser):
             self.hidden += 1
         if tag in {"br", "p", "div", "tr", "blockquote", "hr"}:
             self.parts.append("\n")
+        if tag == "img" and not self.hidden:
+            source = dict(attrs).get("src") or ""
+            if source.lower().startswith("cid:"):
+                self.parts.append(f" [Image: {source}] ")
 
     def handle_endtag(self, tag):
         if tag in {"script", "style"}:
@@ -203,6 +207,19 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
                 if _archive_budget.text_chars > MAX_CONTEXT_CHARS:
                     raise SourceDocumentError("archive_text_limit", "ZIP document text exceeds the extraction context limit; split the archive.")
             record["text"] = text
+            if Path(filename).suffix.lower() == ".pdf":
+                # Independent physical metadata catches OCR confusions such as
+                # ISO AB -> ISO A3. It flags review; it never overwrites a title block.
+                with PdfReader(io.BytesIO(content)) as reader:
+                    dimensions = [sorted(round(float(edge) * float(page.get('/UserUnit', 1)) * 25.4 / 72, 1)
+                                         for edge in (page.mediabox.width, page.mediabox.height))
+                                  for page in reader.pages]
+                sizes = {"A0": (841, 1189), "A1": (594, 841), "A2": (420, 594),
+                         "A3": (297, 420), "A4": (210, 297), "A5": (148, 210), "A6": (105, 148)}
+                record["pdfPageDimensionsMm"] = dimensions
+                record["pdfPageSizes"] = sorted({next((name for name, edges in sizes.items()
+                    if all(abs(actual - expected) <= 3 for actual, expected in zip(pair, edges))), "Custom")
+                    for pair in dimensions})
     except AnimatedImageSkipped:
         record["status"] = ANIMATED_IMAGE_SKIP_STATUS
     except DwgSkipped:

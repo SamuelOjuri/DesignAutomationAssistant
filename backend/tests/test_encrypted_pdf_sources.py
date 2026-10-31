@@ -91,7 +91,7 @@ def test_encrypted_sources_allow_analysis_and_publication_evidence_from_readable
 
     parameters = DesignParameterExtraction(**{
         name: None for name in DesignParameterExtraction.model_fields
-        if name not in {"specification_evidence", "specification_assessed_fields"}
+        if not name.startswith("specification_")
     })
     result = analyze_downloaded_email_assets(downloaded, client=SimpleNamespace(
         process_pdf=process_pdf,

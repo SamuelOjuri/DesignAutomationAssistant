@@ -27,7 +27,7 @@ from backend.tests.pdf_helpers import pdf_bytes
 
 def parameters():
     return DesignParameterExtraction(**{name: None for name in DesignParameterExtraction.model_fields
-                                       if name not in {"specification_evidence", "specification_assessed_fields"}})
+                                       if not name.startswith("specification_")})
 
 
 def image_bytes(format_name, *, animated):

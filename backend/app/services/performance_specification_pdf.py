@@ -1,4 +1,4 @@
-"""Selectable-text PDF containing exactly the CAD handoff's 18 ordered fields."""
+"""Selectable-text PDF with 18 ordered CAD fields and separate request notes."""
 
 from functools import partial
 import io
@@ -52,6 +52,14 @@ def render_performance_specification_pdf(
     for label in FIELD_NAMES:
         story.append(Paragraph(f"{escape(label)}: {escape(values[label])}", review if label in reviews else body))
         story.append(Spacer(1, 2))
+    if isinstance(translation, SpecificationPublication) and translation.request_notes:
+        note_heading = ParagraphStyle("RequestNotesTitle", parent=heading, fontSize=13, leading=18,
+                                      spaceBefore=14, spaceAfter=10, keepWithNext=True)
+        story.append(Paragraph("Request constraints and context", note_heading))
+        story.append(Paragraph("Source excerpts for design review. Confirm scope and any superseded "
+                               "instructions before use. External linked documents are not verified by these excerpts.", body))
+        for note in translation.request_notes:
+            story.append(Paragraph(escape(note), review))
 
     def footer(canvas, doc):
         canvas.saveState()

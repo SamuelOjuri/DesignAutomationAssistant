@@ -11,8 +11,8 @@ from .. import monday_client
 from .design_processing_inputs import parse_design_processing_target
 from .legacy_enquiry.formatting import format_date_for_monday
 from .performance_specification_contract import FIELD_NAMES, missing
-from .performance_specification_evidence import UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT, resolve_email_evidence
-from .specification_semantics import tp_reference_revision
+from .performance_specification_evidence import PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT, resolve_email_evidence, resolve_request_notes
+from .specification_semantics import drawing_reference_key, tp_reference_revision
 
 
 class SpecificationSourceError(ValueError):
@@ -24,7 +24,12 @@ class SpecificationIneligible(SpecificationSourceError):
 
 
 class SpecificationValueConflict(SpecificationSourceError):
-    pass
+    def __init__(self, message, *, values=None):
+        super().__init__(message)
+        self.values = values
+
+
+MULTI_MATERIAL = "Multiple CRM material selections require a scoped specification"
 
 
 class SpecificationReviewRequired(SpecificationSourceError):
@@ -205,11 +210,11 @@ def _typed_value(value, dependencies, gateway=None):
         return _clean(linked[0]["name"]) if linked else None
     if "values" in value:
         options = value["values"]
-        if not isinstance(options, list) or any(not isinstance(x.get("label"), str) for x in options):
+        if not isinstance(options, list) or any(not isinstance(x, dict) or not isinstance(x.get("label"), str) or not x["label"].strip() for x in options):
             raise SpecificationSourceError("Unreadable dropdown specification value")
         labels = {x["label"] for x in options}
         if len(labels) > 1:
-            raise SpecificationValueConflict("A specification field has multiple dropdown selections")
+            raise SpecificationValueConflict("A specification field has multiple dropdown selections", values=sorted(labels))
         return _clean(next(iter(labels))) if labels else None
     for key in ("date", "number", "label", "text"):
         if key in value:
@@ -225,12 +230,23 @@ def _read_column(col, dependencies, gateway=None):
         if not entries and col.get("display_value"):
             raise SpecificationSourceError("Mirrored specification sources have not resolved")
         values = set()
+        multiple = False
         for entry in entries:
             linked = entry.get("linked_item") or {}
             if not linked.get("id") or not (linked.get("board") or {}).get("id"):
                 raise SpecificationSourceError("Incomplete mirrored specification identity")
             dependencies.add((str(linked["board"]["id"]), str(linked["id"])))
-            values.add(_typed_value(entry.get("mirrored_value") or {}, dependencies, gateway))
+            try:
+                values.add(_typed_value(entry.get("mirrored_value") or {}, dependencies, gateway))
+            except SpecificationValueConflict as exc:
+                if exc.values is None:
+                    raise
+                multiple = True
+                values.update(exc.values)
+        if multiple:
+            if None in values:
+                raise SpecificationSourceError("Some mirrored material selections are unresolved")
+            raise SpecificationValueConflict("Multiple mirrored material selections", values=sorted(values))
         if len(values) > 1:
             raise SpecificationValueConflict("Conflicting mirrored specification values")
         return next(iter(values)) if values else None
@@ -273,6 +289,8 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
             or target.item_state != "active" or target.group_id not in active_specification_group_ids()):
         raise SpecificationIneligible("Specification item is outside the active groups")
     extraction = item.extracted_parameters_json or {}
+    if extraction.get("pipelineVersion") != settings.design_processing_pipeline_version:
+        raise SpecificationSourceError("Waiting for extraction from the current configured pipeline")
     if (not target.input_revision or extraction.get("inputRevision") != target.input_revision
             or item.latest_analyzed_input_revision != item.latest_desired_input_revision
             or item.latest_analyzed_pipeline_version != item.latest_desired_pipeline_version
@@ -283,6 +301,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
         raise SpecificationSourceError("Waiting for evidence-aware email extraction (output-v9)")
     try:
         raw, provenance, issues = resolve_email_evidence(extraction)
+        request_notes = resolve_request_notes(extraction)
     except ValueError as exc:
         raise SpecificationSourceError(str(exc)) from exc
     dependencies = set()
@@ -293,6 +312,8 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
         return {
             "raw": raw, "sources": provenance, "crmReads": crm_reads,
             "sourceManifest": extraction["sourceManifest"],
+            "requestNotes": request_notes,
+            "evidenceRepairs": extraction.get("specificationEvidenceRepairs", []),
             "evidenceVersion": extraction["specificationEvidenceVersion"], "issues": issues,
             "dependencies": [list(value) for value in sorted(dependencies)],
             "emailRevision": target.input_revision, "extractionPipeline": extraction["pipelineVersion"],
@@ -322,7 +343,17 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
                 try:
                     value = _read_column(column, dependencies, gateway)
                 except SpecificationValueConflict as exc:
-                    require_review(label, str(exc))
+                    if exc.values is None or label not in {"Tapered Insulation", "Membrane", "VCL", "Decking"}:
+                        require_review(label, str(exc))
+                    source = {"source": "Monday CRM", "boardId": str(source_item["board"]["id"]),
+                              "itemId": str(source_item["id"]), "columnId": column["id"]}
+                    raw[label] = None
+                    issues[label] = MULTI_MATERIAL
+                    provenance[label] = {**source, "status": "conflict",
+                        "candidates": [{"value": value, "scope": None} for value in exc.values],
+                        "columnValue": {key: val for key, val in column.items() if key not in {"value", "display_value"}}}
+                    crm_reads.append({**source, "field": label, "values": exc.values, "status": "conflict"})
+                    continue
                 apply(label, value, source_item, column["id"])
                 if value is not None:
                     provenance[label]["columnValue"] = {key: value for key, value in column.items()
@@ -361,7 +392,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
             if drawing["state"] == "active":
                 drawings.append(drawing)
         def reference(value):
-            return re.sub(r"\s+", "", str(value or "")).lower().removeprefix("tp")
+            return drawing_reference_key(value)
         requested = reference(raw.get("Drawing Reference"))
         matches = [drawing for drawing in drawings if requested and
                    reference(drawing.get("name")) == requested]
@@ -373,7 +404,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
             # A newer letter revision of the same drawing may replace an archived
             # request. Never select a different numbered roof/drawing series.
             def series(name):
-                match = re.fullmatch(r"(?:TP)?(\d+_\d+\.\d+)\s*-\s*([A-Z]+)", str(name).strip(), re.IGNORECASE)
+                match = re.fullmatch(r"((?:(?:tp|ax)|d\.s-)?\d+_\d+\.\d+)-([a-z]+)", reference(name))
                 return (match[1].lower(), match[2].upper()) if match else None
             wanted = series(raw.get("Drawing Reference"))
             same_series = []
@@ -388,7 +419,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
                 require_review("Drawing Reference", "Requested drawing/roof is missing or ambiguous")
         if selected_drawing is not None:
             name = str(selected_drawing.get("name") or "")
-            if re.match(r"^(?:TP)?\d+_", name, re.IGNORECASE):
+            if tp_reference_revision(name, confirmed_crm=True):
                 apply("Drawing Reference", name, selected_drawing, "name")
             apply_columns(selected_drawing, "drawing")
 
@@ -416,6 +447,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
     if raw.get("Drawing Reference") and suffix is None:
         issues["Drawing Reference"] = "Reference is not a verified TaperedPlus drawing"
     if suffix:
+        rejected_revisions = provenance["Revision"].get("rejectedCandidates", [])
         revision_value = raw.get("Revision")
         if provenance["Revision"].get("source") != "Monday CRM" and raw.get("Drawing Reference") != fallback.get("Drawing Reference"):
             revision_value = None  # An older requested drawing does not define the replacement's revision.
@@ -423,11 +455,12 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
         # the full TP reference suffix. A conflicting suffix/letter requires review.
         if revision_value and revision_value.casefold() not in {suffix.casefold(), suffix.rsplit("-", 1)[-1].strip().casefold()}:
             issues["Revision"] = "Revision conflicts with the selected TaperedPlus drawing reference"
-        else:
+        elif not any(e["status"] == "unverified" for e in rejected_revisions):
             issues.pop("Revision", None)
         raw["Revision"] = suffix
         provenance["Revision"] = {"source": "Derived", "status": "provided", "from": "Drawing Reference",
-                                  "referenceSource": provenance["Drawing Reference"], "observedRevision": revision_value}
+                                  "referenceSource": provenance["Drawing Reference"], "observedRevision": revision_value,
+                                  **({"rejectedCandidates": rejected_revisions} if rejected_revisions else {})}
     elif raw.get("Revision"):
         issues["Revision"] = "Revision requires a verified TaperedPlus Drawing Reference"
     if raw.get("Date Received"):
@@ -439,7 +472,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
     # Fully read, verified alternatives can be published as field review notes.
     # Unverified evidence and incomplete/ambiguous CRM reads still fail the refresh.
     publishable_conflicts = {
-        VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT,
+        VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT, PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, MULTI_MATERIAL,
         "Revision conflicts with the selected TaperedPlus drawing reference",
     }
     if any(reason not in publishable_conflicts

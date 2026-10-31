@@ -70,7 +70,7 @@ python -m backend.scripts.check_design_processing_sources
 ```
 
 This uses only synthetic DWG, ZIP, XLSX and encrypted-PDF bytes with no database or
-network calls. Expected output includes `status: ok`, `pipeline_revision: output-v12`,
+network calls. Expected output includes `status: ok`, `pipeline_revision: output-v13`,
 and all four checks with `passed: true`. It verifies that DWG and encrypted PDFs
 are skipped, ZIP members are read and long spreadsheet cells retain their final
 technical values. A `.dwg`
@@ -276,10 +276,11 @@ does not automatically include attachments on linked boards.
    `DESIGN_PROCESSING_MODE=shadow`. Keep existing extraction and reconciliation
    services running. The new publisher runs as another service:
    `python -m backend.app.services.performance_specification`.
-3. Extraction identity is now `output-v12` (`output-v9` introduced source evidence;
+3. Extraction identity is now `output-v13` (`output-v9` introduced source evidence;
    `output-v10` added DWG skips and bounded ZIP extraction; `output-v11` preserves
-   long spreadsheet cells; `output-v12` skips encrypted PDFs). The CAD publication contract is now
-   `performance-specification-v3`. Existing canonical CSV rows
+   long spreadsheet cells; `output-v12` skips encrypted PDFs; `output-v13` validates
+   recovery against source text and retains request constraints). The CAD publication contract is now
+   `performance-specification-v4`. Existing canonical CSV rows
    remain unchanged. Run the normal design reconciliation sweep to re-extract eligible
    historical projects. Old extraction records without the versioned source/evidence
    contract wait for this refresh. Changing only the publisher flag does not refresh
@@ -342,10 +343,8 @@ The database's total backlog still includes held unlisted jobs; in allowlist mod
 only listed items are eligible to be claimed. Changing to `enabled` makes the other
 pending jobs eligible again. Historical uploaded files are preserved during the test.
 
-For the evidence-matching and inline-review updates, deploy the updated specification
-worker and rerun the specification check above. Existing `output-v11` extraction
-evidence can be reused; no migration, extraction-version bump or re-extraction is
-needed. The `performance-specification-v3` publication version creates a new PDF
+The earlier evidence-matching and inline-review update introduced the
+`performance-specification-v3` publication version, which created a new PDF
 revision instead of reusing an older PDF that omitted unresolved field details.
 Read-only replay of item `3320074395`'s stored extraction and recorded CRM precedence
 cleared the scale, page size, title, contract-number and insulation evidence errors.
@@ -373,7 +372,7 @@ venv/Scripts/python.exe -m backend.app.services.performance_specification --once
 Source values, provenance, extraction identity and model/prompt/template version form
 the specification revision. Polling timestamps and unrelated CRM edits do not change
 it. Unchanged inputs reuse the persisted translation and verified PDF bytes.
-Each v2/v3 artifact stores its immutable `source_json`, including field provenance and
+Each v2/v3/v4 artifact stores its immutable `source_json`, including field provenance and
 source texts; later refreshes cannot overwrite that revision's evidence. The current
 record's `source_json` remains the last successful source snapshot. Pre-v2 artifact
 snapshots are null because their historic inputs cannot be reconstructed reliably.
@@ -395,8 +394,47 @@ the database until all matching application/worker processes have stopped.
 
 ## Verification
 
+The allowlist hardening release requires fresh `output-v13` extraction and uses
+`performance-specification-v4` PDFs. Deploy matching API, design, reconciliation and
+specification workers, then run the normal reconciliation for the allowlisted items.
+No additional database migration is needed. The publisher compares the **full**
+configured pipeline identity, including model/thinking settings; matching stored
+desired/analyzed identities alone cannot authorize reuse of an older extraction.
+Retained PDFs remain available until a verified replacement succeeds.
+
+Extraction now checks evidence against the manifest before completing analysis and
+makes one bounded recovery attempt. A unique verified passage can repair an incorrect
+attachment ID within the same email. Formatting-only value repairs preserve words,
+identifiers and numbers. Repairs retain before/after evidence and content hashes in
+`specificationEvidenceRepairs` and the artifact source snapshot. Unresolved citations
+fail extraction so its worker retries analysis, rather than leaving the publisher
+to retry permanently unusable evidence. A populated scalar can become null only when
+recovery verifies that exact fact as achieved, baseline, withdrawn or unselected.
+
+Accepted AX drawing numbers retain their prefix and actual issuer. Separately quoted
+drawing-number/revision cells may form `AX 16670_26.12 - B`; the derived CAD revision
+remains `26.12 - B`. Bare and D.S references still require CRM or verified TP provenance.
+Colon spacing and escaped literal asterisks no longer produce false mismatches.
+Repeated material descriptions are consolidated only when one literally contains
+the other in the same source passage, scope and request. This introduces no product
+alias translation or automatic selection between conflicting roof specifications.
+
+Inline-image Content-IDs are retained with source IDs, and HTML image positions stay
+beside their surrounding scope captions. PDF page dimensions are independently read
+and can flag a title-block size for review; they never replace its stated paper size.
+An ambiguous `ISO AB` is reviewable, not automatically converted to `ISO A3`.
+
+Fully read CRM material multi-selections publish a null CAD value and the alternatives
+as review details. Unreadable mirrors, ambiguous drawing selection, and unverified
+facts still prevent replacement. Verified dimensional limits, exclusions, allocations,
+options and source-link excerpts appear after the 18 CAD fields under **Request
+constraints and context**. They remain review excerpts, including source/date context;
+external linked files are not downloaded or claimed to have been inspected. Notes
+are stored in `source_json.requestNotes` and `translation_json.requestNotes` and cause
+`published_with_review`/`rendered_with_review` status even if all scalar fields resolve.
+
 ```powershell
-venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_source_archives.py backend/tests/test_encrypted_pdf_sources.py -q
+venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_specification_publication_hardening.py backend/tests/test_source_archives.py backend/tests/test_encrypted_pdf_sources.py -q
 ```
 
 Coverage includes LLM schema/semantic validation, optional values, exact PDF text

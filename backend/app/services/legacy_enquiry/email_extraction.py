@@ -186,6 +186,9 @@ def extract_text_from_email(
                 index = futures[future]
                 results[index] = future.result()
     for index in range(len(attachments)):
+        content_id = attachments[index].get("content_id")
+        if content_id:
+            results[index][0]["contentId"] = str(content_id).strip("<>")
         records.extend(results[index])
     if manifest is not None:
         manifest.extend(records)
@@ -194,6 +197,7 @@ def extract_text_from_email(
     combined_text = "\n\n".join(
         f"SOURCE ID: {record['sourceId']}\nSOURCE TYPE: {record['sourceType']}\n"
         f"FILE: {record['filename']}\nREQUEST TIMESTAMP: {record['observedAt']}\n"
+        + (f"CONTENT-ID: {record['contentId']}\n" if record.get("contentId") else "")
         + ("EMAIL CONTENT:\n" if record["sourceType"] == "email_body" else "ATTACHMENT CONTENT:\n")
         + record["text"] for record in records if record["status"] == "read"
     )

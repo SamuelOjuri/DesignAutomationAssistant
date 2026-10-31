@@ -48,6 +48,8 @@ class LegacyAnalysisResult:
     specification_evidence: tuple[dict, ...] = ()
     specification_assessed_fields: tuple[str, ...] = ()
     source_manifest: tuple[dict, ...] = ()
+    specification_request_notes: tuple[dict, ...] = ()
+    specification_evidence_repairs: tuple[dict, ...] = ()
 
 
 def analyze_downloaded_email_assets(
@@ -133,7 +135,9 @@ def analyze_downloaded_email_assets(
     if len(all_text) > MAX_CONTEXT_CHARS:
         raise ValueError("Combined source text exceeds extraction limit; review required")
 
-    structured_parameters = client.extract_design_parameters(all_text)
+    extract_with_manifest = getattr(client, "extract_design_parameters_with_manifest", None)
+    structured_parameters = (extract_with_manifest(all_text, manifest) if extract_with_manifest
+                             else client.extract_design_parameters(all_text))
     dated_requests = [entry for entry in parsed_assets if entry[0]]
     if dated_requests:
         latest = max(dated_requests, key=lambda entry: (entry[0], int(entry[1])))
@@ -179,6 +183,8 @@ def analyze_downloaded_email_assets(
             "Bauder Roof Num": structured_parameters.bauder_roof_num,
         },
         specification_evidence=tuple(e.model_dump() for e in structured_parameters.specification_evidence),
+        specification_request_notes=tuple(n.model_dump() for n in structured_parameters.specification_request_notes),
+        specification_evidence_repairs=tuple(structured_parameters._evidence_repairs),
         specification_assessed_fields=tuple(structured_parameters.specification_assessed_fields),
         source_manifest=tuple(manifest),
     )

@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from .gemini_models import ThinkingLevel, validate_thinking_level
 from .services.legacy_enquiry import LEGACY_MANIFEST_DIGEST
 
-DESIGN_PROCESSING_PIPELINE_REVISION = "output-v12"
+DESIGN_PROCESSING_PIPELINE_REVISION = "output-v13"
 
 class Settings(BaseSettings):
     # monday

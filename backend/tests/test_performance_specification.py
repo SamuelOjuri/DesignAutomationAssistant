@@ -165,8 +165,9 @@ def case(monkeypatch):
         item = DesignProcessingItem(
             id=uuid.uuid4(), board_id=BOARD, item_id=ITEM, state="ready_for_review", warnings_json=[],
             latest_desired_input_revision="email-v1", latest_analyzed_input_revision="email-v1",
-            latest_desired_pipeline_version="extraction-v1", latest_analyzed_pipeline_version="extraction-v1",
-            extracted_parameters_json=with_evidence({"inputRevision": "email-v1", "pipelineVersion": "extraction-v1",
+            latest_desired_pipeline_version=settings.design_processing_pipeline_version,
+            latest_analyzed_pipeline_version=settings.design_processing_pipeline_version,
+            extracted_parameters_json=with_evidence({"inputRevision": "email-v1", "pipelineVersion": settings.design_processing_pipeline_version,
                                        "performanceParameters": raw, "parameters": raw}),
         )
         db.add(item)

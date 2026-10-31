@@ -123,7 +123,7 @@ def test_legacy_gemini_client_preserves_other_model_thinking_configuration():
 
 def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate():
     payload = {
-        name: None for name in DesignParameterExtraction.model_fields
+        name: None for name in DesignParameterExtraction.model_fields if not name.startswith("specification_")
     }
     payload.update(
         specification_evidence=[], specification_assessed_fields=[],
@@ -195,11 +195,8 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
     assert list(schema_properties).index("drawing_title") < list(
         schema_properties
     ).index("drawing_reference")
-    assert schema_properties["drawing_reference"]["description"] == (
-        "The Drawing Reference Number issued by TaperedPlus "
-        "[e.g. TP*****_**.** - *]. If several references exist, use the latest "
-        "one associated with the request to TaperedPlus."
-    )
+    assert schema_properties["drawing_reference"]["description"] == FIELD_DEFINITIONS["Drawing Reference"]
+    assert "AX 16670_26.12 - B" in schema_properties["drawing_reference"]["description"]
     assert schema_properties["revision"]["description"] == (
         "The suffix of the selected TaperedPlus Drawing Reference. This is the "
         "suffix after the underscore in the drawing reference "
@@ -505,7 +502,7 @@ def test_attachment_read_failure_retains_manifest_and_schedules_extraction_retry
     failure_log = next(record.getMessage() for record in caplog.records if "failed runtime=" in record.getMessage())
     runtime = json.loads(failure_log.split("runtime=", 1)[1])
     assert runtime["worker_id"] == "phase5-worker"
-    assert runtime["pipeline_revision"] == "output-v12"
+    assert runtime["pipeline_revision"] == "output-v13"
     assert runtime["commit"] == "a" * 12 and runtime["pid"] > 0
     assert "test-token" not in failure_log
 
