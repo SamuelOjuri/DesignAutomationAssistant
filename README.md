@@ -477,6 +477,15 @@ reads and writes are not an atomic conditional update. Landing Zone retains its
 existing scalar-write behaviour. AI Data remains email-derived, with Monday
 values taking precedence in the assistant.
 
+The design and specification readers intentionally skip encrypted PDFs, including
+PDFs embedded in email or ZIP attachments. They are recorded as
+`skipped:encrypted_pdf` with their original source identity and hash, contribute
+no field evidence, and are never sent to Gemini. Other readable sources continue;
+malformed PDFs still hold extraction for retry/review. Install the updated
+requirements and deploy all matching workers for pipeline revision `output-v12`.
+Check the deployed behaviour with
+`python -m backend.scripts.check_design_processing_sources` (synthetic files only).
+
 Production extraction runs in a spawned child process. Every five seconds, the
 parent reloads local job state to check lease ownership, cancellation, desired
 input/pipeline version and execution policy, without reading Monday. While waiting,

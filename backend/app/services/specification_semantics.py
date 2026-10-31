@@ -15,8 +15,11 @@ from pydantic import BaseModel, ConfigDict, Field
 EVIDENCE_VERSION = 2
 ANIMATED_IMAGE_SKIP_STATUS = "skipped:animated_image"
 DWG_SKIP_STATUS = "skipped:dwg"
+ENCRYPTED_PDF_SKIP_STATUS = "skipped:encrypted_pdf"
 ARCHIVE_EXPANDED_STATUS = "expanded:archive"
-COMPLETE_SOURCE_STATUSES = frozenset({"read", ANIMATED_IMAGE_SKIP_STATUS, DWG_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS})
+COMPLETE_SOURCE_STATUSES = frozenset({
+    "read", ANIMATED_IMAGE_SKIP_STATUS, DWG_SKIP_STATUS, ENCRYPTED_PDF_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS,
+})
 FIELD_DEFINITIONS = {
     "Scale": "The drawing scale, usually found in a drawing title block (for example, 1:100).",
     "Page Size": "The drawing page or paper size, usually found in a drawing title block (for example, A1).",

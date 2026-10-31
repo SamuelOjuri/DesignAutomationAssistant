@@ -11,6 +11,7 @@ from backend.app.services.gemini_requests import (
 from backend.app.services.gemini_schema import gemini_response_schema
 from backend.app.services.legacy_enquiry.email_extraction import extract_text_from_email
 from backend.app.services.legacy_enquiry.source_documents import IncompleteSourceExtraction
+from backend.tests.pdf_helpers import pdf_bytes
 
 
 class Result(BaseModel):
@@ -76,6 +77,7 @@ def test_fallback_output_still_requires_the_original_model_validation():
 
 
 def test_pdf_error_has_no_json_retry_and_manifest_retains_stage_and_status():
+    pdf = pdf_bytes()
     calls = []
     def fail(*args):
         calls.append(args)
@@ -84,11 +86,11 @@ def test_pdf_error_has_no_json_retry_and_manifest_retains_stage_and_status():
         return request_gemini(fail, "offline", [], types.GenerateContentConfig(), stage="pdf_text", input_bytes=len(content))
     manifest = []
     with pytest.raises(IncompleteSourceExtraction) as captured:
-        extract_text_from_email("Request", [{"filename": "locked.pdf", "content": b"pdf"}],
+        extract_text_from_email("Request", [{"filename": "drawing.pdf", "content": pdf}],
                                 extractor=SimpleNamespace(max_attachment_workers=1, process_pdf=process_pdf), manifest=manifest)
     assert len(calls) == 1
     details = manifest[1]["error"]
-    assert details["stage"] == "pdf_text" and details["http_status"] == 400 and details["input_bytes"] == 3
+    assert details["stage"] == "pdf_text" and details["http_status"] == 400 and details["input_bytes"] == len(pdf)
     assert "stage=pdf_text" in str(captured.value) and "http_status=400" in str(captured.value)
     assert "DO_NOT_LOG" not in json.dumps(manifest) and "private source text" not in str(captured.value)
 

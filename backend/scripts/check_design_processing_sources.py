@@ -1,4 +1,4 @@
-"""Check deployed DWG/ZIP/workbook handling using synthetic files only.
+"""Check deployed DWG/ZIP/workbook/encrypted-PDF handling using synthetic files only.
 
 Run on Render: python -m backend.scripts.check_design_processing_sources
 No model requests, database access, or external writes are made.
@@ -9,6 +9,7 @@ import json
 from zipfile import ZipFile
 
 import openpyxl
+from pypdf import PdfWriter
 
 from backend.app.config import settings
 from backend.app.services.design_processing_diagnostics import source_runtime_diagnostics
@@ -27,11 +28,19 @@ def check_sources():
     book.active.append(["Synthetic specification", "Description " * 200 + "Target U-value: 0.25"])
     book.save(output)
     book.close()
+    workbook_content = output.getvalue()
+    output = io.BytesIO()
+    with PdfWriter() as writer:
+        writer.add_blank_page(width=72, height=72)
+        writer.encrypt("synthetic-password", algorithm="AES-256")
+        writer.write(output)
+    encrypted_pdf_content = output.getvalue()
     results = []
     for name, content, expected_statuses, required_text in (
         ("drawing.dwg", b"CAD", ["skipped:dwg"], ""),
         ("request.zip", archive_content, ["expanded:archive", "read", "skipped:dwg"], "Scale: 1:100"),
-        ("long-cell.xlsx", output.getvalue(), ["read"], "Target U-value: 0.25"),
+        ("long-cell.xlsx", workbook_content, ["read"], "Target U-value: 0.25"),
+        ("protected.pdf", encrypted_pdf_content, ["skipped:encrypted_pdf"], ""),
     ):
         records = extract_source_records(content, name, None, source_id="diagnostic")
         statuses = [record["status"] for record in records]

@@ -22,6 +22,7 @@ from backend.app.services.performance_specification_contract import FIELD_NAMES
 from backend.app.services.performance_specification_evidence import resolve_email_evidence
 from backend.app.services.spreadsheet_extraction import extract_spreadsheet_documents
 from backend.app.services.specification_semantics import SpecificationEvidence
+from backend.tests.pdf_helpers import pdf_bytes
 
 
 def parameters():
@@ -67,7 +68,7 @@ def test_skipped_animation_is_audited_without_blocking_other_email_evidence(inli
                              process_pdf=lambda *args: "Scale: 1:100")
     animation = {"filename": "signature.gif", "content": image_bytes("GIF", animated=True)}
     context = extract_text_from_email(
-        "Contact: Alex", [{"filename": "roof.pdf", "content": b"pdf"}] + ([] if inline else [animation]),
+        "Contact: Alex", [{"filename": "roof.pdf", "content": pdf_bytes()}] + ([] if inline else [animation]),
         inline_images=[animation] if inline else [], extractor=client, manifest=manifest, source_prefix="mail",
     )
     assert "Contact: Alex" in context and "Scale: 1:100" in context
@@ -259,7 +260,7 @@ def test_failed_attachment_records_each_source_and_never_passes_error_as_evidenc
     client = SimpleNamespace(max_attachment_workers=2, process_pdf=fail)
     manifest = []
     with pytest.raises(IncompleteSourceExtraction) as captured:
-        extract_text_from_email("Request text", [{"filename": "roof.pdf", "content": b"pdf"}],
+        extract_text_from_email("Request text", [{"filename": "roof.pdf", "content": pdf_bytes()}],
                                 extractor=client, manifest=manifest, source_prefix="asset:1")
     assert [e["status"] for e in manifest] == ["read", "failed:" + error_type.__name__]
     assert manifest[1]["sourceId"] == "asset:1:attachment:0"

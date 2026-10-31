@@ -13,6 +13,7 @@ from backend.app.services.legacy_enquiry.parameter_extraction import DesignParam
 from backend.app.services.performance_specification_contract import FIELD_NAMES
 from backend.app.services.performance_specification_evidence import resolve_email_evidence
 from backend.app.services.specification_semantics import COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION
+from backend.tests.pdf_helpers import pdf_bytes
 
 
 def archive_bytes(entries, compression=ZIP_DEFLATED):
@@ -55,7 +56,8 @@ def test_dwg_is_skipped_and_audited_without_entering_model_context():
 
 @pytest.mark.parametrize("embedded", [True, False])
 def test_zip_and_nested_zip_documents_reach_analysis_with_individual_evidence(tmp_path, embedded):
-    nested = archive_bytes([("roof.pdf", b"pdf"), ("roof.DWG", b"CAD")])
+    pdf = pdf_bytes()
+    nested = archive_bytes([("roof.pdf", pdf), ("roof.DWG", b"CAD")])
     content = archive_bytes([("drawings/", b""), ("drawings/nested.zip", nested),
                              ("request.txt", b"Membrane: Single Ply")])
     mail = EmailMessage()
@@ -81,7 +83,7 @@ def test_zip_and_nested_zip_documents_reach_analysis_with_individual_evidence(tm
     assert "Scale: 1:100" in contexts[0] and "Membrane: Single Ply" in contexts[0]
     assert "roof.DWG" not in contexts[0] and "supplementary.dwg" not in contexts[0]
     pdf_record = next(record for record in manifest if record["filename"].endswith("roof.pdf"))
-    assert pdf_record["contentSha256"] == hashlib.sha256(b"pdf").hexdigest()
+    assert pdf_record["contentSha256"] == hashlib.sha256(pdf).hexdigest()
     assert pdf_record["parentSourceId"] in {record["sourceId"] for record in manifest}
     evidence = {"field": "Scale", "value": "1:100", "source_id": pdf_record["sourceId"],
                 "snippet": "Scale: 1:100", "location": "page 1", "scope": None, "issuer": None,
@@ -97,7 +99,7 @@ def test_zip_and_nested_zip_documents_reach_analysis_with_individual_evidence(tm
 
 
 def test_failed_document_inside_zip_is_not_hidden_by_skipped_dwg():
-    content = archive_bytes([("roof.dwg", b"CAD"), ("roof.pdf", b"pdf")])
+    content = archive_bytes([("roof.dwg", b"CAD"), ("roof.pdf", pdf_bytes())])
     def fail(*args):
         raise TimeoutError("secret signed URL")
     manifest = []

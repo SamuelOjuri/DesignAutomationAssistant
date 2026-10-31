@@ -12,14 +12,18 @@ from html.parser import HTMLParser
 import io
 from pathlib import Path
 import tempfile
-from defusedxml import ElementTree
 from zipfile import BadZipFile, ZipFile
 import zlib
+
+from defusedxml import ElementTree
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 from ..gemini_requests import source_failure_details as gemini_failure_details
 from ..spreadsheet_extraction import extract_spreadsheet_documents, is_spreadsheet
 from ..specification_semantics import (
     ANIMATED_IMAGE_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS, COMPLETE_SOURCE_STATUSES, DWG_SKIP_STATUS,
+    ENCRYPTED_PDF_SKIP_STATUS,
 )
 
 
@@ -37,6 +41,10 @@ class AnimatedImageSkipped(Exception):
 
 class DwgSkipped(Exception):
     """DWG files are audited but intentionally excluded from design extraction."""
+
+
+class EncryptedPdfSkipped(Exception):
+    """Encrypted PDFs are audited but intentionally excluded from extraction."""
 
 
 class SourceDocumentError(ValueError):
@@ -124,6 +132,14 @@ def extract_document(content: bytes, filename: str, extractor) -> str:
                                       + " Recalculate and save uncached formulas in Excel, or supply a smaller readable export.")
         text = "\n\n".join(doc["text"] for doc in documents)
     elif suffix == ".pdf":
+        try:
+            with PdfReader(io.BytesIO(content)) as reader:
+                # Skip all encryption, including owner-only restrictions with
+                # an empty opening password. Never send these bytes to Gemini.
+                if reader.is_encrypted:
+                    raise EncryptedPdfSkipped("Encrypted PDFs are excluded from extraction")
+        except PdfReadError:
+            raise SourceDocumentError("unreadable_pdf", "PDF could not be read; supply a valid PDF export.") from None
         # Per-document calls retain identity and make individual failures retryable.
         text = extractor.process_pdf(content, filename)
     elif suffix in IMAGE_EXTENSIONS:
@@ -191,6 +207,8 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
         record["status"] = ANIMATED_IMAGE_SKIP_STATUS
     except DwgSkipped:
         record["status"] = DWG_SKIP_STATUS
+    except EncryptedPdfSkipped:
+        record["status"] = ENCRYPTED_PDF_SKIP_STATUS
     except Exception as exc:
         record["status"] = "failed:" + type(exc).__name__
         error = source_failure_details(exc)

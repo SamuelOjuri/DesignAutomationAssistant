@@ -69,10 +69,11 @@ To check the deployed source readers independently of Gemini, run:
 python -m backend.scripts.check_design_processing_sources
 ```
 
-This uses only synthetic DWG, ZIP and XLSX bytes with no database or network calls.
-Expected output includes `status: ok`, `pipeline_revision: output-v11`, and all
-three checks with `passed: true`. It verifies that DWG is skipped, ZIP members are
-read and long spreadsheet cells retain their final technical values. A `.dwg`
+This uses only synthetic DWG, ZIP, XLSX and encrypted-PDF bytes with no database or
+network calls. Expected output includes `status: ok`, `pipeline_revision: output-v12`,
+and all four checks with `passed: true`. It verifies that DWG and encrypted PDFs
+are skipped, ZIP members are read and long spreadsheet cells retain their final
+technical values. A `.dwg`
 failure reported as `failed:ValueError` is inconsistent with the current DWG skip
 path. Check the runtime fields on that failing job and ensure all design-worker
 services run the matching release; a nearby startup message alone does not identify
@@ -172,9 +173,9 @@ Application-owned failure messages survive the process boundary in worker logs,
 parser/provider exception text.
 
 Deploy matching API, design/reconciliation and specification workers to recognize
-the new statuses. Pipeline revision `output-v11` makes the normal reconciliation
-flow re-extract eligible items, including jobs previously blocked by DWG or ZIP
-attachments or long spreadsheet cells. No environment-variable or database migration change is needed for
+the new statuses. Pipeline revision `output-v12` makes the normal reconciliation
+flow re-extract eligible items, including jobs previously blocked by encrypted
+PDFs, DWG or ZIP attachments or long spreadsheet cells. No environment-variable or database migration change is needed for
 this update. For a job still marked failed after deployment, use the operator command:
 
 ```bash
@@ -187,6 +188,17 @@ the source manifest, are not sent to the model, and do not block extraction or P
 publication. Static images continue to be processed. Skipped images cannot supply
 field evidence; genuine failures in other sources still require retry/review. Deploy
 the matching extraction and specification workers so both recognize this skip status.
+
+Encrypted PDFs are also intentionally excluded, including email attachments,
+configured supplementary sources and PDFs inside nested ZIP archives. `pypdf`
+checks encryption before any PDF bytes are sent to Gemini, including owner-only
+protection with an empty opening password. Skipped PDFs retain their filename,
+source identity, content hash and `skipped:encrypted_pdf` status in the manifest,
+with no extracted text. They cannot supply field evidence and do not block the
+remaining readable sources or publication. Malformed PDFs still require
+retry/review. Pipeline revision `output-v12` enables reprocessing of affected
+eligible items. Install the updated requirements and deploy matching API,
+design/reconciliation and specification workers; no database migration is needed.
 
 The holding item's confirmed TP Ref selects the project. Multiple linked projects
 still fail the refresh. Verified conflicting technical values publish their roof
@@ -241,9 +253,9 @@ does not automatically include attachments on linked boards.
    `DESIGN_PROCESSING_MODE=shadow`. Keep existing extraction and reconciliation
    services running. The new publisher runs as another service:
    `python -m backend.app.services.performance_specification`.
-3. Extraction identity is now `output-v11` (`output-v9` introduced source evidence;
+3. Extraction identity is now `output-v12` (`output-v9` introduced source evidence;
    `output-v10` added DWG skips and bounded ZIP extraction; `output-v11` preserves
-   long spreadsheet cells). The CAD publication contract is now
+   long spreadsheet cells; `output-v12` skips encrypted PDFs). The CAD publication contract is now
    `performance-specification-v3`. Existing canonical CSV rows
    remain unchanged. Run the normal design reconciliation sweep to re-extract eligible
    historical projects. Old extraction records without the versioned source/evidence
@@ -361,7 +373,7 @@ the database until all matching application/worker processes have stopped.
 ## Verification
 
 ```powershell
-venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_source_archives.py -q
+venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_source_archives.py backend/tests/test_encrypted_pdf_sources.py -q
 ```
 
 Coverage includes LLM schema/semantic validation, optional values, exact PDF text
