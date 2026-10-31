@@ -492,11 +492,21 @@ size/context limits and encrypted-PDF skips still apply. No new dependency is re
 
 The supplied log's new `output-v14` Company failure, job
 `3eee61a8-077c-4e5e-a8a1-ae52d5f1f72f`, belongs to item `3312713363`, not one of the
-three supplied emails. Its retained `output-v13` Company evidence validates locally;
-that older snapshot does not reproduce the failed response. The failed job has no
-saved response payload, so its exact mismatched value/excerpt still needs that item's
-source replay. Worker commit/pipeline fields distinguish the old in-flight errors
-from failures produced by the replacement worker.
+initial three supplied emails. The subsequently supplied `3312713363.eml` completed
+a full live Gemini diagnostic replay on `output-v15`: Company is `WALKERS WATERPROOFING`,
+supported by its embedded signature-logo transcription, and Contact is `Jack Walker`.
+Both request-constraint excerpts were retained. The file contains one embedded PNG;
+the historical drawing/PDF filenames quoted in the email body are not embedded files
+and were not read as attachments. No further validator change was needed for this
+replay. The failed `output-v14` response was not saved, so its exact earlier mismatched
+value/excerpt remains unknown; the successful replay does not reconstruct it.
+
+At the October 31 follow-up database check, that `output-v14` job was cancelled as
+superseded and a fresh `output-v15` job (`6817335c-b572-4e4c-8017-84f543eac802`) was
+scheduled with zero attempts and no error. Let the worker claim the current job;
+do not retry the obsolete execution identity. This was a read-only status check,
+not evidence that production publication had completed. Worker commit/pipeline fields
+distinguish old in-flight errors from failures produced by the replacement worker.
 
 With the supplied three emails, provider replays and subsequent local replays of
 the captured responses verified the `output-v15` fixes. Final captured-response
