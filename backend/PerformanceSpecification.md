@@ -70,7 +70,7 @@ python -m backend.scripts.check_design_processing_sources
 ```
 
 This uses only synthetic DWG, ZIP, XLSX and encrypted-PDF bytes with no database or
-network calls. Expected output includes `status: ok`, `pipeline_revision: output-v13`,
+network calls. Expected output includes `status: ok`, `pipeline_revision: output-v14`,
 and all four checks with `passed: true`. It verifies that DWG and encrypted PDFs
 are skipped, ZIP members are read and long spreadsheet cells retain their final
 technical values. A `.dwg`
@@ -276,10 +276,11 @@ does not automatically include attachments on linked boards.
    `DESIGN_PROCESSING_MODE=shadow`. Keep existing extraction and reconciliation
    services running. The new publisher runs as another service:
    `python -m backend.app.services.performance_specification`.
-3. Extraction identity is now `output-v13` (`output-v9` introduced source evidence;
+3. Extraction identity is now `output-v14` (`output-v9` introduced source evidence;
    `output-v10` added DWG skips and bounded ZIP extraction; `output-v11` preserves
    long spreadsheet cells; `output-v12` skips encrypted PDFs; `output-v13` validates
-   recovery against source text and retains request constraints). The CAD publication contract is now
+   recovery against source text and retains request constraints; `output-v14` repairs
+   request-note citations and verifies revisions from separate title-block cells). The CAD publication contract is now
    `performance-specification-v4`. Existing canonical CSV rows
    remain unchanged. Run the normal design reconciliation sweep to re-extract eligible
    historical projects. Old extraction records without the versioned source/evidence
@@ -394,7 +395,7 @@ the database until all matching application/worker processes have stopped.
 
 ## Verification
 
-The allowlist hardening release requires fresh `output-v13` extraction and uses
+The evidence-recovery hardening release requires fresh `output-v14` extraction and uses
 `performance-specification-v4` PDFs. Deploy matching API, design, reconciliation and
 specification workers, then run the normal reconciliation for the allowlisted items.
 No additional database migration is needed. The publisher compares the **full**
@@ -410,6 +411,46 @@ identifiers and numbers. Repairs retain before/after evidence and content hashes
 fail extraction so its worker retries analysis, rather than leaving the publisher
 to retry permanently unusable evidence. A populated scalar can become null only when
 recovery verifies that exact fact as achieved, baseline, withdrawn or unselected.
+
+Request-note validation participates in the same single recovery call, even when all
+scalar fields have verified values. Diagnostics identify rejected notes by zero-based
+index. A corrected note replaces an invalid version only when the corrected excerpt
+verifies and preserves the words, numbers, signs, negations, category and scope.
+Label-colon formatting may be corrected; URL punctuation is preserved. A wrong
+attachment ID can be repaired only by a unique passage within the same email.
+Unchanged valid notes are retained, omitted invalid notes still block, and repairs
+are recorded with before/after notes and source hashes in `specificationEvidenceRepairs`.
+
+Revision evidence can use a single drawing-number cell and a single labelled revision
+cell in one verified contiguous title-block excerpt, including `reference_parts`.
+Multiple drawing numbers or revision labels require review; recovery cannot splice
+separate passages or change the suffix. Page Size and Scale in an applicable drawing
+title block are requested specification facts even if the email does not repeat them.
+An unsupported Page Size still blocks extraction: PDF dimensions alone cannot verify
+it. Failed field recovery now logs enum-only `evidence_roles` counts to distinguish
+missing evidence from candidates classified as `other`, `lookup` or another role,
+without logging their raw values or excerpts. A null or missing-value marker can
+clear a populated scalar only with the existing verified non-request evidence check.
+
+For the Render failures on items `3320074395`, `3320649967` and `3319921927`, deploy
+matching API, design/reconciliation and specification workers with `output-v14`, stop
+the replaced workers, and keep the existing allowlist. No database migration or
+environment-variable change is needed. Run normal reconciliation after deployment:
+
+```bash
+python -m backend.app.services.design_processing_reconciliation --item-id 3320074395
+python -m backend.app.services.design_processing_reconciliation --item-id 3320649967
+python -m backend.app.services.design_processing_reconciliation --item-id 3319921927
+```
+
+The new pipeline identity schedules fresh extraction; do not manually change job
+statuses or retry an obsolete execution identity. Confirm `output-v14` in runtime
+logs and the full desired/analyzed pipeline identities in the diagnostic SQL.
+These fixes cover reproduced recovery defects, not every possible unverified fact
+in those jobs. Continued Page Size failures require inspection of the actual
+source and its evidence role. Existing PDFs remain until verified replacements
+succeed. Openpyxl data-validation-extension warnings and PDF duplicate `/PageMode`
+warnings in the supplied logs did not themselves report failed extraction jobs.
 
 Accepted AX drawing numbers retain their prefix and actual issuer. Separately quoted
 drawing-number/revision cells may form `AX 16670_26.12 - B`; the derived CAD revision
@@ -434,7 +475,7 @@ are stored in `source_json.requestNotes` and `translation_json.requestNotes` and
 `published_with_review`/`rendered_with_review` status even if all scalar fields resolve.
 
 ```powershell
-venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_specification_publication_hardening.py backend/tests/test_source_archives.py backend/tests/test_encrypted_pdf_sources.py -q
+venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_specification_publication_hardening.py backend/tests/test_specification_recovery_regressions.py backend/tests/test_source_archives.py backend/tests/test_encrypted_pdf_sources.py -q
 ```
 
 Coverage includes LLM schema/semantic validation, optional values, exact PDF text

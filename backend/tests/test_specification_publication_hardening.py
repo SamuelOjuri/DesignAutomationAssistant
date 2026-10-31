@@ -277,7 +277,7 @@ def test_matching_stored_identities_cannot_publish_an_obsolete_configured_pipeli
     revision = current(case).current_revision
     data = deepcopy(case.item.extracted_parameters_json)
     pipeline = data["pipelineVersion"]
-    obsolete = pipeline.replace("output-v13", "output-v12") if variant == "old_revision" else "other-model:" + pipeline
+    obsolete = pipeline.replace("output-v14", "output-v13") if variant == "old_revision" else "other-model:" + pipeline
     data["pipelineVersion"] = obsolete
     case.item.extracted_parameters_json = data
     case.item.latest_analyzed_pipeline_version = case.item.latest_desired_pipeline_version = obsolete

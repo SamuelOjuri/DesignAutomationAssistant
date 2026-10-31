@@ -8,9 +8,10 @@ unsupported TP issuer can be corrected only to literal source branding.
 import re
 
 from .performance_specification_evidence import (
-    _contains_excerpt, _excerpt_normal, _normal, _value_supported, resolve_email_evidence, resolve_request_notes,
+    _contains_excerpt, _excerpt_normal, _normal, _value_supported, request_note_diagnostics,
+    resolve_email_evidence, resolve_request_notes,
 )
-from .specification_semantics import EVIDENCE_VERSION, canonical_label
+from .specification_semantics import EVIDENCE_VERSION, canonical_label, missing
 
 
 def extraction_payload(result, manifest):
@@ -43,6 +44,55 @@ def _same_value(old, new):
     return tokens(old.value) == tokens(new["value"]) and numbers(old.value) == numbers(new["value"])
 
 
+def _repair_source_allowed(old_id, new_id, snippet, manifest):
+    if old_id == new_id:
+        return True
+    # A unique passage within the same email can repair a wrong attachment
+    # ordinal. Never cross emails or choose by filename.
+    parent = old_id.split(":attachment:", 1)[0]
+    if ":attachment:" not in old_id or not new_id.startswith(parent + ":attachment:"):
+        return False
+    matches = [s for s in manifest if s["sourceId"].startswith(parent + ":attachment:")
+               and s["status"] == "read" and _contains_excerpt(snippet, s["text"])]
+    return len(matches) == 1 and matches[0]["sourceId"] == new_id
+
+
+def _note_text_key(note):
+    if note.category == "source_link":
+        # URL paths and queries can be case-sensitive.
+        return re.sub(r"\s+", " ", note.snippet).strip()
+    text = _excerpt_normal(note.snippet)
+    # Permit a model-added label colon only. Keep all words (including
+    # negations), numbers, signs, ratios and sentence boundaries.
+    return re.sub(r"(?<=[a-z]):(?=\s)", "", text)
+
+
+def _merge_request_notes(initial, recovery, manifest):
+    before = request_note_diagnostics(extraction_payload(initial, manifest))
+    after = request_note_diagnostics(extraction_payload(recovery, manifest))
+    sources = {s["sourceId"]: s for s in manifest}
+    retained = []
+    for index, old in enumerate(initial.specification_request_notes):
+        replacements = {new.model_dump_json(): new
+            for new_index, new in enumerate(recovery.specification_request_notes)
+            if index in before and new_index not in after
+            and old.category == new.category and _normal(old.scope) == _normal(new.scope)
+            and _note_text_key(old) == _note_text_key(new)
+            and _repair_source_allowed(old.source_id, new.source_id, new.snippet, manifest)}
+        if len(replacements) == 1:
+            new = next(iter(replacements.values()))
+            initial._evidence_repairs.append({
+                "reason": "Verified request-note citation/formatting repair",
+                "before": old.model_dump(), "after": new.model_dump(),
+                "contentSha256": sources[new.source_id]["contentSha256"],
+            })
+        else:
+            retained.append(old)
+    notes = {n.model_dump_json(): n for n in (*retained, *recovery.specification_request_notes)}
+    initial.specification_request_notes = list(notes.values())
+    resolve_request_notes(extraction_payload(initial, manifest))
+
+
 def merge_recovery(initial, recovery, manifest):
     before, _ = evidence_diagnostics(initial, manifest)
     after, _ = evidence_diagnostics(recovery, manifest)
@@ -65,17 +115,8 @@ def merge_recovery(initial, recovery, manifest):
                         continue
                 if not _same_value(old, new):
                     continue
-                if old.source_id != new["source_id"]:
-                    # A unique passage within the same email can repair a wrong
-                    # attachment ordinal. Never cross emails or choose by filename.
-                    parent = old.source_id.split(":attachment:", 1)[0]
-                    if (":attachment:" not in old.source_id or
-                            not new["source_id"].startswith(parent + ":attachment:")):
-                        continue
-                    matches = [s for s in manifest if s["sourceId"].startswith(parent + ":attachment:")
-                               and s["status"] == "read" and _contains_excerpt(new["snippet"], s["text"])]
-                    if len(matches) != 1:
-                        continue
+                if not _repair_source_allowed(old.source_id, new["source_id"], new["snippet"], manifest):
+                    continue
                 replacements.append(new)
         if len(replacements) == 1:
             new = replacements[0]
@@ -92,7 +133,7 @@ def merge_recovery(initial, recovery, manifest):
         if name.startswith("specification_"):
             continue
         value = getattr(initial, name)
-        if value is None or getattr(recovery, name) is not None:
+        if missing(value) or not missing(getattr(recovery, name)):
             continue
         label = next((canonical_label(k) for k in recovery.as_canonical_parameters()
                       if k.lower().replace("-", "_").replace(" ", "_") == name), None)
@@ -108,6 +149,4 @@ def merge_recovery(initial, recovery, manifest):
                     "field": label, "before": value, "after": None, "evidence": evidence.model_dump(),
                     "contentSha256": source["contentSha256"]})
                 break
-    notes = {n.model_dump_json(): n for n in (*initial.specification_request_notes, *recovery.specification_request_notes)}
-    initial.specification_request_notes = list(notes.values())
-    resolve_request_notes(extraction_payload(initial, manifest))
+    _merge_request_notes(initial, recovery, manifest)

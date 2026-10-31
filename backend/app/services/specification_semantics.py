@@ -130,7 +130,7 @@ class SpecificationEvidence(BaseModel):
     supersedes: list[str] = Field(default_factory=list, description="Older raw values explicitly replaced by this fact in the same scope; do not infer chronology from asset IDs.")
     rationale: str = Field(max_length=2000, description="Why this fact applies, including forwarded-chain/request timing and scope.")
     reference_parts: list[str] = Field(default_factory=list, max_length=2,
-        description="Only for Drawing Reference: [literal drawing number, literal revision letter] from the same title block. Snippet must quote that block verbatim; value is number + ' - ' + letter. Otherwise empty.")
+        description="Only for Drawing Reference or Revision: [literal drawing number, literal revision letter] from the same title block. Snippet must quote that block verbatim. Drawing Reference is number + ' - ' + letter; Revision is its entire suffix after the underscore. Otherwise empty.")
 
 
 class SpecificationRequestNote(BaseModel):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -67,7 +68,8 @@ class LegacyGeminiClient:
     def extract_design_parameters(self, context: str, *, source_manifest=None) -> DesignParameterExtraction:
         from ..specification_recovery import evidence_diagnostics, extraction_payload, merge_recovery
         from ..performance_specification_evidence import (
-            PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT, resolve_request_notes,
+            PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
+            request_note_diagnostics, resolve_request_notes,
         )
         prompt = f"""
         Please analyze the following information extracted from emails, PDF documents, and images:
@@ -102,21 +104,28 @@ class LegacyGeminiClient:
         gaps |= required - set(result.specification_assessed_fields)
         gaps |= {label for label in required if not missing(fields.get(label))} - {e.field for e in result.specification_evidence}
         diagnostics = {}
+        note_diagnostics = {}
         if source_manifest is not None:
             _, diagnostics = evidence_diagnostics(result, source_manifest)
             gaps |= set(diagnostics)
-        if gaps:
+            note_diagnostics = request_note_diagnostics(extraction_payload(result, source_manifest))
+        if gaps or note_diagnostics:
             recovery = request(
                 "Targeted evidence recovery: inspect every supplied email, attachment "
                 "and selected spreadsheet cell again for these missing/unverified fields: "
                 + str(sorted(gaps)) + ". Retain roof-specific alternatives, requested vs "
                 "achieved distinctions, and exact source IDs/excerpts. Do not infer a "
                 "TP prefix or issuer from a manufacturer drawing. Absent facts stay null. "
-                "Verifier diagnostics: " + str(diagnostics) + ". Previous extraction: "
+                "Verifier diagnostics: " + str(diagnostics)
+                + ". Request-note diagnostics (zero-based indexes): " + str(note_diagnostics)
+                + ". Previous extraction: "
                 + result.model_dump_json() + ". Correct rejected citations using literal "
                 "source text, without changing the fact, scope or date. For a scalar "
                 "that was actually an achieved/baseline value, return null and a literal "
-                "non-request evidence candidate explaining that distinction.\n" + prompt,
+                "non-request evidence candidate explaining that distinction. Correct each "
+                "rejected request note with a verbatim excerpt and exact source ID; preserve "
+                "its words, numbers, negations, category and roof scope. Do not omit rejected "
+                "notes or replace them with a different constraint.\n" + prompt,
                 "parameter_recovery",
             )
             # Fill previously absent scalars only; retain every competing evidence
@@ -149,7 +158,13 @@ class LegacyGeminiClient:
             if unresolved:
                 # Retry the producer, not the same unusable stored extraction in
                 # the independent publisher. Valid scoped conflicts remain reviewable.
-                raise ValueError("Specification evidence recovery unresolved: " + str(unresolved))
+                # Enum counts help distinguish absent evidence from facts marked
+                # as non-requested, without logging values or source excerpts.
+                roles = {label: dict(sorted(Counter(e.role for e in result.specification_evidence
+                                                   if e.field == label).items()))
+                         for label in sorted(unresolved)}
+                raise ValueError("Specification evidence recovery unresolved: " + str(unresolved)
+                                 + "; evidence_roles=" + str(roles))
             resolve_request_notes(extraction_payload(result, source_manifest))
         # Merging two individually bounded responses must not bypass the local
         # array limits and leave an oversized extraction for the publisher.

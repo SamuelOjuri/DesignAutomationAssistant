@@ -55,25 +55,47 @@ def _candidate_key(evidence):
     ))
 
 
+def _title_block_reference_parts(snippet):
+    """Return one literal drawing number and one labelled revision from a block.
+
+    Never combine numbers from different drawings or select among revision rows.
+    The caller still verifies the entire contiguous block against its source.
+    """
+    text = _excerpt_normal(snippet)
+    numbers = re.findall(
+        r"(?<!\w)(?:(?:TP|AX)\s*|D\.S\s*-\s*)?\d+_\d+\.\d+(?:\s*-\s*[A-Z]+)?(?!\w|\.\w)",
+        text, re.IGNORECASE,
+    )
+    revisions = re.findall(r"\brev(?:ision)?[\s:|=.-]*([A-Z]+)(?!\w)", text, re.IGNORECASE)
+    if len(numbers) != 1 or len(revisions) != 1:
+        return None
+    suffix = tp_reference_revision(numbers[0], confirmed_crm=True)
+    if not suffix or not re.fullmatch(r"\d+\.\d+", suffix):
+        return None  # An already combined reference cannot acquire another letter.
+    return numbers[0], revisions[0]
+
+
 def _value_supported(evidence):
     value, snippet = evidence["value"], evidence["snippet"]
     if evidence.get("reference_parts"):
         parts = evidence["reference_parts"]
-        return (evidence["field"] == "Drawing Reference" and len(parts) == 2
-                and re.fullmatch(r"[A-Z]+", parts[1], re.IGNORECASE) is not None
-                and tp_reference_revision(parts[0], confirmed_crm=True) is not None
-                and _normal(value) == _normal(parts[0] + " - " + parts[1])
-                and all(_contains_excerpt(part, snippet) for part in parts)
-                and len(set(re.findall(r"\d+_\d+\.\d+", snippet))) == 1
-                and len(re.findall(r"\brev(?:ision)?[\s:|=.-]*[A-Z]+(?!\w)",
-                                   _excerpt_normal(snippet), re.IGNORECASE)) == 1
-                and re.search(r"\b(?:rev(?:ision)?)[\s:|=.-]*" + re.escape(parts[1]) + r"(?!\w)",
-                              _excerpt_normal(snippet), re.IGNORECASE) is not None)
+        verified = _title_block_reference_parts(snippet)
+        if (evidence["field"] not in {"Drawing Reference", "Revision"} or len(parts) != 2
+                or verified is None or tuple(map(_normal, parts)) != verified):
+            return False
+        combined = parts[0] + " - " + parts[1]
+        expected = combined if evidence["field"] == "Drawing Reference" else tp_reference_revision(combined, confirmed_crm=True)
+        return _normal(value) == _normal(expected)
     if evidence["field"] == "Revision":
         # A suffix follows '_' inside an identifier, where a word-boundary
         # substring check would otherwise reject a perfectly literal revision.
-        for match in re.finditer(r"(?<!\w)(?:(?:TP|AX)\s*|D\.S\s*-\s*)?\d+_\d+\.\d+(?:\s*-\s*[A-Z]+)?(?!\w)", snippet, re.IGNORECASE):
+        for match in re.finditer(r"(?<!\w)(?:(?:TP|AX)\s*|D\.S\s*-\s*)?\d+_\d+\.\d+(?:\s*-\s*[A-Z]+)?(?!\w|\.\w)", snippet, re.IGNORECASE):
             if _normal(tp_reference_revision(match[0], confirmed_crm=True)) == _normal(value):
+                return True
+        parts = _title_block_reference_parts(snippet)
+        if parts:
+            suffix = tp_reference_revision(parts[0] + " - " + parts[1], confirmed_crm=True)
+            if _normal(value) == _normal(suffix):
                 return True
     return evidence["field"] == "Date Received" or _contains_excerpt(value, snippet)
 
@@ -91,16 +113,34 @@ def _equivalent_description(shorter, longer):
             and _contains_excerpt(shorter["value"], longer["value"]))
 
 
+def _request_note_issue(note, sources):
+    source = sources.get(note["source_id"])
+    if not source or source["status"] != "read" or not _contains_excerpt(note["snippet"], source["text"]):
+        return "Request note has an unverified source/excerpt"
+    if note["scope"] and not _contains_excerpt(note["scope"], source["text"]):
+        return "Request note has an unverified roof scope"
+    return None
+
+
+def request_note_diagnostics(extraction):
+    """Safe, indexed reasons for the same bounded recovery used by CAD fields."""
+    sources = {entry["sourceId"]: entry for entry in extraction.get("sourceManifest", [])}
+    issues = {}
+    for index, value in enumerate(extraction.get("specificationRequestNotes") or []):
+        note = SpecificationRequestNote.model_validate(value).model_dump()
+        if reason := _request_note_issue(note, sources):
+            issues[index] = reason
+    return issues
+
+
 def resolve_request_notes(extraction):
     sources = {entry["sourceId"]: entry for entry in extraction.get("sourceManifest", [])}
     notes = []
-    for value in extraction.get("specificationRequestNotes") or []:
+    for index, value in enumerate(extraction.get("specificationRequestNotes") or []):
         note = SpecificationRequestNote.model_validate(value).model_dump()
+        if reason := _request_note_issue(note, sources):
+            raise ValueError(f"{reason} (note index {index})")
         source = sources.get(note["source_id"])
-        if not source or source["status"] != "read" or not _contains_excerpt(note["snippet"], source["text"]):
-            raise ValueError("Request note has an unverified source/excerpt")
-        if note["scope"] and not _contains_excerpt(note["scope"], source["text"]):
-            raise ValueError("Request note has an unverified roof scope")
         note.update(filename=source["filename"], contentSha256=source["contentSha256"], observedAt=source.get("observedAt"))
         if note not in notes:
             notes.append(note)

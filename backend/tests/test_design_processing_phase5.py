@@ -502,7 +502,7 @@ def test_attachment_read_failure_retains_manifest_and_schedules_extraction_retry
     failure_log = next(record.getMessage() for record in caplog.records if "failed runtime=" in record.getMessage())
     runtime = json.loads(failure_log.split("runtime=", 1)[1])
     assert runtime["worker_id"] == "phase5-worker"
-    assert runtime["pipeline_revision"] == "output-v13"
+    assert runtime["pipeline_revision"] == "output-v14"
     assert runtime["commit"] == "a" * 12 and runtime["pid"] > 0
     assert "test-token" not in failure_log
 
