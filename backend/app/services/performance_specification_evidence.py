@@ -13,6 +13,11 @@ from .specification_semantics import (
     COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, FIELD_DEFINITIONS, SpecificationEvidence,
     SpecificationRequestNote, drawing_reference_key, missing, tp_reference_revision,
 )
+from .specification_request_context import (
+    CLIENT_FIELDS, attachment_message, client_evidence_applies, email_messages,
+    parent_email, select_client_request,
+)
+from .specification_image_text import literal_source_texts
 
 FIELD_NAMES = tuple(FIELD_DEFINITIONS)
 
@@ -53,6 +58,10 @@ def _contains_excerpt(excerpt, text):
     start = r"(?<!\w)" if re.match(r"\w", excerpt[0]) else ""
     end = r"(?!\w)" if re.match(r"\w", excerpt[-1]) else ""
     return re.search(start + re.escape(excerpt) + end, text) is not None
+
+
+def _source_contains_excerpt(source, excerpt):
+    return any(_contains_excerpt(excerpt, text) for text in literal_source_texts(source))
 
 
 def _candidate_key(evidence):
@@ -132,9 +141,9 @@ def _equivalent_description(shorter, longer):
 
 def _request_note_issue(note, sources):
     source = sources.get(note["source_id"])
-    if not source or source["status"] != "read" or not _contains_excerpt(note["snippet"], source["text"]):
+    if not source or source["status"] != "read" or not _source_contains_excerpt(source, note["snippet"]):
         return "Request note has an unverified source/excerpt"
-    if note["scope"] and not _contains_excerpt(note["scope"], source["text"]):
+    if note["scope"] and not _source_contains_excerpt(source, note["scope"]):
         return "Request note has an unverified roof scope"
     return None
 
@@ -165,8 +174,20 @@ def resolve_request_notes(extraction):
 
 
 def _has_parent_request_date(evidence, source, sources):
-    """Verify an attachment's inherited date against its own outer email header."""
+    """Verify a request date through its own parent and literal message headers."""
     source_id = source["sourceId"]
+    if source.get("contentId"):
+        parent = parent_email(source, sources)
+        if not parent or source.get("observedAt") != parent.get("observedAt"):
+            return False
+        if evidence["field"] in {"Company", "Contact"}:
+            context = select_client_request(list(sources.values()))
+            if (context and _normal(context["sentDate"]) == _normal(evidence["message_date"])
+                    and client_evidence_applies(evidence, source, sources, context, _contains_excerpt)):
+                return True  # A repeated client signature still identifies that client.
+        message = attachment_message(source, sources)
+        return (message is not None and _normal(message["sentDate"]) == _normal(evidence["message_date"])
+                and evidence["request_role"] in {message["requestRole"], "document"})
     if (source.get("sourceType") != "attachment" or ":attachment:" not in source_id
             or evidence["request_role"] == "forwarded_request" or not source.get("observedAt")):
         return False
@@ -201,6 +222,7 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
     if len(sources) != len(manifest) or not sources or not any(source["status"] == "read" for source in manifest):
         raise ValueError("Source manifest is empty or contains duplicate identities")
     assessed = set(extraction.get("specificationAssessedFields") or [])
+    client_request = select_client_request(manifest)
     candidates = defaultdict(list)
     rejected = defaultdict(list)
     issues = {}
@@ -216,17 +238,19 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
             _include_baseline_references and label == "Drawing Reference" and evidence["role"] == "baseline"
             and tp_reference_revision(evidence["value"], confirmed_crm=evidence["issuer"] == "TaperedPlus")
         )
-        if evidence["role"] != "requested" and not baseline_reference:
+        described_deck = label == "Decking" and evidence["role"] == "baseline"
+        if evidence["role"] != "requested" and not baseline_reference and not described_deck:
             continue  # Non-request facts are retained in extraction, not published.
         source = sources.get(evidence["source_id"])
+        if (source is not None and label in CLIENT_FIELDS
+                and not client_evidence_applies(evidence, source, sources, client_request, _contains_excerpt)):
+            continue
         if (source is None or source["status"] != "read"
-                or not _contains_excerpt(evidence["snippet"], source["text"])):
+                or not _source_contains_excerpt(source, evidence["snippet"])):
             reject("Supporting source/excerpt could not be verified")
             continue
         if label in {"Bauder Roof Num", "Date Received"} and source["sourceType"] != "email_body":
             reject("Evidence does not meet this field's required email/request scope")
-            continue
-        if label in {"Company", "Contact", "Date Received"} and evidence["request_role"] != "direct_request":
             continue
         if label == "Drawing Reference" and not tp_reference_revision(evidence["value"]):
             # Unprefixed references require an explicit verified TP issuer claim.
@@ -244,10 +268,25 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         if not _value_supported(evidence):
             reject("Raw value is absent from the supporting excerpt")
             continue
-        observed_at = source.get("observedAt")
+        # Carrying/upload dates are provenance, not an undated document's fact date.
+        observed_at = (source.get("observedAt") if source["sourceType"] == "email_body"
+                       and evidence["request_role"] == "direct_request" else None)
+        if label in CLIENT_FIELDS and client_request:
+            observed_at = client_request["sentAt"]
+        containing = attachment_message(source, sources)
+        if containing:
+            observed_at = containing["sentAt"]
         if evidence["message_date"]:
             try:
-                if ((_normal(evidence["message_date"]) not in _normal(source["text"])
+                messages = email_messages(source["text"]) if source["sourceType"] == "email_body" else []
+                message_verified = (not messages or any(
+                    _normal(message["sentDate"]) == _normal(evidence["message_date"])
+                    and _contains_excerpt(evidence["snippet"], message["text"])
+                    and evidence["request_role"] in {message["requestRole"], "document"}
+                    for message in messages))
+                if (not message_verified
+                        or (source.get("contentId") and not _has_parent_request_date(evidence, source, sources))
+                        or (_normal(evidence["message_date"]) not in _normal(source["text"])
                      and not _has_parent_request_date(evidence, source, sources))
                         or not re.search(r"\b(?:19|20)\d{2}\b", evidence["message_date"])):
                     raise ValueError("Unverified message date")
@@ -259,6 +298,7 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
                 reject("Candidate request timestamp could not be verified")
                 continue
         candidates[label].append({**evidence, "observedAt": observed_at,
+                                  "sourceObservedAt": source.get("observedAt"),
                                   "filename": source["filename"], "contentSha256": source["contentSha256"]})
         if label == "Page Size" and re.fullmatch(r"(?:ISO\s*)?[ABC][A-Z]", evidence["value"].strip(), re.IGNORECASE):
             issues[label] = PAGE_SIZE_UNCERTAIN

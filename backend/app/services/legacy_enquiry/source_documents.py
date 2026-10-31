@@ -25,6 +25,7 @@ from ..specification_semantics import (
     ANIMATED_IMAGE_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS, COMPLETE_SOURCE_STATUSES, DWG_SKIP_STATUS,
     ENCRYPTED_PDF_SKIP_STATUS,
 )
+from ..specification_image_text import literal_image_regions
 
 
 MAX_SOURCE_BYTES = 20 * 1024 * 1024
@@ -207,6 +208,8 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
                 if _archive_budget.text_chars > MAX_CONTEXT_CHARS:
                     raise SourceDocumentError("archive_text_limit", "ZIP document text exceeds the extraction context limit; split the archive.")
             record["text"] = text
+            if Path(filename).suffix.lower() in IMAGE_EXTENSIONS:
+                record["imageTextRegions"] = literal_image_regions(text)
             if Path(filename).suffix.lower() == ".pdf":
                 # Independent physical metadata catches OCR confusions such as
                 # ISO AB -> ISO A3. It flags review; it never overwrites a title block.

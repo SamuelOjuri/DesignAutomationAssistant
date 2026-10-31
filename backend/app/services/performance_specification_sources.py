@@ -317,9 +317,11 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
     drawing_selection = None
 
     def snapshot():
+        from .specification_request_context import request_context_summary, select_client_request
         return {
             "raw": raw, "sources": provenance, "crmReads": crm_reads,
             "sourceManifest": extraction["sourceManifest"],
+            "requestContext": request_context_summary(select_client_request(extraction["sourceManifest"])),
             "requestNotes": request_notes,
             "evidenceRepairs": extraction.get("specificationEvidenceRepairs", []),
             "evidenceVersion": extraction["specificationEvidenceVersion"], "issues": issues,

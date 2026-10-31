@@ -167,8 +167,13 @@ def validate_translation(result: CADTranslation, raw: dict[str, Any], *, allow_u
             ratios = re.findall(r"(\d+)\s*(?:[:/]|\bto\b)\s*(\d+)", str(source), flags=re.IGNORECASE)
             if len(ratios) != 1 or tuple(map(int, ratios[0])) != tuple(map(int, value.split(":"))):
                 raise ValueError("CAD translation changed the specified scale")
-        elif label not in OPTIONS and value != str(source).strip():
-            raise ValueError(f"CAD translation changed source text for {label}")
+        elif label not in OPTIONS:
+            expected = str(source).strip()
+            if label in {"Company", "Contact"}:
+                # Logo/name layout is presentation, not an alias or legal-name change.
+                expected = re.sub(r"\s+", " ", expected)
+            if value != expected:
+                raise ValueError(f"CAD translation changed source text for {label}")
     result.warnings = result.warnings[:64]
     if unresolved and not allow_unresolved:
         raise UnresolvedSpecificationTranslation(result, unresolved)
@@ -182,12 +187,17 @@ def translate_specification(raw: dict[str, Any], client: LegacyGeminiClient, *, 
         "For dropdown fields return an exact allowed option only when the source "
         "unambiguously identifies it or an equivalent supported by the supplied "
         "evidence. A brand alone does not verify a specific product variant. Return null "
+        "for Decking when a deck/system label does not establish the structural "
+        "material; retain existing/baseline descriptions in the review evidence. "
+        "Never infer a deck material from a waterproofing brand. Return null "
         "for missing, unsupported or ambiguous values and explain ambiguity in warnings. "
         "Never choose a nearest scale, assume membrane layer count, EPS grade, timber "
         "thickness, or a Foamglas product variant. Preserve the direction of scale ratios. "
         "For U values return a decimal string with exactly two places, rounding HALF_UP; "
         "do not invent a secondary target. Copy other text exactly, including leading "
-        "zeroes. Incoming Information must always be the empty string. "
+        "zeroes. For Company and Contact only, collapse source whitespace to single "
+        "spaces without changing words, punctuation, case or legal suffixes. "
+        "Incoming Information must always be the empty string. "
         "Missing markers such as 'Not provided' are null, not dropdown values. "
         "Fields with source conflicts are null in Resolved values: leave those null, "
         "even when the evidence lists alternatives. Their conflict details will be "
@@ -270,7 +280,7 @@ def prepare_specification_publication(source, client) -> SpecificationPublicatio
                 if (label.casefold() in warning.casefold() or value.casefold() in warning.casefold())
                 and warning != f"{label}: translation unresolved"))
             reason = " ".join(warnings) or "No verified CAD translation could be selected."
-            reviews[label] = f"Translation unresolved for requested value '{value}'. {reason}"
+            reviews[label] = f"Translation unresolved for source value '{value}'. {reason}"
     return SpecificationPublication.model_validate({
         **translated.model_dump(by_alias=True), "fieldReviews": reviews,
         "requestNotes": [

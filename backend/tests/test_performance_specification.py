@@ -456,7 +456,7 @@ def test_roof_conflict_and_unmapped_material_publish_together(case):
     assert set(current(case).review_json["issues"]) == {"Decking", "Tapered Insulation"}
     text = pdf_text(case.gateway.uploads[-1][1])
     assert "Timber (18mm) (Roof 1)" in text and "Concrete (Roof 5)" in text
-    assert "Translation unresolved for requested value 'BauderROCK'" in text
+    assert "Translation unresolved for source value 'BauderROCK'" in text
     assert "No verified CAD translation could be selected." in text
 
 

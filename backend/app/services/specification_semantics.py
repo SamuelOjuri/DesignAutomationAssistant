@@ -38,23 +38,35 @@ FIELD_DEFINITIONS = {
         "[e.g. **.** - * from TP*****_**.** - *]."
     ),
     "Date Received": (
-        "The date the client sent the request to TaperedPlus. For forwarded chains, "
-        "do not use the date of an earlier message."
+        "The date the selected client sent the request to TaperedPlus. Company, "
+        "Contact and Date Received share that client-request context. An internal "
+        "TaperedPlus follow-up does not replace the client's date. A verified "
+        "forwarded client header can identify that request when its original email is absent."
     ),
     "Company": (
         "The company directly requesting drawings or services from TaperedPlus. For "
-        "a forwarded email, use the company of the person sending to TaperedPlus, "
-        "not an earlier sender."
+        "a forwarded email, use the client sending to TaperedPlus, not an earlier "
+        "third-party sender or the internal employee forwarding it. Preserve literal "
+        "visible branding; never expand a domain or invent a legal suffix."
     ),
     "Contact": (
         "The person directly requesting the job or drawings from TaperedPlus. For a "
-        "forwarded email, use the person sending to TaperedPlus, not an earlier sender."
+        "forwarded email, use the client sending to TaperedPlus, not an earlier "
+        "third-party sender or an internal TaperedPlus follow-up."
     ),
     "Surveyor": "The surveyor's name, when provided.",
-    "Target U Value": "The primary target U-value for the main insulation area.",
-    "Target Min U Value": "A secondary or minimum target U-value, often for an area such as upstands.",
+    "Target U Value": "The primary requested target U-value for the main insulation area, never an achieved calculation.",
+    "Target Min U Value": (
+        "A secondary or minimum requested target U-value, often for an area such as "
+        "upstands. The source must establish that role; never infer it from an achieved result."
+    ),
     "Tapered Insulation": "The type or brand of tapered insulation product requested.",
-    "Decking": "The type of roof decking material described.",
+    "Decking": (
+        "The type of roof decking material described for the applicable roof, "
+        "including existing/baseline construction unless replaced or withdrawn. "
+        "Retain a literal but ambiguous deck/system description for review; a brand "
+        "alone does not establish structural material or timber thickness."
+    ),
     "Bauder Contract Number": (
         "The contract or project reference assigned by Bauder Ltd, the roofing-system "
         "manufacturer and supplier. It is usually found in the email subject, but may "

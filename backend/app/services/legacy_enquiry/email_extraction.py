@@ -16,6 +16,7 @@ from .source_documents import (
     extract_source_records, html_text, source_record,
 )
 from ..specification_semantics import COMPLETE_SOURCE_STATUSES
+from ..specification_request_context import attachment_message, parent_email, request_context_summary
 
 
 class AttachmentTextExtractor(Protocol):
@@ -190,14 +191,25 @@ def extract_text_from_email(
         if content_id:
             results[index][0]["contentId"] = str(content_id).strip("<>")
         records.extend(results[index])
+    sources = {record["sourceId"]: record for record in records}
+    for record in records:
+        containing = attachment_message(record, sources)
+        if containing:
+            parent = parent_email(record, sources)
+            record["containingMessage"] = {
+                **request_context_summary(containing), "sourceId": parent["sourceId"],
+                "contentSha256": parent["contentSha256"],
+            }
     if manifest is not None:
         manifest.extend(records)
     if any(record["status"] not in COMPLETE_SOURCE_STATUSES for record in records):
         raise IncompleteSourceExtraction(records)
     combined_text = "\n\n".join(
         f"SOURCE ID: {record['sourceId']}\nSOURCE TYPE: {record['sourceType']}\n"
-        f"FILE: {record['filename']}\nREQUEST TIMESTAMP: {record['observedAt']}\n"
+        f"FILE: {record['filename']}\nCARRYING EMAIL TIMESTAMP (not the fact's date): {record['observedAt']}\n"
         + (f"CONTENT-ID: {record['contentId']}\n" if record.get("contentId") else "")
+        + (f"VERIFIED CONTAINING MESSAGE DATE: {record['containingMessage']['sentDate']}\n"
+           if record.get("containingMessage") else "")
         + ("EMAIL CONTENT:\n" if record["sourceType"] == "email_body" else "ATTACHMENT CONTENT:\n")
         + record["text"] for record in records if record["status"] == "read"
     )

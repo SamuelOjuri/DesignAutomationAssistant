@@ -502,7 +502,7 @@ def test_attachment_read_failure_retains_manifest_and_schedules_extraction_retry
     failure_log = next(record.getMessage() for record in caplog.records if "failed runtime=" in record.getMessage())
     runtime = json.loads(failure_log.split("runtime=", 1)[1])
     assert runtime["worker_id"] == "phase5-worker"
-    assert runtime["pipeline_revision"] == "output-v15"
+    assert runtime["pipeline_revision"] == "output-v16"
     assert runtime["commit"] == "a" * 12 and runtime["pid"] > 0
     assert "test-token" not in failure_log
 
@@ -561,6 +561,8 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
             "Bauder Contract Number": "Not provided",
             "Membrane": "Not provided",
             "VCL": "Not provided",
+            # The client sent the request at 15:12; 15:45 is the internal forward.
+            "Hour Received": "15:12",
         }
     )
     assert item.extracted_parameters_json["parameters"] == expected_parameters

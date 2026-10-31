@@ -1,4 +1,11 @@
--- Read-only diagnostics for the performance-specification publication test.
+-- Read-only performance-specification diagnostics for all stored active-group items.
+-- Group IDs below match AUTO_SYNC_ACTIVE_GROUP_IDS; update them if settings change.
+-- Membership/lifecycle comes from tasks, not a live Monday board read. Items not yet
+-- discovered by ingestion are absent; stale membership requires reconciliation.
+-- Landing Zone, Completed Folder and inactive lifecycle states are excluded.
+-- No design-processing allowlist filter: include every stored active-group item.
+-- Some legacy extraction JSON contains escaped U+0000, which PostgreSQL cannot
+-- decode. Flag these payloads and skip their JSON reads; retain the item/status.
 -- Pipeline identities must match in full, not only their output-vN suffix.
 -- Stored extraction readiness cannot verify the current Monday email revision.
 -- Artifact source identities describe the retained PDF, not the latest extraction.
@@ -6,15 +13,31 @@
 -- checked_at is the last successful specification completion, not the last attempt.
 -- Generations count refresh notifications, not separate queued jobs or PDFs.
 -- The lease expiry below assumes the worker's default 3600-second timeout.
-WITH test_items(item_id) AS (
-    VALUES
-        ('3296781921'), ('3312632285'), ('3312713363'),
-        ('3312801232'), ('3312970498'), ('3315502554'),
-        ('3316985606'), ('3319900903'), ('3319921927'),
-        ('3320074395'), ('3320649967')
+WITH latest_tasks AS (
+    -- Keep one current observation per board/item even if account keys differ.
+    SELECT DISTINCT ON (task.board_id, task.item_id)
+        task.board_id,
+        task.item_id,
+        task.source_group_id,
+        task.source_group_title,
+        task.auto_sync_state
+    FROM tasks AS task
+    WHERE task.board_id = '1882196103'
+    ORDER BY task.board_id, task.item_id, task.updated_at DESC,
+        task.external_task_key
+),
+active_items AS (
+    SELECT *
+    FROM latest_tasks
+    WHERE auto_sync_state = 'active'
+      AND source_group_id IN ('topics', 'group_mkpbs35c', 'group_mkqbx92r')
+      AND source_group_id NOT IN ('group_mkpbd6vy', 'group_mkpbb3tx')
 )
 SELECT
     CURRENT_TIMESTAMP AS observed_at,
+    t.board_id,
+    t.source_group_id,
+    t.source_group_title,
     t.item_id,
     i.state AS design_state,
     s.review_json->'source' AS review_source,
@@ -22,22 +45,26 @@ SELECT
     i.latest_analyzed_input_revision,
     i.latest_desired_pipeline_version,
     i.latest_analyzed_pipeline_version,
-    i.extracted_parameters_json->>'inputRevision' AS extraction_input_revision,
-    i.extracted_parameters_json->>'pipelineVersion' AS extraction_pipeline_version,
-    i.extracted_parameters_json->>'specificationEvidenceVersion' AS evidence_version,
+    extraction.payload->>'inputRevision' AS extraction_input_revision,
+    extraction.payload->>'pipelineVersion' AS extraction_pipeline_version,
+    extraction.payload->>'specificationEvidenceVersion' AS evidence_version,
+    (i.extracted_parameters_json IS NOT NULL AND extraction.payload IS NULL)
+        AS extraction_json_has_null_escape,
     CASE
         WHEN i.item_id IS NULL THEN 'item_not_registered'
+        WHEN i.extracted_parameters_json IS NOT NULL AND extraction.payload IS NULL
+            THEN 'extraction_payload_contains_null_character'
         WHEN i.latest_desired_input_revision IS NULL THEN 'waiting_for_inputs'
         WHEN i.latest_analyzed_input_revision IS DISTINCT FROM i.latest_desired_input_revision
             THEN 'waiting_for_input_revision'
         WHEN i.latest_analyzed_pipeline_version IS DISTINCT FROM i.latest_desired_pipeline_version
             THEN 'waiting_for_pipeline_version'
-        WHEN (i.extracted_parameters_json->>'inputRevision')
+        WHEN (extraction.payload->>'inputRevision')
                 IS DISTINCT FROM i.latest_analyzed_input_revision
-          OR (i.extracted_parameters_json->>'pipelineVersion')
+          OR (extraction.payload->>'pipelineVersion')
                 IS DISTINCT FROM i.latest_analyzed_pipeline_version
             THEN 'extraction_payload_identity_mismatch'
-        WHEN i.extracted_parameters_json->>'specificationEvidenceVersion' IS NULL
+        WHEN extraction.payload->>'specificationEvidenceVersion' IS NULL
             THEN 'missing_evidence_version'
         ELSE 'stored_identities_current_check_live_sources'
     END AS extraction_diagnostic,
@@ -73,11 +100,20 @@ SELECT
     artifacts.artifact_count,
     artifacts.rendered_count,
     artifacts.published_count
-FROM test_items AS t
+FROM active_items AS t
 LEFT JOIN design_processing_items AS i
-    ON i.board_id = '1882196103' AND i.item_id = t.item_id
+    ON i.board_id = t.board_id AND i.item_id = t.item_id
+LEFT JOIN LATERAL (
+    SELECT CASE
+        -- An odd run of backslashes followed by u0000 encodes a JSON null
+        -- character. Even runs encode literal backslashes and remain readable.
+        WHEN i.extracted_parameters_json::text ~ $json$(?<!\\)(?:\\\\)*\\u0000$json$
+            THEN NULL
+        ELSE i.extracted_parameters_json
+    END AS payload
+) AS extraction ON TRUE
 LEFT JOIN performance_specifications AS s
-    ON s.board_id = i.board_id AND s.item_id = i.item_id
+    ON s.board_id = t.board_id AND s.item_id = t.item_id
 LEFT JOIN performance_specification_artifacts AS a
     ON a.board_id = s.board_id
    AND a.item_id = s.item_id
@@ -85,7 +121,7 @@ LEFT JOIN performance_specification_artifacts AS a
 LEFT JOIN LATERAL (
     SELECT job.*
     FROM design_processing_jobs AS job
-    WHERE job.board_id = i.board_id AND job.item_id = i.item_id
+    WHERE job.board_id = t.board_id AND job.item_id = t.item_id
     ORDER BY job.created_at DESC, job.id DESC
     LIMIT 1
 ) AS j ON TRUE
@@ -95,6 +131,6 @@ LEFT JOIN LATERAL (
         COUNT(*) FILTER (WHERE artifact.status = 'rendered') AS rendered_count,
         COUNT(*) FILTER (WHERE artifact.status = 'published') AS published_count
     FROM performance_specification_artifacts AS artifact
-    WHERE artifact.board_id = i.board_id AND artifact.item_id = i.item_id
+    WHERE artifact.board_id = t.board_id AND artifact.item_id = t.item_id
 ) AS artifacts ON TRUE
-ORDER BY t.item_id;
+ORDER BY t.source_group_title NULLS LAST, t.source_group_id, t.item_id;

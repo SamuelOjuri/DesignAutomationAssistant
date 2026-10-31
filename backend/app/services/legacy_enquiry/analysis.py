@@ -6,6 +6,7 @@ from email.utils import parsedate_to_datetime
 import hashlib
 from pathlib import Path
 from typing import Protocol, Sequence
+from zoneinfo import ZoneInfo
 
 from ..design_processing_inputs import DownloadedDesignEmailAsset
 from .email_extraction import (
@@ -21,6 +22,9 @@ from .parameter_extraction import (
 )
 from .source_documents import IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_source_records, source_record
 from ..specification_semantics import COMPLETE_SOURCE_STATUSES, SpecificationEvidence
+from ..specification_request_context import (
+    email_messages, internal_address, select_client_request,
+)
 
 
 class LegacyAnalysisClient(AttachmentTextExtractor, Protocol):
@@ -135,11 +139,37 @@ def analyze_downloaded_email_assets(
     if len(all_text) > MAX_CONTEXT_CHARS:
         raise ValueError("Combined source text exceeds extraction limit; review required")
 
+    client_request = select_client_request(manifest)
+    internal_only = bool(parsed_assets) and all(
+        (messages := email_messages(entry[3])) and internal_address(messages[0]["sender"])
+        for entry in parsed_assets
+    ) and client_request is None
     extract_with_manifest = getattr(client, "extract_design_parameters_with_manifest", None)
     structured_parameters = (extract_with_manifest(all_text, manifest) if extract_with_manifest
                              else client.extract_design_parameters(all_text))
     dated_requests = [entry for entry in parsed_assets if entry[0]]
-    if dated_requests:
+    if client_request:
+        from ..performance_specification_evidence import resolve_email_evidence
+        from ..specification_recovery import extraction_payload
+        # The same context governs model validation, persisted raw fields and CAD.
+        if structured_parameters.specification_evidence:
+            resolved, _, _ = resolve_email_evidence(extraction_payload(structured_parameters, manifest))
+            structured_parameters.company = resolved["Company"]
+            structured_parameters.contact = resolved["Contact"]
+        request_date = datetime.fromisoformat(client_request["sentAt"]).astimezone(
+            ZoneInfo("Europe/London"))
+        structured_parameters.date_received = request_date.strftime("%d %b %Y")
+        structured_parameters.hour_received = request_date.strftime("%H:%M")
+        structured_parameters.specification_evidence = [
+            e for e in structured_parameters.specification_evidence if e.field != "Date Received"
+        ] + [SpecificationEvidence(
+            field="Date Received", value=structured_parameters.date_received,
+            source_id=client_request["sourceId"], location="selected client request header",
+            snippet=client_request["headerSnippet"], scope=None, issuer=None, role="requested",
+            request_role=client_request["requestRole"], message_date=client_request["sentDate"],
+            rationale="Client-request context shared by Company, Contact and Date Received",
+        )]
+    elif dated_requests and not internal_only:
         latest = max(dated_requests, key=lambda entry: (entry[0], int(entry[1])))
         timestamp, asset_id, _, header, _, _, _ = latest
         request_date = parsedate_to_datetime(next(line[6:] for line in header.splitlines() if line.startswith("Date: ")))
@@ -155,10 +185,17 @@ def analyze_downloaded_email_assets(
             request_role="direct_request",
             rationale="Latest actual outer request timestamp; earlier forwarded dates and upload times excluded",
         )]
+    elif internal_only:
+        structured_parameters.date_received = structured_parameters.hour_received = None
+        structured_parameters.company = structured_parameters.contact = None
+        structured_parameters.specification_evidence = [
+            e for e in structured_parameters.specification_evidence if e.field not in {"Company", "Contact", "Date Received"}]
     parameters = extract_parameters(
         all_text,
         extracted_parameters=structured_parameters,
     )
+    if internal_only:
+        parameters["Date Received"] = parameters["Hour Received"] = "Not provided"
     query_llm: QueryLlm = client.query_llm
     project_name = extract_project_name_from_content(
         first_email_text,
@@ -179,7 +216,7 @@ def analyze_downloaded_email_assets(
         extracted_text_sha256=hashlib.sha256(all_text.encode("utf-8")).hexdigest(),
         performance_parameters={
             **structured_parameters.as_canonical_parameters(),
-            "Date Received": parameters["Date Received"],
+            "Date Received": None if internal_only else parameters["Date Received"],
             "Bauder Roof Num": structured_parameters.bauder_roof_num,
         },
         specification_evidence=tuple(e.model_dump() for e in structured_parameters.specification_evidence),

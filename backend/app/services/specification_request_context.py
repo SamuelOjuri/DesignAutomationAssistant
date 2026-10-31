@@ -1,0 +1,155 @@
+"""Literal message boundaries and client identity, independent of model claims."""
+
+from datetime import timezone
+from email.utils import getaddresses
+import re
+from zoneinfo import ZoneInfo
+
+from dateutil.parser import isoparse, parse
+
+from ..config import settings
+
+
+CLIENT_FIELDS = frozenset({"Company", "Contact", "Date Received"})
+
+
+def _addresses(values):
+    # Outlook's plain-text alternative repeats linked addresses as <mailto:...>.
+    cleaned = [re.sub(r"<mailto:[^>]*>", "", value, flags=re.I) for value in values]
+    return list(dict.fromkeys(address.lower() for _, address in getaddresses(cleaned) if "@" in address))
+
+
+def message_timestamp(value):
+    if not value or not re.search(r"\b(?:19|20)\d{2}\b", value):
+        return None
+    try:
+        stamp = isoparse(value) if re.match(r"^\d{4}-\d{2}-\d{2}(?:T|\s|$)", value) else parse(value, dayfirst=True)
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=ZoneInfo("Europe/London"))
+        return stamp.astimezone(timezone.utc).isoformat()
+    except (ValueError, OverflowError):
+        return None
+
+
+def email_messages(text):
+    """Only header runs beginning with From; body dates cannot create headers."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    starts = [match.start() for match in re.finditer(r"(?mi)^From:[ \t]", text)]
+    messages = []
+    for index, start in enumerate(starts):
+        block = text[start:starts[index + 1] if index + 1 < len(starts) else len(text)]
+        headers = []
+        values = {}
+        after_blank = False
+        for line in block.splitlines():
+            if not line.strip():
+                after_blank = True
+                continue  # Outlook puts blank lines between forwarded headers.
+            match = re.match(r"^(From|To|Cc|Bcc|Subject|Date|Sent|Importance):[ \t]*(.*)$", line, re.I)
+            if match:
+                key = match[1].lower()
+                values.setdefault(key, []).append(match[2])
+                headers.append(line)
+                after_blank = False
+            elif line[0].isspace() and headers and not after_blank:
+                headers[-1] += "\n" + line
+                # Folded recipient lines matter when selecting a client request.
+                values[key][-1] += " " + line.strip()
+            else:
+                break
+        dates = values.get("date", []) + values.get("sent", [])
+        senders = _addresses(values.get("from", []))
+        recipients = _addresses(values.get("to", []) + values.get("cc", []))
+        if len(dates) != 1 or len(senders) > 1:
+            continue
+        messages.append({
+            "messageIndex": index, "sender": senders[0] if senders else None, "recipients": recipients,
+            "sentDate": dates[0], "sentAt": message_timestamp(dates[0]),
+            "requestRole": "direct_request" if index == 0 else "forwarded_request",
+            "headerSnippet": "\n".join(headers), "text": block,
+        })
+    return messages
+
+
+def internal_address(address):
+    domain = str(address or "").rsplit("@", 1)[-1].lower()
+    domains = {part.strip().lower() for part in settings.design_processing_internal_email_domains.split(",") if part.strip()}
+    return domain in domains
+
+
+def select_client_request(manifest):
+    """Select the latest external message sent to the configured organisation."""
+    candidates = []
+    for source in manifest:
+        if source.get("sourceType") != "email_body" or source.get("status") != "read":
+            continue
+        for message in email_messages(source["text"]):
+            if (message["sender"] and not internal_address(message["sender"])
+                    and any(internal_address(a) for a in message["recipients"])):
+                candidates.append({**message, "sourceId": source["sourceId"]})
+    if not candidates:
+        return None  # Legacy/unidentified sources retain their existing checks.
+    if any(not message["sentAt"] for message in candidates):
+        raise ValueError("Client request has an unreadable sent date; chronology requires review")
+    latest = max(message["sentAt"] for message in candidates)
+    current = [message for message in candidates if message["sentAt"] == latest]
+    if len({message["sender"] for message in current}) != 1:
+        raise ValueError("Simultaneous client requests have conflicting senders")
+    # Prefer the original outer email over an otherwise identical quoted copy.
+    return min(current, key=lambda message: (message["messageIndex"], message["sourceId"]))
+
+
+def request_context_summary(context):
+    return {key: value for key, value in context.items() if key != "text"} if context else None
+
+
+def parent_email(source, sources):
+    identity = source.get("sourceId", "")
+    if source.get("sourceType") != "attachment" or ":attachment:" not in identity:
+        return None
+    parent = sources.get(identity.split(":attachment:", 1)[0] + ":body")
+    return parent if parent and parent.get("status") == "read" and parent.get("sourceType") == "email_body" else None
+
+
+def contains_content_id(text, content_id):
+    content_id = str(content_id or "").strip("<>")
+    return bool(content_id and re.search(r"(?i:cid:)" + re.escape(content_id) + r"(?=[>\]\s\"']|$)", text))
+
+
+def attachment_messages(source, sources):
+    parent = parent_email(source, sources)
+    if not parent or not source.get("contentId"):
+        return []
+    return [message for message in email_messages(parent["text"])
+            if contains_content_id(message["text"], source["contentId"])]
+
+
+def attachment_message(source, sources):
+    parent = parent_email(source, sources)
+    if parent and source.get("observedAt") != parent.get("observedAt"):
+        return None
+    messages = attachment_messages(source, sources)
+    return messages[0] if len(messages) == 1 else None
+
+
+def client_evidence_applies(evidence, source, sources, context, contains):
+    """Company/contact/date must belong to the same selected client message."""
+    if context is None:
+        parent = source if source.get("sourceType") == "email_body" else parent_email(source, sources)
+        messages = email_messages(parent["text"]) if parent else []
+        return (evidence["request_role"] == "direct_request"
+                and not (messages and internal_address(messages[0]["sender"])))
+    if source.get("sourceType") == "email_body":
+        return any(message["sender"] == context["sender"] and message["sentAt"] == context["sentAt"]
+                   and contains(evidence["snippet"], message["text"])
+                   for message in email_messages(source["text"]))
+    if source.get("sourceType") == "reviewed_crm":
+        return evidence["request_role"] == "direct_request"
+    parent = parent_email(source, sources)
+    if parent and source.get("contentId"):
+        messages = attachment_messages(source, sources)
+        return (any(message["sender"] == context["sender"] and message["sentAt"] == context["sentAt"] for message in messages)
+                and all(message["sender"] in {None, context["sender"]} for message in messages))
+    # Explicit requester forms, including standalone source documents.
+    return evidence["request_role"] == "direct_request" and (
+        parent is None or parent["sourceId"] == context["sourceId"])

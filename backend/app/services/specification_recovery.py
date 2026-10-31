@@ -9,9 +9,13 @@ import re
 
 from .performance_specification_evidence import (
     _contains_excerpt, _excerpt_normal, _normal, _parse_message_date, _value_supported, request_note_diagnostics,
-    resolve_email_evidence, resolve_request_notes,
+    resolve_email_evidence, resolve_request_notes, _source_contains_excerpt,
 )
 from .specification_semantics import EVIDENCE_VERSION, canonical_label, missing, tp_reference_revision
+from .specification_image_text import literal_image_regions
+from .specification_request_context import (
+    attachment_message, parent_email, request_context_summary, select_client_request,
+)
 
 
 def extraction_payload(result, manifest):
@@ -23,6 +27,7 @@ def extraction_payload(result, manifest):
         "performanceParameters": {**{canonical_label(k): v for k, v in result.as_canonical_parameters().items()},
                                   "Bauder Roof Num": result.bauder_roof_num},
         "sourceManifest": manifest,
+        "requestContext": request_context_summary(select_client_request(manifest)),
     }
 
 
@@ -30,6 +35,30 @@ def evidence_diagnostics(result, manifest):
     payload = extraction_payload(result, manifest)
     _, provenance, issues = resolve_email_evidence(payload)
     return provenance, issues
+
+
+def repair_image_company_citations(result, manifest):
+    """Restore one complete literal image region; never change the claimed name."""
+    sources = {source["sourceId"]: source for source in manifest}
+    for index, old in enumerate(result.specification_evidence):
+        source = sources.get(old.source_id)
+        if (old.field != "Company" or not source or source["status"] != "read"
+                or not source.get("imageTextRegions")):
+            continue
+        if _source_contains_excerpt(source, old.snippet) and _value_supported(old.model_dump()):
+            continue
+        # Reparse immutable text; metadata alone cannot supply a fabricated region.
+        matches = [region for region in literal_image_regions(source["text"])
+                   if _contains_excerpt(old.value, region["text"])]
+        if len(matches) != 1:
+            continue
+        new = old.model_copy(update={"snippet": matches[0]["text"]})
+        result.specification_evidence[index] = new
+        result._evidence_repairs.append({
+            "reason": "Verified literal image-region citation repair", "regionId": matches[0]["id"],
+            "before": old.model_dump(), "after": new.model_dump(),
+            "contentSha256": source["contentSha256"],
+        })
 
 
 def _list_text_positions(text):
@@ -151,7 +180,7 @@ def _date_repair_allowed(old, new, sources):
         return True
     source = sources.get(old.source_id)
     if (not old.message_date or not new["message_date"] or old.source_id != new["source_id"]
-            or not source or source["sourceType"] != "email_body"
+            or not source
             or _contains_excerpt(old.message_date, source["text"])):
         return False
     try:
@@ -161,6 +190,13 @@ def _date_repair_allowed(old, new, sources):
                 != _parse_message_date(new["message_date"]).replace(tzinfo=None)):
             return False
     except (ValueError, OverflowError):
+        return False
+    if source["sourceType"] == "attachment":
+        message = attachment_message(source, sources)
+        return (message is not None and _normal(message["sentDate"]) == _normal(new["message_date"])
+                and _contains_excerpt(new["snippet"], source["text"])
+                and old.request_role in {message["requestRole"], "document"})
+    if source["sourceType"] != "email_body":
         return False
     text = source["text"].replace("\r\n", "\n").replace("\r", "\n")
     blocks = re.split(r"(?m)(?=^From:[ \t])", text)
@@ -230,6 +266,8 @@ def _merge_request_notes(initial, recovery, manifest):
 
 
 def merge_recovery(initial, recovery, manifest):
+    repair_image_company_citations(initial, manifest)
+    repair_image_company_citations(recovery, manifest)
     before, _ = evidence_diagnostics(initial, manifest)
     after, _ = evidence_diagnostics(recovery, manifest)
     sources = {s["sourceId"]: s for s in manifest}
@@ -253,9 +291,11 @@ def merge_recovery(initial, recovery, manifest):
                 replacements.append(new)
         if len(replacements) == 1:
             new = replacements[0]
+            parent = parent_email(sources[new["source_id"]], sources)
             initial._evidence_repairs.append({"reason": "Verified citation/formatting repair",
                 "before": old.model_dump(), "after": new,
-                "contentSha256": sources[new["source_id"]]["contentSha256"]})
+                "contentSha256": sources[new["source_id"]]["contentSha256"],
+                **({"parentEmailContentSha256": parent["contentSha256"]} if parent else {})})
         else:
             retained.append(old)
     unique = {e.model_dump_json(): e for e in (*retained, *recovery.specification_evidence)}
@@ -274,6 +314,8 @@ def merge_recovery(initial, recovery, manifest):
             continue
         for evidence in recovery.specification_evidence:
             source = sources.get(evidence.source_id)
+            if label == "Decking" and evidence.role == "baseline":
+                continue  # Described existing decking remains an applicable fact.
             if (evidence.field == label and evidence.role in {"achieved", "baseline", "withdrawn", "lookup"}
                     and _normal(value) == _normal(evidence.value) and source and source["status"] == "read"
                     and _contains_excerpt(evidence.snippet, source["text"]) and _value_supported(evidence.model_dump())):

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from typing import Annotated, Literal, Optional
 
@@ -9,7 +10,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from .gemini_models import ThinkingLevel, validate_thinking_level
 from .services.legacy_enquiry import LEGACY_MANIFEST_DIGEST
 
-DESIGN_PROCESSING_PIPELINE_REVISION = "output-v15"
+DESIGN_PROCESSING_PIPELINE_REVISION = "output-v16"
 
 class Settings(BaseSettings):
     # monday
@@ -109,6 +110,7 @@ class Settings(BaseSettings):
     design_processing_landing_group_id: str = "group_mkpbd6vy"
     design_processing_project_board_id: str = "1825117125"
     design_processing_extraction_model: str = "gemini-3.8-flash"
+    design_processing_internal_email_domains: str = "taperedplus.co.uk"
     design_processing_extraction_remote_validation_seconds: int = Field(default=60, ge=1)
     design_processing_thinking_level: ThinkingLevel = "medium"
     design_processing_artifact_bucket: str = "design-processing-artifacts"
@@ -151,6 +153,15 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_design_processing_thinking_level(cls, v: object) -> str:
         return str(v).strip().lower()
+
+    @field_validator("design_processing_internal_email_domains", mode="before")
+    @classmethod
+    def _normalize_internal_email_domains(cls, value: object) -> str:
+        domains = sorted({domain.strip().lower() for domain in str(value).split(",") if domain.strip()})
+        if not domains or any(not re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}", domain)
+                              for domain in domains):
+            raise ValueError("Internal email domains must be comma-separated domain names")
+        return ",".join(domains)
 
     @field_validator(
         "design_processing_board_id",
@@ -285,10 +296,13 @@ class Settings(BaseSettings):
 
     @property
     def design_processing_pipeline_version(self) -> str:
+        domain_identity = hashlib.sha256(
+            self.design_processing_internal_email_domains.encode("utf-8")).hexdigest()[:12]
         return (
             f"legacy-files-{LEGACY_MANIFEST_DIGEST}:"
             f"model-{self.design_processing_extraction_model}:"
             f"thinking-{self.design_processing_thinking_level}:"
+            f"request-domains-{domain_identity}:"
             f"{DESIGN_PROCESSING_PIPELINE_REVISION}"
         )
 

@@ -70,7 +70,7 @@ python -m backend.scripts.check_design_processing_sources
 ```
 
 This uses only synthetic DWG, ZIP, XLSX and encrypted-PDF bytes with no database or
-network calls. Expected output includes `status: ok`, `pipeline_revision: output-v15`,
+network calls. Expected output includes `status: ok`, `pipeline_revision: output-v16`,
 and all four checks with `passed: true`. It verifies that DWG and encrypted PDFs
 are skipped, ZIP members are read and long spreadsheet cells retain their final
 technical values. A `.dwg`
@@ -149,14 +149,22 @@ and date. Rejected candidates remain in provenance as `rejectedCandidates`, with
 `repaired` or `unverified` status; different unverified claims still require review.
 An attachment (including an archive member) may cite its own parent email's exact
 outer Date header when its inherited timestamp matches that parent's timestamp.
-An unrelated email or a date found only in a forwarded body cannot establish this
-attachment chronology.
-Actual outer email sent timestamps establish request chronology, independently of
-Monday asset IDs/upload order. The most recent outer request supplies the fallback
-Date Received, excluding earlier dates inside the forwarded chain.
-Forwarded-message facts retain their verified message-header dates and requester
-roles, so an earlier sender cannot replace the direct requester. Multiple email
-files with unreadable sent dates require chronology review.
+Inline images can instead use the literal Date/Sent header of their unique containing
+message, verified through Content-ID and message boundaries. Reused or unmatched
+Content-IDs cannot establish a drawing's date. Repeated signatures can identify the
+selected client when every occurrence belongs to that same sender. An unrelated
+message or a date mentioned only in prose cannot establish attachment chronology.
+Undated documents retain their carrying email time as `sourceObservedAt`, independently
+of the candidate's fact time; a later email carrying an older image cannot silently
+supersede a dated fact.
+
+Company, Contact and Date Received share one selected client-request context: the
+latest external sender addressing a configured TaperedPlus domain. A later internal
+follow-up does not replace that client or enquiry date. When only an internal forward
+is supplied, a verified client header within it may establish the context. Simultaneous
+different client senders or unreadable candidate dates require review. Internal-only
+correspondence supplies no client date. Unknown legacy headers retain existing checks.
+Current verified CRM precedence is unchanged.
 
 The reader supports plain text and HTML-only email bodies, PDF/image attachments,
 DOCX, text/CSV/TSV/JSON/XML/HTML and XLS/XLSX/**XLSM**. Workbook readers use cached
@@ -305,12 +313,14 @@ does not automatically include attachments on linked boards.
    `DESIGN_PROCESSING_MODE=shadow`. Keep existing extraction and reconciliation
    services running. The new publisher runs as another service:
    `python -m backend.app.services.performance_specification`.
-3. Extraction identity is now `output-v15` (`output-v9` introduced source evidence;
+3. Extraction identity is now `output-v16` (`output-v9` introduced source evidence;
    `output-v10` added DWG skips and bounded ZIP extraction; `output-v11` preserves
    long spreadsheet cells; `output-v12` skips encrypted PDFs; `output-v13` validates
    recovery against source text and retains request constraints; `output-v14` repairs
    request-note citations and verifies revisions from separate title-block cells;
-   `output-v15` adds bounded drawing detail views and audited date/issuer/scope repairs). The CAD publication contract is now
+   `output-v15` adds bounded drawing detail views and audited date/issuer/scope repairs;
+   `output-v16` adds literal image regions, client-request context and applicable
+   existing-deck evidence). The CAD publication contract is now
    `performance-specification-v4`. Existing canonical CSV rows
    remain unchanged. Run the normal design reconciliation sweep to re-extract eligible
    historical projects. Old extraction records without the versioned source/evidence
@@ -425,13 +435,53 @@ the database until all matching application/worker processes have stopped.
 
 ## Verification
 
-The source-replay hardening release requires fresh `output-v15` extraction and uses
+The current release requires fresh `output-v16` extraction and uses
 `performance-specification-v4` PDFs. Deploy matching API, design, reconciliation and
 specification workers, then run the normal reconciliation for the allowlisted items.
 No additional database migration is needed. The publisher compares the **full**
 configured pipeline identity, including model/thinking settings; matching stored
 desired/analyzed identities alone cannot authorize reuse of an older extraction.
 Retained PDFs remain available until a verified replacement succeeds.
+
+Images now transcribe coherent visible text into bounded `[TEXT REGION n]` blocks,
+with visual descriptions separate. Evidence and constraint excerpts use those literal
+regions, not descriptive prose. A Company citation can be restored to one uniquely
+matching region within the same image without changing the claimed name, scope,
+issuer, role or date. Before/after evidence, region ID and source hash are audited;
+invented legal suffixes, separate logos and ambiguous matches still block extraction.
+The model remains responsible for reading the image accurately.
+Company/Contact raw evidence retains visual line breaks. CAD export collapses only
+their whitespace to single spaces, preserving words, punctuation, case and legal
+suffixes; other text/identifier validation remains exact.
+
+Decking means the material **described** for the applicable roof. Verified baseline
+deck construction therefore remains applicable; recovery cannot clear it merely by
+returning a null scalar. Achieved U-values, withdrawn facts and unselected options
+remain excluded from requested fields. An ambiguous description such as `polyroof deck`
+retains its raw wording and baseline provenance, with a null CAD value and a
+**Review required** note when no allowed structural material can be established.
+
+Deploy matching API, design/reconciliation and specification workers, stop replaced
+workers, and run normal reconciliation for item `3310414364` to request fresh extraction:
+
+```bash
+python -m backend.app.services.design_processing_reconciliation --item-id 3310414364
+```
+
+No database migration is required. `DESIGN_PROCESSING_INTERNAL_EMAIL_DOMAINS` defaults
+to `taperedplus.co.uk`; provide comma-separated additional internal domains only when
+needed, consistently across the services. Its normalized value contributes to the
+full extraction identity. The new pipeline revision forces fresh transcription;
+reusing old descriptive image text cannot validate a previously unsupported logo claim.
+
+The October 31 full live Gemini replay of the two supplied emails for item
+`3310414364` completed on `output-v16` with no remaining evidence or request-note
+errors after recovery. It selected the external client's 26 October 14:56 request,
+retained the literal company branding and the described `polyroof deck`, and verified
+the plan's 22 October 16:36 forwarded-message date through its Content-ID. The replay
+saved diagnostics locally and did not publish PDFs or modify Monday/database records.
+It validates those captured responses; subsequent model responses still require
+the same evidence checks.
 
 Extraction now checks evidence against the manifest before completing analysis and
 makes one bounded recovery attempt. A unique verified passage can repair an incorrect
@@ -569,7 +619,7 @@ are stored in `source_json.requestNotes` and `translation_json.requestNotes` and
 `published_with_review`/`rendered_with_review` status even if all scalar fields resolve.
 
 ```powershell
-venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_drawing_selection.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_specification_publication_hardening.py backend/tests/test_specification_recovery_regressions.py backend/tests/test_pdf_detail_views.py backend/tests/test_source_archives.py backend/tests/test_encrypted_pdf_sources.py -q
+venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_drawing_selection.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_specification_publication_hardening.py backend/tests/test_specification_recovery_regressions.py backend/tests/test_specification_semantic_context.py backend/tests/test_pdf_detail_views.py backend/tests/test_source_archives.py backend/tests/test_encrypted_pdf_sources.py -q
 ```
 
 Coverage includes LLM schema/semantic validation, optional values, exact PDF text

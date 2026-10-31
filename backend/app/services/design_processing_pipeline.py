@@ -160,6 +160,7 @@ def _extraction_payload(
     result: LegacyAnalysisResult,
     identity: ProcessingIdentity,
 ) -> dict[str, Any]:
+    from .specification_request_context import request_context_summary, select_client_request
     return {
         "schemaVersion": 1,
         **_identity_payload(identity),
@@ -171,6 +172,7 @@ def _extraction_payload(
         "specificationEvidenceRepairs": list(result.specification_evidence_repairs),
         "specificationAssessedFields": list(result.specification_assessed_fields),
         "sourceManifest": list(result.source_manifest),
+        "requestContext": request_context_summary(select_client_request(result.source_manifest)),
         "sources": result.sources,
         "projectName": result.project_name,
         "emailContentHashes": [
