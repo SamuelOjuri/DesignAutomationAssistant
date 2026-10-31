@@ -70,7 +70,7 @@ python -m backend.scripts.check_design_processing_sources
 ```
 
 This uses only synthetic DWG, ZIP, XLSX and encrypted-PDF bytes with no database or
-network calls. Expected output includes `status: ok`, `pipeline_revision: output-v14`,
+network calls. Expected output includes `status: ok`, `pipeline_revision: output-v15`,
 and all four checks with `passed: true`. It verifies that DWG and encrypted PDFs
 are skipped, ZIP members are read and long spreadsheet cells retain their final
 technical values. A `.dwg`
@@ -276,11 +276,12 @@ does not automatically include attachments on linked boards.
    `DESIGN_PROCESSING_MODE=shadow`. Keep existing extraction and reconciliation
    services running. The new publisher runs as another service:
    `python -m backend.app.services.performance_specification`.
-3. Extraction identity is now `output-v14` (`output-v9` introduced source evidence;
+3. Extraction identity is now `output-v15` (`output-v9` introduced source evidence;
    `output-v10` added DWG skips and bounded ZIP extraction; `output-v11` preserves
    long spreadsheet cells; `output-v12` skips encrypted PDFs; `output-v13` validates
    recovery against source text and retains request constraints; `output-v14` repairs
-   request-note citations and verifies revisions from separate title-block cells). The CAD publication contract is now
+   request-note citations and verifies revisions from separate title-block cells;
+   `output-v15` adds bounded drawing detail views and audited date/issuer/scope repairs). The CAD publication contract is now
    `performance-specification-v4`. Existing canonical CSV rows
    remain unchanged. Run the normal design reconciliation sweep to re-extract eligible
    historical projects. Old extraction records without the versioned source/evidence
@@ -395,7 +396,7 @@ the database until all matching application/worker processes have stopped.
 
 ## Verification
 
-The evidence-recovery hardening release requires fresh `output-v14` extraction and uses
+The source-replay hardening release requires fresh `output-v15` extraction and uses
 `performance-specification-v4` PDFs. Deploy matching API, design, reconciliation and
 specification workers, then run the normal reconciliation for the allowlisted items.
 No additional database migration is needed. The publisher compares the **full**
@@ -433,7 +434,7 @@ without logging their raw values or excerpts. A null or missing-value marker can
 clear a populated scalar only with the existing verified non-request evidence check.
 
 For the Render failures on items `3320074395`, `3320649967` and `3319921927`, deploy
-matching API, design/reconciliation and specification workers with `output-v14`, stop
+matching API, design/reconciliation and specification workers with `output-v15`, stop
 the replaced workers, and keep the existing allowlist. No database migration or
 environment-variable change is needed. Run normal reconciliation after deployment:
 
@@ -444,13 +445,66 @@ python -m backend.app.services.design_processing_reconciliation --item-id 331992
 ```
 
 The new pipeline identity schedules fresh extraction; do not manually change job
-statuses or retry an obsolete execution identity. Confirm `output-v14` in runtime
+statuses or retry an obsolete execution identity. Confirm `output-v15` in runtime
 logs and the full desired/analyzed pipeline identities in the diagnostic SQL.
 These fixes cover reproduced recovery defects, not every possible unverified fact
 in those jobs. Continued Page Size failures require inspection of the actual
 source and its evidence role. Existing PDFs remain until verified replacements
 succeed. Openpyxl data-validation-extension warnings and PDF duplicate `/PageMode`
 warnings in the supplied logs did not themselves report failed extraction jobs.
+
+The October 31 source replay reproduced recovery merging a corrected literal
+forwarded-message date with its invalid reformatted predecessor. Recovery can now
+replace that predecessor only for the same fact, source, scope and request role,
+with the same local calendar date/time and a unique containing message whose
+Date/Sent header exactly supplies the correction. It cannot move a fact to another
+message or change an already literal date. ISO year-month-day timestamps retain
+their month/day order. All accepted repairs retain before/after evidence and hashes.
+
+A flattened bullet note can be restored to a unique contiguous source passage,
+allowing only whitespace, star/bullet prefixes and sentence-ending full stops to
+differ. Every word, sign and numeric fact must remain; omitted intervening text,
+ellipses, competing matches and URL rewrites cannot pass this repair. The full literal
+passage and before/after audit are retained, rather than accepting a shortened note
+that loses constraints. A note's unsupported optional scope can be removed only when its full excerpt is
+verified in the same source and the old scope is absent there. Verified scopes and
+all constraint wording survive. Self-identifying TP/AX references can discard an
+unquoted issuer or use literal quoted branding; bare/D.S references still require
+verified TP provenance. Redundant `reference_parts` also validate when they reproduce
+one complete reference already present verbatim in the excerpt. They cannot change
+the reference or combine separate passages. Company names remain literal; recovery
+cannot invent legal-name suffixes or replace an unsupported claim with an alias.
+Drawing-title recovery may restore a possessive apostrophe in an alphabetic name
+when the corrected value is literally supported in the same source. It cannot
+change other words, numeric identifiers or negations; verified spelling alternatives
+from different sources still remain separate candidates for review.
+
+Large PDF drawings now include four overlapping detail views per large page in the
+same Gemini transcription request, capped at 16 detail pages and 20 MiB of derived
+PDF bytes. The original complete PDF remains present; ordinary small pages have no
+detail views. Views stay in memory, retain the original source identity, and never
+supply page-size evidence through their dimensions. PDF requests use high media
+resolution and literal transcription instructions, including no invented labels,
+dates or requested/achieved annotations. Explicit ambiguous paper-size labels must
+remain evidence for review. Source transcription is still model-based; these changes
+improve legibility without guaranteeing that every glyph is correct. Existing source
+size/context limits and encrypted-PDF skips still apply. No new dependency is required.
+
+The supplied log's new `output-v14` Company failure, job
+`3eee61a8-077c-4e5e-a8a1-ae52d5f1f72f`, belongs to item `3312713363`, not one of the
+three supplied emails. Its retained `output-v13` Company evidence validates locally;
+that older snapshot does not reproduce the failed response. The failed job has no
+saved response payload, so its exact mismatched value/excerpt still needs that item's
+source replay. Worker commit/pipeline fields distinguish the old in-flight errors
+from failures produced by the replacement worker.
+
+With the supplied three emails, provider replays and subsequent local replays of
+the captured responses verified the `output-v15` fixes. Final captured-response
+validation completed for all three while retaining review issues: title/product/deck
+alternatives for `3320074395`, ambiguous paper size for `3320649967`, and drawing/roof
+U-value alternatives for `3319921927`. These checks did not publish PDFs or modify
+Monday/database records. They validate these captured responses, not every future
+model response. Private source files and diagnostics remain outside Git.
 
 Accepted AX drawing numbers retain their prefix and actual issuer. Separately quoted
 drawing-number/revision cells may form `AX 16670_26.12 - B`; the derived CAD revision
@@ -475,7 +529,7 @@ are stored in `source_json.requestNotes` and `translation_json.requestNotes` and
 `published_with_review`/`rendered_with_review` status even if all scalar fields resolve.
 
 ```powershell
-venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_specification_publication_hardening.py backend/tests/test_specification_recovery_regressions.py backend/tests/test_source_archives.py backend/tests/test_encrypted_pdf_sources.py -q
+venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_specification_publication_hardening.py backend/tests/test_specification_recovery_regressions.py backend/tests/test_pdf_detail_views.py backend/tests/test_source_archives.py backend/tests/test_encrypted_pdf_sources.py -q
 ```
 
 Coverage includes LLM schema/semantic validation, optional values, exact PDF text

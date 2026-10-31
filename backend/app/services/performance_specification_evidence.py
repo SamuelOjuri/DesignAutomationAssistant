@@ -7,7 +7,7 @@ from datetime import timezone
 import re
 from zoneinfo import ZoneInfo
 
-from dateutil.parser import parse as parse_datetime
+from dateutil.parser import isoparse, parse as parse_datetime
 
 from .specification_semantics import (
     COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, FIELD_DEFINITIONS, SpecificationEvidence,
@@ -21,6 +21,14 @@ VALUE_CONFLICT = "Conflicting roof/drawing/request values require a confirmed ta
 UNDATED_SCOPE_CONFLICT = "Undated project-wide value conflicts with the selected roof"
 PAGE_SIZE_CONFLICT = "Title-block paper size differs from the PDF page dimensions; confirm the intended drawing size"
 PAGE_SIZE_UNCERTAIN = "Ambiguous title-block paper size requires confirmation"
+
+
+def _parse_message_date(value):
+    # dayfirst=True changes YYYY-MM-DD dates with a day <= 12. ISO timestamps
+    # in source metadata must keep their explicit year-month-day order.
+    if re.match(r"^\d{4}-\d{2}-\d{2}(?:T|\s|$)", value):
+        return isoparse(value)
+    return parse_datetime(value, dayfirst=True)
 
 
 def _normal(value):
@@ -80,10 +88,19 @@ def _value_supported(evidence):
     if evidence.get("reference_parts"):
         parts = evidence["reference_parts"]
         verified = _title_block_reference_parts(snippet)
-        if (evidence["field"] not in {"Drawing Reference", "Revision"} or len(parts) != 2
-                or verified is None or tuple(map(_normal, parts)) != verified):
+        if evidence["field"] not in {"Drawing Reference", "Revision"} or len(parts) != 2:
             return False
         combined = parts[0] + " - " + parts[1]
+        separate_cells = verified is not None and tuple(map(_normal, parts)) == verified
+        # Some responses redundantly split an already contiguous reference.
+        # Accept only that exact reference, with an unrevised number and letter;
+        # never assemble pieces from unrelated passages.
+        literal_reference = (
+            re.fullmatch(r"\d+\.\d+", tp_reference_revision(parts[0], confirmed_crm=True) or "")
+            and re.fullmatch(r"[A-Za-z]+", parts[1]) and _contains_excerpt(combined, snippet)
+        )
+        if not (separate_cells or literal_reference):
+            return False
         expected = combined if evidence["field"] == "Drawing Reference" else tp_reference_revision(combined, confirmed_crm=True)
         return _normal(value) == _normal(expected)
     if evidence["field"] == "Revision":
@@ -230,7 +247,7 @@ def resolve_email_evidence(extraction, scopes=()):
                      and not _has_parent_request_date(evidence, source, sources))
                         or not re.search(r"\b(?:19|20)\d{2}\b", evidence["message_date"])):
                     raise ValueError("Unverified message date")
-                timestamp = parse_datetime(evidence["message_date"], dayfirst=True)
+                timestamp = _parse_message_date(evidence["message_date"])
                 if timestamp.tzinfo is None:
                     timestamp = timestamp.replace(tzinfo=ZoneInfo("Europe/London"))
                 observed_at = timestamp.astimezone(timezone.utc).isoformat()

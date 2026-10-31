@@ -6,7 +6,7 @@ import pytest
 
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.performance_specification_evidence import resolve_email_evidence, resolve_request_notes
-from backend.app.services.specification_recovery import extraction_payload
+from backend.app.services.specification_recovery import extraction_payload, repair_note_list_formatting
 from backend.tests.test_specification_evidence import candidate, extraction, source
 from backend.tests.test_specification_publication_hardening import extract_twice, parameters
 
@@ -192,4 +192,162 @@ def test_note_recovery_does_not_bypass_combined_array_limit():
     with pytest.raises(ValueError, match="at most 64"):
         extract_twice(parameters(specification_request_notes=notes[:64]),
                       parameters(specification_request_notes=notes[64:]),
+                      [source("asset:1:attachment:0", text)])
+
+
+def test_literal_forwarded_header_replaces_reformatted_date_without_changing_fact():
+    header = "Thursday, October 15, 2026 10:55 AM"
+    text = ("From: Requester\nDate: Fri, 30 Oct 2026 11:32:17 +0000\n\nPlease revise.\n"
+            f"From: Earlier requester\nSent: {header}\nSubject: Original request\n\nMinimum U-value 0.35")
+    evidence = candidate("Target Min U Value", "0.35", "Minimum U-value 0.35", source_id="asset:1:body",
+                         request_role="forwarded_request", message_date="Thu, 15 Oct 2026 10:55:00 +0000")
+    manifest = [source("asset:1:body", text, "email_body")]
+    result = extract_twice(parameters(target_min_u_value="0.35", specification_evidence=[evidence]),
+                          parameters(target_min_u_value="0.35", specification_evidence=[{**evidence, "message_date": header}]), manifest)
+    raw, provenance, issues = resolve_email_evidence(extraction_payload(result, manifest))
+    assert not issues and raw["Target Min U Value"] == "0.35"
+    assert provenance["Target Min U Value"]["selected"]["observedAt"] == "2026-10-15T09:55:00+00:00"
+    assert result._evidence_repairs[0]["after"]["message_date"] == header
+
+
+@pytest.mark.parametrize("case", ["different_time", "different_date", "unrelated_message", "body_date", "duplicate", "role"])
+def test_date_repair_cannot_move_fact_to_another_message_or_time(case):
+    header = "15 October 2026 10:55"
+    text = ("From: Requester\nDate: Fri, 30 Oct 2026 11:32:17 +0000\n\nPlease revise.\n"
+            f"From: Earlier requester\nSent: {header}\nSubject: Request\n\nMinimum U-value 0.35")
+    if case == "unrelated_message":
+        text = text.replace("Minimum U-value", "From: Different requester\nSent: 14 October 2026 10:55\n\nMinimum U-value")
+    elif case == "body_date":
+        text = text.replace(f"Sent: {header}\n", "").replace("Minimum U-value", f"Body starts here.\nDate: {header}\nMinimum U-value")
+    elif case == "duplicate":
+        text += f"\nFrom: Duplicate requester\nSent: {header}\n\nMinimum U-value 0.35"
+    old_date = "2026-10-15T10:55:00Z"
+    if case == "different_time":
+        old_date = "2026-10-15T11:55:00Z"
+    if case == "different_date":
+        old_date = "2026-10-14T10:55:00Z"
+    evidence = candidate("Target Min U Value", "0.35", "Minimum U-value 0.35", source_id="asset:1:body",
+                         request_role="direct_request" if case == "role" else "forwarded_request", message_date=old_date)
+    with pytest.raises(ValueError, match="recovery unresolved"):
+        extract_twice(parameters(target_min_u_value="0.35", specification_evidence=[evidence]),
+                      parameters(target_min_u_value="0.35", specification_evidence=[{**evidence, "message_date": header}]),
+                      [source("asset:1:body", text, "email_body")])
+
+
+def test_iso_message_date_preserves_month_and_day():
+    text = "From: Requester\nDate: 2026-10-05T10:00:00Z\nCompany: Sample Ltd"
+    evidence = candidate("Company", "Sample Ltd", "Company: Sample Ltd", source_id="asset:1:body",
+                         request_role="direct_request", message_date="2026-10-05T10:00:00Z")
+    _, provenance, issues = resolve_email_evidence(extraction([source("asset:1:body", text, "email_body")], [evidence]))
+    assert not issues and provenance["Company"]["selected"]["observedAt"] == "2026-10-05T10:00:00+00:00"
+
+
+def test_recovery_can_remove_only_an_unverified_optional_note_scope():
+    text = "The pink area does not require a tapered scheme."
+    initial = parameters(specification_request_notes=[note(text, scope="Block C&D")])
+    recovered = parameters(specification_request_notes=[note(text)])
+    result = extract_twice(initial, recovered, [source("asset:1:attachment:0", text)])
+    assert len(result.specification_request_notes) == 1 and result.specification_request_notes[0].scope is None
+    assert result._evidence_repairs[0]["before"]["scope"] == "Block C&D"
+    # If that scope was in the source, the original note must survive.
+    initial = parameters(specification_request_notes=[note(text, scope="Block C&D")])
+    result = extract_twice(initial, recovered, [source("asset:1:attachment:0", "Block C&D: " + text)])
+    assert any(n.scope == "Block C&D" for n in result.specification_request_notes)
+    assert not result._evidence_repairs
+
+
+@pytest.mark.parametrize("field,value", [("Drawing Reference", "AX14992_24.06 - E"), ("Revision", "24.06 - E")])
+def test_contiguous_reference_can_have_redundant_reference_parts(field, value):
+    text = "AX14992_24.06 - E- Sample project - Block EF"
+    evidence = candidate(field, value, text, reference_parts=["AX14992_24.06", "E"])
+    raw, _, issues = resolve_email_evidence(extraction([source("asset:1:attachment:0", text)], [evidence]))
+    assert not issues and raw[field] == value
+
+
+@pytest.mark.parametrize("parts", [["AX14992_24.06", "F"], ["AX14992_24.07", "E"], ["AX14992_24.06 - E", "F"]])
+def test_redundant_reference_parts_cannot_change_literal_suffix(parts):
+    text = "AX14992_24.06 - E- Sample project - Block EF"
+    evidence = candidate("Revision", "24.06 - E", text, reference_parts=parts)
+    assert "Revision" in resolve_email_evidence(extraction([source("asset:1:attachment:0", text)], [evidence]))[2]
+
+
+@pytest.mark.parametrize("number,allowed", [("AX12345_26.01 - B", True), ("TP12345_26.01 - B", True),
+                                          ("12345_26.01 - B", False), ("D.S - 12345_26.01 - B", False)])
+def test_only_self_identifying_reference_can_drop_unquoted_issuer(number, allowed):
+    evidence = candidate("Drawing Reference", number, number, issuer="Invented Ltd")
+    initial = parameters(drawing_reference=number, specification_evidence=[evidence])
+    recovery = parameters(drawing_reference=number, specification_evidence=[{**evidence, "issuer": None}])
+    manifest = [source("asset:1:attachment:0", number)]
+    if allowed:
+        result = extract_twice(initial, recovery, manifest)
+        assert result._evidence_repairs[0]["after"]["issuer"] is None
+    else:
+        with pytest.raises(ValueError, match="recovery unresolved"):
+            extract_twice(initial, recovery, manifest)
+
+
+def test_company_recovery_cannot_expand_brand_to_unquoted_legal_name():
+    evidence = candidate("Company", "Brand Ltd", "Brand", source_id="asset:1:body", request_role="direct_request")
+    with pytest.raises(ValueError, match="Raw value is absent"):
+        extract_twice(parameters(company="Brand Ltd", specification_evidence=[evidence]),
+                      parameters(company="Brand", specification_evidence=[{**evidence, "value": "Brand"}]),
+                      [source("asset:1:body", "Brand", "email_body")])
+
+
+def test_flattened_note_restores_the_entire_contiguous_bullet_passage():
+    text = "  *   Area around joint (Grid H/2C-4C)\r\n     *   Do not exceed 170 mm\r\n     *   Review 1 in 80 falls."
+    old = "Area around joint (Grid H/2C-4C). Do not exceed 170 mm. Review 1 in 80 falls."
+    initial = parameters(specification_request_notes=[note(old)])
+    manifest = [source("asset:1:attachment:0", text)]
+    repair_note_list_formatting(initial, manifest)
+    restored, = initial.specification_request_notes
+    # All original words and the middle constraint survive; the restored excerpt
+    # is genuinely contiguous in the source, including the internal bullet markers.
+    assert restored.snippet in text and "Do not exceed 170 mm" in restored.snippet
+    assert restored.snippet.startswith("Area around joint") and "*" in restored.snippet
+    assert initial._evidence_repairs[0]["before"]["snippet"] == old
+    assert resolve_request_notes(extraction_payload(initial, manifest))
+
+
+@pytest.mark.parametrize("text,old", [
+    ("* Do not exceed 170 mm\n  * Review 1 in 80 falls", "Do exceed 170 mm. Review 1 in 80 falls"),
+    ("* Target -0.13\n  * Review 1 in 80 falls", "Target 0.13. Review 1 in 80 falls"),
+    ("* Target 0.13\n  * Review 1 in 80 falls", "Target 0.130. Review 1 in 80 falls"),
+    ("* Maximum 170 mm\n  * Separate restriction\n  * Review 1 in 80 falls", "Maximum 170 mm. Review 1 in 80 falls"),
+    ("* Maximum 170 mm\n ...\n * Review 1 in 80 falls", "Maximum 170 mm. Review 1 in 80 falls"),
+    ("* Maximum 170 mm\n  * Review 1 in 80 falls\n* Maximum 170 mm\n  * Review 1 in 80 falls", "Maximum 170 mm. Review 1 in 80 falls"),
+])
+def test_list_formatting_repair_rejects_changed_facts_omitted_passages_and_duplicates(text, old):
+    initial = parameters(specification_request_notes=[note(old)])
+    manifest = [source("asset:1:attachment:0", text)]
+    repair_note_list_formatting(initial, manifest)
+    assert initial.specification_request_notes[0].snippet == old and not initial._evidence_repairs
+
+
+def test_list_formatting_cannot_rewrite_source_link_punctuation():
+    initial = parameters(specification_request_notes=[note("https://example.test/a. More", category="source_link")])
+    repair_note_list_formatting(initial, [source("asset:1:attachment:0", "https://example.test/a\n * More")])
+    assert not initial._evidence_repairs
+
+
+@pytest.mark.parametrize("apostrophe", ["'", "\u2019"])
+def test_drawing_title_recovery_can_restore_literal_possessive_apostrophe(apostrophe):
+    title = f"St John{apostrophe}s School"
+    text = "Project: " + title
+    old = candidate("Drawing Title", "St Johns School", text)
+    result = extract_twice(parameters(drawing_title=old["value"], specification_evidence=[old]),
+                          parameters(drawing_title=title, specification_evidence=[{**old, "value": title}]),
+                          [source("asset:1:attachment:0", text)])
+    assert result._evidence_repairs[0]["after"]["value"] == title
+
+
+@pytest.mark.parametrize("old,new", [("St Johns School", "St Johns Academy"),
+                                      ("Plot A1s", "Plot A1's"), ("Cant build", "Can't build"),
+                                      ("Site 12", "Site 13")])
+def test_title_recovery_cannot_change_words_identifiers_negations_or_numbers(old, new):
+    text = "Project: " + new
+    evidence = candidate("Drawing Title", old, text)
+    with pytest.raises(ValueError, match="recovery unresolved"):
+        extract_twice(parameters(drawing_title=old, specification_evidence=[evidence]),
+                      parameters(drawing_title=new, specification_evidence=[{**evidence, "value": new}]),
                       [source("asset:1:attachment:0", text)])

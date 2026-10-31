@@ -37,6 +37,10 @@ node_modules/
 /tmp/*project_matcher*
 /tmp/*legacy_snapshot*
 /tmp/legacy-source-recovery.git/
+# Private email replay inputs, outputs and local-only operator scripts.
+/tmp/render-source-audit/
+/tmp/audit_render_sources.py
+/tmp/map_render_jobs_readonly.py
 dist/
 build/
 
