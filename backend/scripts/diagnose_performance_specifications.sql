@@ -1,0 +1,93 @@
+-- Read-only diagnostics for the performance-specification publication test.
+-- Pipeline identities must match in full, not only their output-vN suffix.
+-- Stored extraction readiness cannot verify the current Monday email revision.
+-- checked_at is the last successful specification completion, not the last attempt.
+-- Generations count refresh notifications, not separate queued jobs or PDFs.
+-- The lease expiry below assumes the worker's default 3600-second timeout.
+WITH test_items(item_id) AS (
+    VALUES
+        ('3296781921'), ('3312632285'), ('3312713363'),
+        ('3312801232'), ('3312970498'), ('3315502554'),
+        ('3316985606'), ('3319900903'), ('3319921927'),
+        ('3320649967')
+)
+SELECT
+    CURRENT_TIMESTAMP AS observed_at,
+    t.item_id,
+    i.state AS design_state,
+    i.latest_desired_input_revision,
+    i.latest_analyzed_input_revision,
+    i.latest_desired_pipeline_version,
+    i.latest_analyzed_pipeline_version,
+    i.extracted_parameters_json->>'inputRevision' AS extraction_input_revision,
+    i.extracted_parameters_json->>'pipelineVersion' AS extraction_pipeline_version,
+    i.extracted_parameters_json->>'specificationEvidenceVersion' AS evidence_version,
+    CASE
+        WHEN i.item_id IS NULL THEN 'item_not_registered'
+        WHEN i.latest_desired_input_revision IS NULL THEN 'waiting_for_inputs'
+        WHEN i.latest_analyzed_input_revision IS DISTINCT FROM i.latest_desired_input_revision
+            THEN 'waiting_for_input_revision'
+        WHEN i.latest_analyzed_pipeline_version IS DISTINCT FROM i.latest_desired_pipeline_version
+            THEN 'waiting_for_pipeline_version'
+        WHEN (i.extracted_parameters_json->>'inputRevision')
+                IS DISTINCT FROM i.latest_analyzed_input_revision
+          OR (i.extracted_parameters_json->>'pipelineVersion')
+                IS DISTINCT FROM i.latest_analyzed_pipeline_version
+            THEN 'extraction_payload_identity_mismatch'
+        WHEN i.extracted_parameters_json->>'specificationEvidenceVersion' IS NULL
+            THEN 'missing_evidence_version'
+        ELSE 'stored_identities_current_check_live_sources'
+    END AS extraction_diagnostic,
+    j.id AS latest_job_id,
+    j.status AS latest_job_status,
+    j.stage AS latest_job_stage,
+    j.execution_kind,
+    j.execution_pipeline_version,
+    j.attempt_count AS job_attempt_count,
+    j.scheduled_for AS job_scheduled_for,
+    j.next_retry_at,
+    j.heartbeat_at,
+    CASE WHEN j.status = 'running'
+        THEN COALESCE(j.heartbeat_at, j.locked_at) + INTERVAL '1 hour'
+    END AS default_job_lease_expires_at,
+    j.last_error AS job_last_error,
+    s.requested_generation,
+    s.completed_generation,
+    s.checked_at AS specification_last_success_at,
+    s.scheduled_for AS specification_scheduled_for,
+    s.lease_until AS specification_lease_until,
+    s.attempt_count AS specification_attempt_count,
+    s.review_json->>'status' AS review_status,
+    s.review_json->'issues' AS review_issues,
+    s.last_error AS specification_last_error,
+    a.status AS current_artifact_status,
+    a.filename,
+    a.monday_asset_id,
+    artifacts.artifact_count,
+    artifacts.rendered_count,
+    artifacts.published_count
+FROM test_items AS t
+LEFT JOIN design_processing_items AS i
+    ON i.board_id = '1882196103' AND i.item_id = t.item_id
+LEFT JOIN performance_specifications AS s
+    ON s.board_id = i.board_id AND s.item_id = i.item_id
+LEFT JOIN performance_specification_artifacts AS a
+    ON a.board_id = s.board_id
+   AND a.item_id = s.item_id
+   AND a.revision = s.current_revision
+LEFT JOIN LATERAL (
+    SELECT job.*
+    FROM design_processing_jobs AS job
+    WHERE job.board_id = i.board_id AND job.item_id = i.item_id
+    ORDER BY job.created_at DESC, job.id DESC
+    LIMIT 1
+) AS j ON TRUE
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*) AS artifact_count,
+        COUNT(*) FILTER (WHERE artifact.status = 'rendered') AS rendered_count,
+        COUNT(*) FILTER (WHERE artifact.status = 'published') AS published_count
+    FROM performance_specification_artifacts AS artifact
+    WHERE artifact.board_id = i.board_id AND artifact.item_id = i.item_id
+) AS artifacts ON TRUE
+ORDER BY t.item_id;

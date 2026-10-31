@@ -251,6 +251,11 @@ def _find_column(item, label, scope):
             return matches[0]
         if label in configured:
             raise SpecificationSourceError(f"Configured {scope} column for {label} is missing")
+    if scope == "project" and label == "Contact":
+        # Project Contact commonly rolls up mirrors from every drawing/request.
+        # Only an explicit mapping above may opt into that scope. Otherwise use
+        # the selected drawing's Contact, holding override or verified evidence.
+        return None
     aliases = TITLE_ALIASES.get(label, {_normal(label)})
     matches = [col for col in columns if _normal((col.get("column") or {}).get("title")) in aliases]
     if len(matches) > 1:

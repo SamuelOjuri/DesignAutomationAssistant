@@ -111,6 +111,29 @@ retained as provenance; an incompatible letter/suffix requires review. Company a
 Contact describe the direct requester. Requested U-values remain distinct from
 achieved calculations and unselected template options.
 
+Contact defaults to the selected drawing's `mirror_11__1` column (or its configured
+drawing mapping), with populated holding-item Contact values taking precedence.
+Missing or empty drawing/holding values fall back to verified email evidence.
+Project columns titled **Contact** are not automatically selected: they can roll
+up contacts from several drawings and return unsupported nested mirrors. A project
+Contact source requires an explicit `PERFORMANCE_SPECIFICATION_COLUMN_MAP` mapping,
+for example `{"project":{"Contact":"request_contact"}}`, to a suitable requester
+column. Explicit mappings still undergo normal source validation and remain below
+populated drawing and holding values in precedence. Unreadable or conflicting
+selected Contact values still stop publication and retain the previous PDF.
+This selection fix requires redeploying the specification worker, with no database
+migration or extraction-version bump. Its next refresh uses the corrected source.
+
+For an explicitly reviewed item correction, a source manifest can also retain a
+`reviewed_crm` snapshot alongside the original email evidence. Store its CRM IDs,
+column values, content hash and `reviewedAt` separately from `observedAt`: a CRM
+review time is not a client request date. Such evidence remains subject to the
+same excerpt, scope and conflict checks. A differing requester in that snapshot
+can publish both Contact alternatives for review, with their source names, while
+leaving the CAD Contact value null. This is a dated review snapshot, not an implicit
+project link or a live CRM override. Preserve the original extraction in the item
+correction audit; subsequent input/pipeline changes require fresh evidence.
+
 Each extraction retains a source manifest and field candidates with source identity,
 content hash, page/table or worksheet/cell location, supporting excerpt, issuer,
 roof/drawing scope and selection rationale. Excerpts are checked against source

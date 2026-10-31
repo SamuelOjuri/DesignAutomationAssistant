@@ -197,6 +197,125 @@ def current(case):
     return case.db.get(PerformanceSpecification, (BOARD, ITEM), populate_existing=True)
 
 
+@pytest.fixture()
+def contact_case(case):
+    drawing = case.gateway.project["subitems"][0]
+    contact = {
+        "id": "mirror_11__1", "type": "mirror", "column": {"title": "Contact"},
+        "display_value": "Example, Sam", "mirrored_items": [{
+            "linked_item": {"id": "777", "board": {"id": "888"}},
+            "mirrored_value": {"__typename": "BoardRelationValue", **relation("contact", [
+                {"id": "555", "name": "Example, Sam", "board": {"id": "666"}},
+            ])},
+        }],
+    }
+    drawing["column_values"].append(contact)
+    other = deepcopy(drawing)
+    other.update(id="9102", name="TP00901_26.02 - A")
+    # An unreadable Contact on a different drawing must never be consulted.
+    other["column_values"][-1].update(display_value="Other requester", mirrored_items=[])
+    case.gateway.project["subitems"].insert(0, other)
+    case.gateway.project["column_values"].append({
+        "id": "lookup_mm0mm6ff", "type": "mirror", "column": {"title": "Contact"},
+        "display_value": "Other requester, Example, Sam",
+        "mirrored_items": [{
+            "linked_item": {"id": entry["id"], "board": entry["board"]},
+            "mirrored_value": {"__typename": "MirrorValue"},
+        } for entry in case.gateway.project["subitems"]],
+    })
+    case.drawing_contact = contact
+    return case
+
+
+def test_selected_drawing_contact_publishes_despite_project_contact_rollup(contact_case):
+    case = contact_case
+    assert run(case) == ["published"]
+    source = current(case).source_json
+    assert source["drawingItemId"] == "9101"
+    assert source["raw"]["Contact"] == "Example, Sam"
+    assert source["sources"]["Contact"]["itemId"] == "9101"
+    assert source["sources"]["Contact"]["columnId"] == "mirror_11__1"
+    assert ["888", "777"] in source["dependencies"]
+    assert ["666", "555"] in source["dependencies"]
+    assert [read["columnId"] for read in source["crmReads"] if read["field"] == "Contact"] == ["mirror_11__1"]
+    artifact = case.db.get(PerformanceSpecificationArtifact, (BOARD, ITEM, current(case).current_revision))
+    assert artifact.translation_json["values"]["Contact"] == "Example, Sam"
+
+
+@pytest.mark.parametrize("contact_state", ["empty", "missing", "no_drawings"])
+def test_contact_fallback_uses_email_without_project_rollup(contact_case, contact_state):
+    case = contact_case
+    if contact_state == "empty":
+        case.drawing_contact.update(display_value="", mirrored_items=[])
+    elif contact_state == "missing":
+        case.gateway.project["subitems"][1]["column_values"].remove(case.drawing_contact)
+    else:
+        case.gateway.project["subitems"] = []
+    source = resolve_specification_sources(case.gateway, case.item)
+    assert source["raw"]["Contact"] == "Alex Example"
+    assert source["sources"]["Contact"]["source"] == "Email/Attachment"
+    assert not any(read["columnId"] == "lookup_mm0mm6ff" for read in source["crmReads"])
+
+
+@pytest.mark.parametrize("failure", ["unresolved", "conflicting"])
+def test_invalid_selected_contact_retains_previous_pdf(contact_case, failure):
+    case = contact_case
+    assert run(case) == ["published"]
+    revision = current(case).current_revision
+    if failure == "unresolved":
+        case.drawing_contact["mirrored_items"] = []
+    else:
+        value = case.drawing_contact["mirrored_items"][0]["mirrored_value"]
+        value["linked_item_ids"].append("556")
+        value["linked_items"].append({"id": "556", "name": "Another requester", "board": {"id": "666"}})
+    assert run(case) == ["failed"]
+    assert current(case).current_revision == revision
+    assert len(case.gateway.uploads) == 1 and not case.gateway.deletes
+    if failure == "unresolved":
+        assert current(case).review_json["status"] == "source_failure"
+    else:
+        assert current(case).review_json["status"] == "conflict"
+        assert "Contact" in current(case).review_json["issues"]
+
+
+def test_contact_selection_preserves_holding_override(contact_case):
+    case = contact_case
+    override = column("request_contact", "Contact", "Holding requester")
+    case.gateway.holding["column_values"].append(override)
+    source = resolve_specification_sources(case.gateway, case.item)
+    assert source["raw"]["Contact"] == "Holding requester"
+    assert source["sources"]["Contact"]["itemId"] == ITEM
+    override["text"] = None
+    assert resolve_specification_sources(case.gateway, case.item)["raw"]["Contact"] == "Example, Sam"
+
+
+def test_ambiguous_drawing_does_not_choose_contact_from_project_rollup(contact_case):
+    case = contact_case
+    case.gateway.project["subitems"][1]["name"] = "TP00901_26.03 - A"
+    assert run(case) == ["failed"]
+    assert "missing or ambiguous" in current(case).review_json["issues"]["Drawing Reference"]
+    assert not case.gateway.uploads
+
+
+def test_project_contact_requires_explicit_mapping(case, monkeypatch):
+    case.gateway.project["column_values"].append(column("request_contact", "Contact", "Project requester"))
+    assert resolve_specification_sources(case.gateway, case.item)["raw"]["Contact"] == "Alex Example"
+    monkeypatch.setattr(settings, "performance_specification_column_map", {"project": {"Contact": "request_contact"}})
+    source = resolve_specification_sources(case.gateway, case.item)
+    assert source["raw"]["Contact"] == "Project requester"
+    assert source["sources"]["Contact"]["columnId"] == "request_contact"
+    case.gateway.project["column_values"].pop()
+    with pytest.raises(SpecificationSourceError, match="Configured project column for Contact is missing"):
+        resolve_specification_sources(case.gateway, case.item)
+
+
+def test_explicit_project_contact_mapping_still_validates_source(contact_case, monkeypatch):
+    case = contact_case
+    monkeypatch.setattr(settings, "performance_specification_column_map", {"project": {"Contact": "lookup_mm0mm6ff"}})
+    with pytest.raises(SpecificationSourceError, match="Unsupported or unreadable mirrored"):
+        resolve_specification_sources(case.gateway, case.item)
+
+
 def test_resolves_current_crm_and_keeps_optional_roof_number_and_raw_insulation(case):
     source = resolve_specification_sources(case.gateway, case.item)
     assert source["raw"]["Drawing Title"] == "Warehouse South"
@@ -397,6 +516,45 @@ def test_long_review_details_are_selectable_and_keep_field_order(case):
 def test_common_value_for_multiple_roofs_is_usable(case):
     roof_evidence(case, [("Roof 1", "Concrete"), ("Roof 5", "Concrete")])
     assert resolve_specification_sources(case.gateway, case.item)["raw"]["Decking"] == "Concrete"
+
+
+@pytest.mark.parametrize("verified", [True, False])
+def test_reviewed_crm_contact_keeps_email_alternative_and_source_labels(case, verified):
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    extraction["sourceManifest"].append({
+        "sourceId": "reviewed-crm:9000:9101", "sourceType": "reviewed_crm",
+        "filename": "Monday CRM drawing TP00901_26.01 - A (reviewed snapshot)",
+        "contentSha256": "crm-snapshot-hash", "status": "read", "text": "Contact: Sam Example",
+        "observedAt": None, "reviewedAt": "2026-10-31T12:00:00+00:00",
+    })
+    extraction["specificationEvidence"].append({
+        "field": "Contact", "value": "Sam Example", "source_id": "reviewed-crm:9000:9101",
+        "snippet": "Contact: Sam Example" if verified else "Invented: Sam Example",
+        "location": "Drawing Contact mirror", "scope": None, "issuer": None,
+        "role": "requested", "request_role": "direct_request", "message_date": None,
+        "rationale": "Reviewed CRM requester alternative; preserve the email disagreement for review",
+    })
+    case.item.extracted_parameters_json = extraction
+    case.db.commit()
+    if not verified:
+        assert run(case) == ["failed"]
+        assert current(case).review_json["status"] == "conflict"
+        assert not case.gateway.uploads
+        return
+    assert run(case) == ["published"]
+    record = current(case)
+    assert record.review_json["status"] == "published_with_review"
+    provenance = record.source_json["sources"]["Contact"]
+    assert {c["value"] for c in provenance["candidates"]} == {"Alex Example", "Sam Example"}
+    snapshot = next(s for s in record.source_json["sourceManifest"] if s["sourceType"] == "reviewed_crm")
+    assert snapshot["observedAt"] is None and snapshot["reviewedAt"] == "2026-10-31T12:00:00+00:00"
+    artifact = case.db.get(PerformanceSpecificationArtifact, (BOARD, ITEM, record.current_revision))
+    assert artifact.translation_json["values"]["Contact"] is None
+    detail = artifact.translation_json["fieldReviews"]["Contact"]
+    assert "Alex Example (request.eml)" in detail
+    assert "Sam Example (Monday CRM drawing TP00901_26.01 - A (reviewed snapshot))" in detail
+    text = pdf_text(case.gateway.uploads[-1][1])
+    assert "Contact: Review required" in text and "Alex Example" in text and "Sam Example" in text
 
 
 def test_people_mirror_preserves_name_with_comma_and_entity_identity(case):

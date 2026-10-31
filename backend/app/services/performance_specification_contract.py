@@ -230,9 +230,16 @@ def translate_specification(raw: dict[str, Any], client: LegacyGeminiClient, *, 
 def _conflict_detail(label, source, reason):
     provenance = source.get("sources", {}).get(label, {})
     reported = []
+    reviewed_sources = {entry["sourceId"] for entry in source.get("sourceManifest", [])
+                        if entry.get("sourceType") == "reviewed_crm"}
+    show_source = any(candidate.get("source_id") in reviewed_sources
+                      for candidate in provenance.get("candidates", []))
     for candidate in provenance.get("candidates", []):
         value, scope = candidate["value"], candidate.get("scope")
-        entry = f"{value} ({scope})" if scope else value
+        context = [scope] if scope else []
+        if show_source and candidate.get("filename"):
+            context.append(candidate["filename"])
+        entry = f"{value} ({'; '.join(context)})" if context else value
         if entry not in reported:
             reported.append(entry)
     if provenance.get("source") == "Derived" and provenance.get("observedRevision"):
