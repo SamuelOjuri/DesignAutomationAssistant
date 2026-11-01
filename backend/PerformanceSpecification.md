@@ -478,6 +478,15 @@ Legacy stored payloads should be replaced by fresh extraction, not bulk-edited w
 SQL string replacement. Empty/failed text and size-limit errors carry safe source
 codes such as `no_readable_text` and `source_text_limit`.
 
+CAD values are single-line fields. Before translation and validation, line breaks
+and other whitespace runs in every resolved text value collapse to single spaces,
+not only Company/Contact; for example, a two-line title-block project name for item
+`3318408522` previously failed with `CAD translation contains control characters
+in Drawing Title`. Words, case and punctuation must still match exactly, and a
+translated value containing a control character is still rejected. The source
+snapshot keeps the literal evidence, so specification revisions and already
+published PDFs are unchanged; only the specification publisher needs redeploying.
+
 The two valid PNG plans for item `3313351849` returned HTTP-success responses with
 no text and `finish_reason=RECITATION` in the approved Gemini replay. The provider
 defines this as content flagged for recitation ([Gemini API response reference](https://ai.google.dev/api/generate-content#FinishReason)).
@@ -487,6 +496,18 @@ be accepted as a complete source. Do not repeat unchanged blocked calls indefini
 silently skip the plans, or disable provider safeguards. This item needs a reviewed
 source/transcription or a provider-side resolution before its source is complete.
 No automatic OCR fallback is claimed to capture diagram geometry or outlet locations.
+
+A controlled drawing-specific prompt trial on 1 November 2026 made one additional
+request for each of those PNGs, using the same `gemini-3.8-flash` model and medium
+thinking, no sampling override, no SDK retries and a 120-second request timeout.
+Calder still returned `RECITATION` (26.458 seconds, no text). Whifflet returned
+`STOP` with 29 text regions (19.470 seconds), but declared `READABILITY: PARTIAL`,
+including obscured smoke-shaft specifications and unreadable labels/notes. Neither
+result was accepted as a complete source, and the item remains blocked. A second
+run used both content/model/prompt-keyed cached outcomes with zero network calls.
+This two-image trial does not establish a production success rate or performance
+benchmark; no runtime fallback was enabled. The next useful input is the original
+drawing PDF or a higher-resolution export with the obscured notes reviewed.
 
 The supplied 15 emails cover eight blocked items. Final local validation of both
 sets of captured Gemini parameter responses succeeds for `3312713363`, `3313065024`,

@@ -13,7 +13,9 @@ from backend.app.services.legacy_enquiry.email_extraction import extract_text_fr
 from backend.app.services.legacy_enquiry.source_documents import extract_source_records
 from backend.app.services.performance_specification_evidence import VALUE_CONFLICT, resolve_email_evidence
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
-from backend.app.services.performance_specification_contract import CADTranslation, validate_translation
+from backend.app.services.performance_specification_contract import (
+    CADTranslation, translate_specification, validate_translation,
+)
 from backend.app.config import Settings, settings
 from backend.app.services.specification_image_text import literal_image_regions
 from backend.app.services.specification_recovery import extraction_payload, repair_image_company_citations
@@ -369,11 +371,38 @@ def test_internal_domains_are_normalized_before_forming_the_identity():
 @pytest.mark.parametrize("field,raw,formatted", [
     ("Company", "example roofing &\nconstruction", "example roofing & construction"),
     ("Contact", "Alex\n  Example", "Alex Example"),
+    ("Drawing Title", "Proposed Drive Thru Restaurant\nTrentham Gardens",
+     "Proposed Drive Thru Restaurant Trentham Gardens"),
 ])
-def test_cad_requester_names_can_collapse_source_layout_whitespace(field, raw, formatted):
+def test_cad_text_can_collapse_source_layout_whitespace(field, raw, formatted):
     payload = translation_payload({field: formatted})
     translation = CADTranslation.model_validate(payload)
     assert validate_translation(translation, {field: raw}) is translation
+
+
+def test_cad_text_still_rejects_line_breaks_in_the_translated_value():
+    title = "Proposed Drive Thru Restaurant\nTrentham Gardens"
+    translation = CADTranslation.model_validate(translation_payload({"Drawing Title": title}))
+    with pytest.raises(ValueError, match="control characters in Drawing Title"):
+        validate_translation(translation, {"Drawing Title": title})
+
+
+def test_cad_translation_receives_single_line_title_block_text():
+    prompts = []
+
+    def generate(model, prompt, config):
+        prompts.append(prompt)
+        # The model copies the resolved value exactly, as instructed.
+        return SimpleNamespace(parsed=translation_payload(json.loads(prompt.split("\nResolved values: ", 1)[1])))
+
+    client = LegacyGeminiClient("gemini-3.8-flash", generate_content=generate)
+    translation = translate_specification(
+        {"Drawing Title": "Proposed Drive Thru Restaurant\nTrentham Gardens"}, client,
+    )
+    assert translation.values.model_dump(by_alias=True)["Drawing Title"] == (
+        "Proposed Drive Thru Restaurant Trentham Gardens"
+    )
+    assert len(prompts) == 1
 
 
 @pytest.mark.parametrize("changed", ["Example Roofing & construction", "example roofing & construction Ltd",
