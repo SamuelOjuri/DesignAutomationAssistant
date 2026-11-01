@@ -121,6 +121,16 @@ def drawing_reference_key(reference: str | None) -> str:
     return value.removeprefix("tp") if re.match(r"^(?:tp)?\d+_", value) else value
 
 
+def scale_ratio(value: str | None) -> tuple[str, str] | None:
+    """Ordered terms of a value that is exactly one scale ratio (1:50, 1/50, 1 to 50).
+
+    Notation is not a fact: these forms state the same scale. Term order still
+    matters (1:50 is not 50:1), and any surrounding text is not a bare ratio.
+    """
+    match = re.fullmatch(r"\s*(\d+)\s*(?::|/|\bto\b)\s*(\d+)\s*", str(value or ""), re.IGNORECASE)
+    return (match[1], match[2]) if match else None
+
+
 class SpecificationEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
     field: SpecificationField = Field(description="Exact CAD field label from the supplied shared definitions.")

@@ -487,6 +487,16 @@ translated value containing a control character is still rejected. The source
 snapshot keeps the literal evidence, so specification revisions and already
 published PDFs are unchanged; only the specification publisher needs redeploying.
 
+Scale evidence still verifies literally: a lone `1:50` citing `scale: 1/50 @ A1` is
+rejected. When the same claim (source, scope, issuer, role and date) also has a
+verified literal candidate stating the same ordered ratio, a reformatted `1:50`,
+`1/50` or `1 to 50` sibling is marked `repaired` instead of blocking extraction;
+recovery may likewise replace it with that literal and record the audit entry.
+`50:1`, `1:500` and values with extra text such as `1:50 @ A1` remain distinct.
+This resolved item `3318413027` (job `5af08583`) offline from its stored failure
+payload. It is a verifier change only, so `output-v17` is unchanged and no
+re-extraction is forced; deploy the design worker and specification publisher.
+
 The two valid PNG plans for item `3313351849` returned HTTP-success responses with
 no text and `finish_reason=RECITATION` in the approved Gemini replay. The provider
 defines this as content flagged for recitation ([Gemini API response reference](https://ai.google.dev/api/generate-content#FinishReason)).

@@ -12,7 +12,7 @@ from dateutil.parser import isoparse, parse as parse_datetime
 
 from .specification_semantics import (
     COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, FIELD_DEFINITIONS, SpecificationEvidence,
-    SpecificationRequestNote, drawing_reference_key, missing, tp_reference_revision,
+    SpecificationRequestNote, drawing_reference_key, missing, scale_ratio, tp_reference_revision,
 )
 from .specification_request_context import (
     CLIENT_FIELDS, attachment_message, client_evidence_applies,
@@ -68,7 +68,14 @@ def _source_contains_excerpt(source, excerpt):
 def _candidate_key(evidence):
     # A repaired excerpt may replace a rejected one only for the same claim.
     # Different values, sources, scopes, roles or dates still require review.
-    return tuple(evidence.get(key) if key == "source_id" else _normal(evidence.get(key)) for key in (
+    # A verified literal 1/50 also settles a reformatted 1:50 for that claim.
+    def part(key):
+        if key == "source_id":
+            return evidence.get(key)
+        if key == "value" and evidence.get("field") == "Scale" and scale_ratio(evidence.get(key)):
+            return scale_ratio(evidence.get(key))
+        return _normal(evidence.get(key))
+    return tuple(part(key) for key in (
         "field", "value", "source_id", "scope", "issuer", "role", "request_role", "message_date",
     ))
 

@@ -7,6 +7,7 @@ import pytest
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.performance_specification_evidence import resolve_email_evidence, resolve_request_notes
 from backend.app.services.specification_recovery import extraction_payload, repair_note_list_formatting
+from backend.app.services.specification_semantics import scale_ratio
 from backend.tests.test_specification_evidence import candidate, extraction, source
 from backend.tests.test_specification_publication_hardening import extract_twice, parameters
 
@@ -350,4 +351,60 @@ def test_title_recovery_cannot_change_words_identifiers_negations_or_numbers(old
     with pytest.raises(ValueError, match="recovery unresolved"):
         extract_twice(parameters(drawing_title=old, specification_evidence=[evidence]),
                       parameters(drawing_title=new, specification_evidence=[{**evidence, "value": new}]),
+                      [source("asset:1:attachment:0", text)])
+
+
+@pytest.mark.parametrize("value,ratio", [
+    ("1:50", ("1", "50")), ("1/50", ("1", "50")), (" 1 / 50 ", ("1", "50")),
+    ("1 to 50", ("1", "50")), ("50:1", ("50", "1")),
+    ("1:50 @ A1", None), ("1to50", None), ("1.5:50", None), ("", None), (None, None),
+])
+def test_scale_ratio_reads_only_a_bare_ordered_ratio(value, ratio):
+    assert scale_ratio(value) == ratio
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_verified_literal_scale_settles_a_reformatted_ratio_for_the_same_claim(reverse):
+    # Render job 5af08583: a literal 1/50 and a CAD-style 1:50 cited the same title block.
+    snippet = "scale: 1/50 @ A1"
+    literal = candidate("Scale", "1/50", snippet)
+    data = extraction([source(literal["source_id"], "Roof plan\n" + snippet)],
+                      [{**literal, "value": "1:50"}, literal][::(-1 if reverse else 1)])
+    raw, provenance, issues = resolve_email_evidence(data)
+    assert raw["Scale"] == "1/50" and not issues
+    assert provenance["Scale"]["rejectedCandidates"][0]["status"] == "repaired"
+
+
+@pytest.mark.parametrize("change", [
+    {"value": "50:1"}, {"value": "1:500"}, {"value": "1:50 @ A1"},
+    {"scope": "Roof 5"}, {"source_id": "missing"},
+])
+def test_verified_literal_scale_does_not_hide_a_different_scale_claim(change):
+    snippet = "scale: 1/50 @ A1"
+    literal = candidate("Scale", "1/50", snippet)
+    data = extraction([source(literal["source_id"], snippet)], [{**literal, "value": "1:50", **change}, literal])
+    _, provenance, issues = resolve_email_evidence(data)
+    assert "Scale" in issues
+    assert provenance["Scale"]["rejectedCandidates"][0]["status"] == "unverified"
+
+
+def test_scale_recovery_replaces_a_reformatted_ratio_with_its_literal_and_is_audited():
+    snippet = "scale: 1/50 @ A1"
+    manifest = [source("asset:1:attachment:0", snippet)]
+    result = extract_twice(parameters(scale="1:50", specification_evidence=[candidate("Scale", "1:50", snippet)]),
+                           parameters(scale="1/50", specification_evidence=[candidate("Scale", "1/50", snippet)]),
+                           manifest)
+    raw, _, issues = resolve_email_evidence(extraction_payload(result, manifest))
+    assert raw["Scale"] == "1/50" and not issues
+    assert [e.value for e in result.specification_evidence if e.field == "Scale"] == ["1/50"]
+    repair, = result._evidence_repairs
+    assert (repair["before"]["value"], repair["after"]["value"]) == ("1:50", "1/50")
+
+
+@pytest.mark.parametrize("recovered", ["50/1", "1/500"])
+def test_scale_recovery_cannot_change_the_ratio(recovered):
+    text = f"scale: {recovered} @ A1"
+    with pytest.raises(ValueError, match="recovery unresolved"):
+        extract_twice(parameters(scale="1:50", specification_evidence=[candidate("Scale", "1:50", text)]),
+                      parameters(scale=recovered, specification_evidence=[candidate("Scale", recovered, text)]),
                       [source("asset:1:attachment:0", text)])

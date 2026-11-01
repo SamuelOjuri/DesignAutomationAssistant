@@ -11,7 +11,7 @@ from .performance_specification_evidence import (
     _contains_excerpt, _excerpt_normal, _normal, _parse_message_date, _value_supported, request_note_diagnostics,
     resolve_email_evidence, resolve_request_notes, _source_contains_excerpt,
 )
-from .specification_semantics import EVIDENCE_VERSION, canonical_label, missing, tp_reference_revision
+from .specification_semantics import EVIDENCE_VERSION, canonical_label, missing, scale_ratio, tp_reference_revision
 from .specification_image_text import literal_image_regions
 from .specification_request_context import (
     attachment_message, attachment_messages, parent_email, request_context_summary, select_client_request, source_email_messages,
@@ -201,6 +201,9 @@ def _same_value(old, new):
         # title alias, identifier rewrite or contraction/negation correction.
         possessive = lambda value: re.sub(r"\b([a-z]{3,})['\u2019]s\b", r"\1s", _excerpt_normal(value))
         return possessive(old.value) == possessive(new["value"])
+    if old.field == "Scale":
+        # Ratio notation only (1/50 = 1:50); the ordered terms must be identical.
+        return scale_ratio(old.value) is not None and scale_ratio(old.value) == scale_ratio(new["value"])
     if old.field not in {"Membrane", "VCL", "Tapered Insulation"}:
         return False
     # Only material-list separators may differ. Keep identifiers, ratios, units
