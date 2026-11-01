@@ -223,8 +223,15 @@ class LegacyGeminiClient:
                 roles = {label: dict(sorted(Counter(e.role for e in result.specification_evidence
                                                    if e.field == label).items()))
                          for label in sorted(unresolved)}
+                # A publishable conflict reason can mask the unverified candidate
+                # that actually blocks; name those fixed verifier reasons too.
+                masked = {label: reasons for label in sorted(unresolved)
+                          if (reasons := sorted({e["reason"] for e in provenance[label].get("rejectedCandidates", [])
+                                                 if e["status"] == "unverified"}))
+                          and reasons != [unresolved[label]]}
                 raise evidence_failure("Specification evidence recovery unresolved: " + str(unresolved)
-                                       + "; evidence_roles=" + str(roles))
+                                       + "; evidence_roles=" + str(roles)
+                                       + ("; unverified_candidates=" + str(masked) if masked else ""))
             try:
                 resolve_request_notes(extraction_payload(result, source_manifest))
             except ValidationError as exc:

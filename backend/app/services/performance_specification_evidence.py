@@ -105,6 +105,24 @@ def _candidate_key(evidence):
     ))
 
 
+# Rejections after the source excerpt itself verified: only the value or date is unproven.
+REDUNDANT_REJECTION_REASONS = frozenset({
+    "Raw value is absent from the supporting excerpt",
+    "Candidate request timestamp could not be verified",
+})
+
+
+def _fact_key(evidence):
+    """The claimed fact without its citation: field, value, scope, issuer and role."""
+    field, value, _, scope, issuer, role, _, _ = _candidate_key(evidence)
+    return field, value, scope, issuer, role
+
+
+def _words_in_order(value, snippet):
+    words = iter(re.findall(r"\w+", _excerpt_normal(snippet)))
+    return all(word in words for word in re.findall(r"\w+", _excerpt_normal(value)))
+
+
 def _title_block_reference_parts(snippet):
     """Return one literal drawing number and one labelled revision from a block.
 
@@ -381,9 +399,18 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
 
     for label, failures in rejected.items():
         verified = {_candidate_key(evidence) for evidence in candidates[label]}
+        # An undated verified candidate keeps its scope out of date-based selection,
+        # so a duplicate of that same fact cannot add a value or reorder the scope.
+        # Its verified excerpt must still contain the value's words in order.
+        undated = {_fact_key(evidence) for evidence in candidates[label] if evidence["observedAt"] is None}
         for failure in failures:
-            failure["status"] = "repaired" if _candidate_key(failure) in verified else "unverified"
-            if failure["status"] == "unverified":
+            if _candidate_key(failure) in verified:
+                failure["status"] = "repaired"
+            elif (failure["reason"] in REDUNDANT_REJECTION_REASONS and _fact_key(failure) in undated
+                  and _words_in_order(failure["value"], failure["snippet"])):
+                failure["status"] = "redundant"
+            else:
+                failure["status"] = "unverified"
                 issues[label] = failure["reason"]
 
     raw, provenance = {}, {}

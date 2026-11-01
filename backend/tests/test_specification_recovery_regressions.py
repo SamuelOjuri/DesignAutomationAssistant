@@ -6,7 +6,7 @@ import pytest
 
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.performance_specification_evidence import (
-    UNCONFIRMED_REFERENCE, resolve_email_evidence, resolve_request_notes,
+    UNCONFIRMED_REFERENCE, VALUE_CONFLICT, resolve_email_evidence, resolve_request_notes,
 )
 from backend.app.services.specification_recovery import (
     extraction_payload, repair_note_list_formatting, repair_template_markers,
@@ -14,7 +14,7 @@ from backend.app.services.specification_recovery import (
 from backend.app.services.specification_semantics import (
     SpecificationEvidence, drawing_reference_key, scale_ratio, tp_reference_revision,
 )
-from backend.tests.test_specification_evidence import candidate, extraction, source
+from backend.tests.test_specification_evidence import SENT, candidate, extraction, source
 from backend.tests.test_specification_publication_hardening import extract_twice, parameters
 
 
@@ -417,6 +417,83 @@ def test_scale_recovery_cannot_change_the_ratio(recovered):
         extract_twice(parameters(scale="1:50", specification_evidence=[candidate("Scale", "1:50", text)]),
                       parameters(scale=recovered, specification_evidence=[candidate("Scale", recovered, text)]),
                       [source("asset:1:attachment:0", text)])
+
+
+def kent_drawing_titles():
+    """Render job 18700b4f: two roof titles, repeated by a later forwarded email."""
+    first, second = "asset:288731044", "asset:288785101"
+    sources = [source(f"{first}:body", "From: Sales\nDate: Tue, 27 Oct 2026 14:43:13 +0000\n\nForwarded enquiry",
+                      "email_body")]
+    evidence = []
+    for index, roof in enumerate(("Darwin College", "Registry Roof")):
+        title, postcode = "University of Kent, " + roof, ("CT2 7NY", "CT2 7NZ")[index]
+        plan = source(f"{first}:attachment:{index + 2}", f"Roof Plan \u2013 {title}, {postcode}")
+        outlet = source(f"{second}:attachment:{index}", f"University of Kent\n27/10/26\nOutlet Plan\n{roof}")
+        document = candidate("Drawing Title", title, plan["text"], source_id=plan["sourceId"], scope=roof)
+        evidence += [
+            document,
+            # Neither the forwarded date nor the comma-joined title-block lines verify.
+            {**document, "request_role": "forwarded_request", "message_date": "27 October 2026 14:38"},
+            {**document, "source_id": outlet["sourceId"], "snippet": outlet["text"]},
+        ]
+        sources += [plan, outlet]
+    return sources, evidence
+
+
+def test_unverified_duplicates_of_an_undated_verified_title_are_redundant():
+    sources, evidence = kent_drawing_titles()
+    raw, provenance, issues = resolve_email_evidence(extraction(sources, evidence))
+    assert raw["Drawing Title"] is None and issues == {"Drawing Title": VALUE_CONFLICT}
+    rejected = provenance["Drawing Title"]["rejectedCandidates"]
+    assert sorted(e["reason"] for e in rejected) == 2 * ["Candidate request timestamp could not be verified"] + 2 * [
+        "Raw value is absent from the supporting excerpt"]
+    assert {e["status"] for e in rejected} == {"redundant"}
+    raw, _, issues = resolve_email_evidence(extraction(sources, evidence), ["Darwin College"])
+    assert raw["Drawing Title"] == "University of Kent, Darwin College" and not issues
+
+
+DUPLICATE_PLAN = "Roof Plan \u2013 Example Campus, North Roof"
+DUPLICATE_OUTLET = "Example Campus\n27/10/26\nOutlet Plan\nNorth Roof"
+
+
+@pytest.mark.parametrize("verified_change,duplicate_change,outlet_text", [
+    ({}, {"value": "Example Campus, South Roof"}, DUPLICATE_OUTLET),
+    ({}, {"scope": "South Roof"}, DUPLICATE_OUTLET),
+    ({}, {"issuer": "Architect"}, DUPLICATE_OUTLET),
+    ({}, {}, "North Roof\nOutlet Plan\nExample Campus"),  # Words out of order.
+    ({}, {}, "Example Campus\nOutlet Plan"),  # A value word is absent.
+    ({}, {"snippet": "Unlisted excerpt"}, DUPLICATE_OUTLET),
+    ({"message_date": SENT}, {}, DUPLICATE_OUTLET),  # The verified twin is dated.
+    ({"message_date": SENT}, {"source_id": "asset:1:attachment:0", "snippet": DUPLICATE_PLAN,
+                              "request_role": "forwarded_request", "message_date": "27 October 2026 14:38"},
+     DUPLICATE_OUTLET),
+])
+def test_only_an_undated_verified_twin_makes_an_unverified_duplicate_redundant(
+        verified_change, duplicate_change, outlet_text):
+    verified = candidate("Drawing Title", "Example Campus, North Roof", DUPLICATE_PLAN,
+                         scope="North Roof", **verified_change)
+    duplicate = {**verified, "source_id": "asset:2:attachment:0", "snippet": outlet_text,
+                 "message_date": None, **duplicate_change}
+    data = extraction([source("asset:1:body", f"From: Requester\nDate: {SENT}\n\nRequest", "email_body"),
+                       source("asset:1:attachment:0", DUPLICATE_PLAN), source("asset:2:attachment:0", outlet_text)],
+                      [verified, duplicate])
+    _, provenance, issues = resolve_email_evidence(data)
+    assert len(provenance["Drawing Title"]["candidates"]) == 1 and "Drawing Title" in issues
+    assert provenance["Drawing Title"]["rejectedCandidates"][0]["status"] == "unverified"
+
+
+def test_failure_names_unverified_candidates_masked_by_a_conflict():
+    texts = {f"asset:1:attachment:{index}": f"Project: {roof} Roof"
+             for index, roof in enumerate(("Alpha", "Beta", "Gamma"))}
+    evidence = [candidate("Drawing Title", text.removeprefix("Project: "), text, source_id=identity,
+                          scope=text.split()[1]) for identity, text in texts.items()]
+    evidence[2] = {**evidence[2], "request_role": "forwarded_request", "message_date": "27 October 2026 14:38"}
+    initial = parameters(specification_evidence=evidence)
+    with pytest.raises(ValueError, match="Conflicting roof/drawing/request values") as error:
+        extract_twice(initial, initial, [source(identity, text) for identity, text in texts.items()])
+    assert ("unverified_candidates={'Drawing Title': ['Candidate request timestamp could not be verified']}"
+            in str(error.value))
+    assert "Gamma" not in str(error.value) and "14:38" not in str(error.value)
 
 
 EN_DASH_EMAIL = "Please proceed with TP18954_26.03 \u2013 A as reduced insulation thickness."

@@ -146,7 +146,7 @@ extraction while retaining contiguous text, punctuation and token boundaries.
 It does not join excerpts across ellipses. A verified recovery candidate repairs a
 rejected excerpt only for the same field, value, source, scope, issuer, request role
 and date. Rejected candidates remain in provenance as `rejectedCandidates`, with
-`repaired` or `unverified` status; different unverified claims still require review.
+`repaired`, `redundant` or `unverified` status; different unverified claims still require review.
 An attachment (including an archive member) may cite its own parent email's exact
 outer Date header when its inherited timestamp matches that parent's timestamp.
 Inline images can instead use the literal Date/Sent header of their unique containing
@@ -531,6 +531,22 @@ ambiguous values are left for the verifier to reject. Each repair is audited as
 `Polyester reinforced ***PVC/ FPO*** single ply membrane` is restored and Membrane
 publishes as a reviewable conflict with the email's `single ply`. Stored
 extractions are not re-resolved by this repair, so published PDFs are unchanged.
+
+A rejected candidate is `redundant`, rather than blocking extraction, only when its
+literal excerpt verified and just its value or request date did not, the value's
+words occur in that excerpt in order, and a verified **undated** candidate states
+the same field, value, scope, issuer and role. The undated candidate already keeps
+that scope out of date-based selection, so the duplicate cannot add a value,
+supersede another or reorder the scope. Different values, scopes or issuers,
+unverified excerpts, and duplicates of only dated facts still block. For item
+`3312851487` (job `18700b4f`), each roof plan's `University of Kent, Darwin College`
+/ `Registry Roof` title verified undated, but its copy dated by the forwarded 27
+October 14:38 message and the later outlet plans' comma-joined title-block lines did
+not. In an offline replica of those stored candidates, Drawing Title now resolves as
+the reviewable Darwin College/Registry Roof conflict; the live retry still depends
+on its new model response. When such a conflict masks an unverified candidate, the
+failure also logs `unverified_candidates` with fixed verifier reasons only, never
+values or excerpts.
 
 The two valid PNG plans for item `3313351849` returned HTTP-success responses with
 no text and `finish_reason=RECITATION` in the approved Gemini replay. The provider
