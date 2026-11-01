@@ -14,11 +14,19 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 from .legacy_enquiry.llm import LegacyGeminiClient
 from .gemini_schema import gemini_response_schema
 from .gemini_requests import GeminiJSONRequester
-from .specification_semantics import FIELD_DEFINITIONS, SpecificationField, missing
+from .specification_semantics import (
+    FIELD_DEFINITIONS, PROVIDER_RECITATION_REVIEW_STATUS, SpecificationField, missing,
+)
 
 
 SPECIFICATION_VERSION = "performance-specification-v4"
 NOT_PROVIDED = "Not Provided"
+SOURCE_REVIEW_DETAILS = {
+    PROVIDER_RECITATION_REVIEW_STATUS: (
+        "Not transcribed. Gemini withheld the transcription (finish_reason=RECITATION), so its "
+        "contents were not used. Review this source before relying on this specification."
+    ),
+}
 FIELD_NAMES = (
     "Scale", "Page Size", "Drawing Reference", "Drawing Title",
     "Bauder Contract Number", "Bauder Roof Num", "Incoming Information",
@@ -109,6 +117,8 @@ class SpecificationPublication(CADTranslation):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     field_reviews: dict[SpecificationField, str] = Field(default_factory=dict, alias="fieldReviews")
     request_notes: list[str] = Field(default_factory=list, alias="requestNotes", max_length=64)
+    # Item-level: an unread source cannot be attributed to any one field.
+    source_reviews: list[str] = Field(default_factory=list, alias="sourceReviews")
 
     @model_validator(mode="after")
     def validate_reviews(self):
@@ -116,6 +126,8 @@ class SpecificationPublication(CADTranslation):
         for label, detail in self.field_reviews.items():
             if label == "Incoming Information" or values[label] is not None or not detail.strip():
                 raise ValueError("A field review requires a null CAD value and nonempty details")
+        if any(not detail.strip() for detail in self.source_reviews):
+            raise ValueError("A source review requires nonempty details")
         return self
 
 
@@ -297,7 +309,13 @@ def prepare_specification_publication(source, client) -> SpecificationPublicatio
             + f" (Source: {note['filename']}" + (f"; {note['observedAt']}" if note.get("observedAt") else "") + ")"
             for note in source.get("requestNotes", [])
         ],
+        "sourceReviews": source_review_notes(source.get("sourceManifest", [])),
     })
+
+
+def source_review_notes(manifest) -> list[str]:
+    return [f"{source['filename']}: {SOURCE_REVIEW_DETAILS[source['status']]}"
+            for source in manifest if source.get("status") in SOURCE_REVIEW_DETAILS]
 
 
 def pdf_values(translation: CADTranslation) -> dict[str, str]:

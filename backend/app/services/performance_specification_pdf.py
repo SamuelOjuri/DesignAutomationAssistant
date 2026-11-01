@@ -1,4 +1,4 @@
-"""Selectable-text PDF with 18 ordered CAD fields and separate request notes."""
+"""Selectable-text PDF with source reviews, 18 ordered CAD fields and separate request notes."""
 
 from functools import partial
 import io
@@ -44,7 +44,14 @@ def render_performance_specification_pdf(
                             borderPadding=6, spaceBefore=6, spaceAfter=12)
     values = pdf_values(translation)
     reviews = translation.field_reviews if isinstance(translation, SpecificationPublication) else {}
+    source_reviews = translation.source_reviews if isinstance(translation, SpecificationPublication) else []
     story = [Paragraph(TITLE, heading)]
+    if source_reviews:
+        story.append(Paragraph("Review required: some source documents could not be read. Values below "
+                               "exclude their contents.", body))
+        for note in source_reviews:
+            story.append(Paragraph(escape(note), review))
+        story.append(Spacer(1, 8))
     if reviews:
         story.append(Paragraph("Fields marked Review required contain unresolved specifications. "
                                "The details are shown beside each affected field.", body))

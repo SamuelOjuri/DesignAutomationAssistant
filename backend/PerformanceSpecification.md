@@ -590,7 +590,7 @@ Responses now preserve safe `blocked_response`, `incomplete_response` or
 `empty_response` diagnostics, including finish/block reasons. Partial text cannot
 be accepted as a complete source. Do not repeat unchanged blocked calls indefinitely,
 silently skip the plans, or disable provider safeguards. This item needs a reviewed
-source/transcription or a provider-side resolution before its source is complete.
+source/transcription or a provider-side resolution before its review flag clears.
 No automatic OCR fallback is claimed to capture diagram geometry or outlet locations.
 
 A controlled drawing-specific prompt trial on 1 November 2026 made one additional
@@ -604,6 +604,26 @@ run used both content/model/prompt-keyed cached outcomes with zero network calls
 This two-image trial does not establish a production success rate or performance
 benchmark; no runtime fallback was enabled. The next useful input is the original
 drawing PDF or a higher-resolution export with the obscured notes reviewed.
+
+Item `3313351849` (job `fb2c8adb`) then exhausted its analysis attempts on the same
+two blocks while its specification kept waiting for a current extraction. A source
+whose image or PDF transcription returns `blocked_response` with
+`finish_reason=RECITATION` (and no prompt block) is now finalised after that one
+request as `review:provider_recitation` instead of `failed:GeminiRequestFailure`.
+It keeps its identity, hash and safe error details in the source manifest, has no
+text, and cannot verify any evidence. The remaining readable sources extract and
+publish normally. This is not a silent skip: the specification is published with
+review status `published_with_review`, `review_json.sourceReviews`, and a
+"Review required" banner at the top of the PDF naming each unread file. A
+subsequent readable transcription of the same source clears the flag. SAFETY and
+other blocks, prompt blocks, `MAX_TOKENS` truncation and empty responses still hold
+extraction for retry/review. Specification revisions hash only the source snapshot
+and model version, so unaffected items do not republish. `output-v17` is unchanged
+and no re-extraction is forced. Deploy the design worker and specification
+publisher together (an older publisher rejects the new status as incomplete), then
+retry the exhausted job with `retry-failed-job --job-id
+fb2c8adb-eb04-4136-a0b0-a61b5f06467a`. `diagnose_performance_specifications.sql`
+reports the flag as `review_source_reviews`.
 
 The supplied 15 emails cover eight blocked items. Final local validation of both
 sets of captured Gemini parameter responses succeeds for `3312713363`, `3313065024`,

@@ -89,6 +89,7 @@ SELECT
     s.attempt_count AS specification_attempt_count,
     s.review_json->>'status' AS review_status,
     s.review_json->'issues' AS review_issues,
+    s.review_json->'sourceReviews' AS review_source_reviews,
     s.last_error AS specification_last_error,
     s.current_revision,
     a.status AS current_artifact_status,

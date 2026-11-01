@@ -17,11 +17,13 @@ from backend.app.services.legacy_enquiry.analysis import analyze_downloaded_emai
 from backend.app.services.legacy_enquiry.email_extraction import extract_text_from_email, process_email_content
 from backend.app.services.legacy_enquiry.parameter_extraction import DesignParameterExtraction
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
-from backend.app.services.legacy_enquiry.source_documents import AnimatedImageSkipped, IncompleteSourceExtraction, extract_document
+from backend.app.services.legacy_enquiry.source_documents import (
+    AnimatedImageSkipped, IncompleteSourceExtraction, extract_document, extract_source_records,
+)
 from backend.app.services.performance_specification_contract import FIELD_NAMES
 from backend.app.services.performance_specification_evidence import resolve_email_evidence
 from backend.app.services.spreadsheet_extraction import extract_spreadsheet_documents
-from backend.app.services.specification_semantics import SpecificationEvidence
+from backend.app.services.specification_semantics import PROVIDER_RECITATION_REVIEW_STATUS, SpecificationEvidence
 from backend.tests.pdf_helpers import pdf_bytes
 
 
@@ -141,6 +143,88 @@ def test_supplementary_animated_image_does_not_block_analysis(tmp_path):
     skipped = next(source for source in result.source_manifest if source["filename"] == "signature.gif")
     assert skipped["status"] == "skipped:animated_image" and not image_calls
     assert "signature.gif" not in contexts[0] and "Contact: Alex" in contexts[0]
+
+
+def gemini_reader(blocked_mime_types, finish_reason="RECITATION", block_reason=None):
+    """Offline provider: blocked MIME types get no text; others are transcribed."""
+    calls = []
+
+    def generate(model, contents, config):
+        mime_type = contents[0].inline_data.mime_type
+        calls.append(mime_type)
+        if mime_type in blocked_mime_types:
+            return SimpleNamespace(text=None, candidates=[SimpleNamespace(finish_reason=finish_reason)],
+                                   prompt_feedback=SimpleNamespace(block_reason=block_reason))
+        return SimpleNamespace(text="Scale: 1:100", candidates=[SimpleNamespace(finish_reason="STOP")])
+
+    return LegacyGeminiClient("offline", generate_content=generate), calls
+
+
+@pytest.mark.parametrize("filename,mime_type", [("plan.png", "image/png"), ("plan.pdf", "application/pdf")])
+def test_recitation_block_is_recorded_for_review_after_one_request(filename, mime_type):
+    client, calls = gemini_reader({mime_type})
+    content = image_bytes("PNG", animated=False) if mime_type == "image/png" else pdf_bytes()
+    [record] = extract_source_records(content, filename, client, source_id="asset:1")
+    assert calls == [mime_type]
+    assert record["status"] == PROVIDER_RECITATION_REVIEW_STATUS and record["text"] == ""
+    assert record["error"]["code"] == "blocked_response" and record["error"]["finish_reason"] == "RECITATION"
+    assert record["contentSha256"] == hashlib.sha256(content).hexdigest()
+
+
+def test_recitation_blocked_plans_do_not_block_readable_email_evidence():
+    # Render job fb2c8adb (item 3313351849): two valid PNG plans returned
+    # finish_reason=RECITATION with no text on every attempt, so extraction never completed.
+    client, calls = gemini_reader({"image/png"})
+    plans = [{"filename": name, "content": image_bytes("PNG", animated=False)}
+             for name in ("Calder Outlet Revision - 3nr.png", "Whifflet Outlet Revisions - 3nr.png")]
+    manifest = []
+    context = extract_text_from_email("Contact: Alex", [{"filename": "roof.pdf", "content": pdf_bytes()}, *plans],
+                                      extractor=client, manifest=manifest, source_prefix="mail")
+    assert sorted(calls) == ["application/pdf", "image/png", "image/png"]
+    assert "Scale: 1:100" in context and "Outlet" not in context
+    blocked = [source for source in manifest if source["status"] == PROVIDER_RECITATION_REVIEW_STATUS]
+    assert [source["filename"] for source in blocked] == [plan["filename"] for plan in plans]
+    extraction = {"specificationEvidenceVersion": 2, "specificationAssessedFields": list(FIELD_NAMES),
+                  "performanceParameters": {}, "sourceManifest": manifest, "specificationEvidence": [
+                      {"field": "Scale", "value": "1:100", "source_id": "mail:attachment:0", "snippet": "Scale: 1:100",
+                       "location": "page 1", "scope": None, "issuer": None, "role": "requested", "rationale": "Drawing scale"}]}
+    raw, _, issues = resolve_email_evidence(extraction)
+    assert raw["Scale"] == "1:100" and not issues
+    # An unread plan has no text, so it can never verify a citation.
+    extraction["specificationEvidence"][0]["source_id"] = blocked[0]["sourceId"]
+    assert "Scale" in resolve_email_evidence(extraction)[2]
+
+
+@pytest.mark.parametrize("finish_reason,block_reason", [
+    ("SAFETY", None), ("MAX_TOKENS", None), ("STOP", None), ("RECITATION", "OTHER"),
+])
+def test_other_provider_blocks_still_hold_extraction_for_retry(finish_reason, block_reason):
+    client, _ = gemini_reader({"image/png"}, finish_reason, block_reason)
+    manifest = []
+    with pytest.raises(IncompleteSourceExtraction) as captured:
+        extract_text_from_email("Contact: Alex", [{"filename": "plan.png", "content": image_bytes("PNG", animated=False)}],
+                                extractor=client, manifest=manifest)
+    assert manifest[1]["status"] == "failed:GeminiRequestFailure"
+    assert "plan.png" in str(captured.value)
+
+
+def test_supplementary_recitation_blocked_plan_does_not_block_analysis(tmp_path):
+    sources = [("1", "request.eml", b"From: client@example.com\nSubject: Roof\n\nContact: Alex"),
+               ("2", "Calder Outlet Revision - 3nr.png", image_bytes("PNG", animated=False))]
+    downloaded, contexts = [], []
+    for asset_id, filename, content in sources:
+        path = tmp_path / filename
+        path.write_bytes(content)
+        source = DesignEmailAsset(asset_id, filename, filename.rsplit(".", 1)[1], len(content), "2026-10-30T12:00:00Z", "unused", False)
+        downloaded.append(DownloadedDesignEmailAsset(source, str(path), "unused", hashlib.sha256(content).hexdigest(), len(content)))
+    reader, calls = gemini_reader({"image/png"})
+    result = analyze_downloaded_email_assets(downloaded, client=SimpleNamespace(
+        extract_design_parameters=lambda context: contexts.append(context) or parameters(),
+        query_llm=lambda *args: "Roof", process_image=reader.process_image,
+    ))
+    blocked = next(source for source in result.source_manifest if source["filename"].startswith("Calder"))
+    assert blocked["status"] == PROVIDER_RECITATION_REVIEW_STATUS and calls == ["image/png"]
+    assert "Calder" not in contexts[0] and "Contact: Alex" in contexts[0]
 
 
 def test_parameter_recovery_revisits_missing_attachment_field_with_same_meaning():

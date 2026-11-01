@@ -411,6 +411,36 @@ def test_forged_excerpt_and_incomplete_source_manifest_preserve_last_pdf(case):
     assert "Contact" in current(case).review_json["issues"]
 
 
+def test_recitation_blocked_source_publishes_with_an_item_review_until_read(case):
+    # Render job fb2c8adb (item 3313351849): an unread plan is flagged, never silently skipped.
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    plan = {"sourceId": "email:attachment:0", "filename": "Calder Outlet Revision - 3nr.png",
+            "sourceType": "attachment", "contentSha256": "def", "status": "review:provider_recitation",
+            "text": "", "observedAt": "2026-10-29T12:00:00+00:00",
+            "error": {"stage": "image_text", "code": "blocked_response", "finish_reason": "RECITATION"}}
+    extraction["sourceManifest"].append(plan)
+    case.item.extracted_parameters_json = deepcopy(extraction)
+    case.db.commit()
+    assert run(case) == ["published"]
+    record = current(case)
+    assert record.review_json["status"] == "published_with_review" and record.review_json["issues"] == {}
+    [note] = record.review_json["sourceReviews"]
+    assert note.startswith("Calder Outlet Revision - 3nr.png: Not transcribed.") and "RECITATION" in note
+    artifact = case.db.get(PerformanceSpecificationArtifact, (BOARD, ITEM, record.current_revision))
+    assert artifact.translation_json["sourceReviews"] == [note]
+    text = pdf_text(case.gateway.uploads[-1][1])
+    assert "Review required: some source documents could not be read." in text
+    assert "Calder Outlet Revision - 3nr.png: Not transcribed." in text
+    assert "Scale: 1:100" in text
+    plan.update(status="read", text="Outlet plan")
+    del plan["error"]
+    case.item.extracted_parameters_json = deepcopy(extraction)
+    case.db.commit()
+    assert run(case) == ["published"]
+    assert current(case).review_json is None
+    assert "could not be read" not in pdf_text(case.gateway.uploads[-1][1])
+
+
 def roof_evidence(case, values):
     extraction = deepcopy(case.item.extracted_parameters_json)
     extraction["performanceParameters"]["Decking"] = None

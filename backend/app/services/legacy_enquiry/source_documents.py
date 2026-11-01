@@ -19,11 +19,11 @@ from defusedxml import ElementTree
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
-from ..gemini_requests import source_failure_details as gemini_failure_details
+from ..gemini_requests import GeminiRequestFailure, source_failure_details as gemini_failure_details
 from ..spreadsheet_extraction import extract_spreadsheet_documents, is_spreadsheet
 from ..specification_semantics import (
     ANIMATED_IMAGE_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS, COMPLETE_SOURCE_STATUSES, DWG_SKIP_STATUS,
-    ENCRYPTED_PDF_SKIP_STATUS,
+    ENCRYPTED_PDF_SKIP_STATUS, PROVIDER_RECITATION_REVIEW_STATUS,
 )
 from ..specification_image_text import literal_image_regions
 from ..source_text import clean_source_text
@@ -67,6 +67,15 @@ def source_failure_details(exc):
         return exc.details
     # Arbitrary parser/provider messages can contain source text or signed URLs.
     return gemini_failure_details(exc)
+
+
+def _provider_recitation(exc):
+    # Recitation recurs for unchanged bytes, so retrying only repeats the block.
+    # Safety/prompt blocks, truncation and empty output remain retryable failures.
+    details = exc.details if isinstance(exc, GeminiRequestFailure) else {}
+    return (details.get("stage") in {"image_text", "pdf_text"} and details.get("code") == "blocked_response"
+            and details.get("finish_reason") == "RECITATION"
+            and details.get("block_reason") in {None, "BLOCK_REASON_UNSPECIFIED"})
 
 
 def _failure_summary(source):
@@ -237,7 +246,8 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
     except EncryptedPdfSkipped:
         record["status"] = ENCRYPTED_PDF_SKIP_STATUS
     except Exception as exc:
-        record["status"] = "failed:" + type(exc).__name__
+        record["status"] = (PROVIDER_RECITATION_REVIEW_STATUS if _provider_recitation(exc)
+                            else "failed:" + type(exc).__name__)
         error = source_failure_details(exc)
         if error:
             record["error"] = error
