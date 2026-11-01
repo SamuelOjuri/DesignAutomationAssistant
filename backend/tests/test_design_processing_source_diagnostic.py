@@ -9,7 +9,7 @@ def test_source_probe_checks_real_readers_without_external_services(monkeypatch,
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "ok"
     assert payload["commit"] == "a" * 12
-    assert payload["pipeline_revision"] == "output-v16"
+    assert payload["pipeline_revision"] == "output-v17"
     assert payload["pid"] > 0
     assert payload["dwg_status"] == "skipped:dwg"
     assert payload["encrypted_pdf_status"] == "skipped:encrypted_pdf"

@@ -14,6 +14,7 @@ def simulated_extraction(monkeypatch):
     """Advance a ten-minute child wait without sleeping or external requests."""
     state = SimpleNamespace(
         elapsed=0.0, duration=600.0, terminated=False, closed=False,
+        response=(True, {"result": "ok"}),
     )
 
     class Receiver:
@@ -22,7 +23,7 @@ def simulated_extraction(monkeypatch):
             return state.elapsed >= state.duration
 
         def recv(self):
-            return True, {"result": "ok"}
+            return state.response
 
         def close(self):
             pass
@@ -84,6 +85,23 @@ def test_local_cancellation_terminates_child_before_next_remote_read(simulated_e
     assert simulated_extraction.elapsed == 5
     assert remote_checks == [0]
     assert simulated_extraction.terminated and simulated_extraction.closed
+
+
+def test_evidence_failure_survives_process_boundary_without_logging_sources(simulated_extraction, monkeypatch):
+    from backend.app.services.specification_failures import SpecificationEvidenceError
+    details = {"fieldIssues": {"Company": "Unverified"}, "extraction": {"private": "source text"}}
+    sent = []
+    def fail(*args, **kwargs):
+        raise SpecificationEvidenceError("Evidence unresolved", details)
+    monkeypatch.setattr(execution, "analyze_downloaded_email_assets", fail)
+    execution._analyze_in_child(SimpleNamespace(send=sent.append, close=lambda: None), (), None)
+    simulated_extraction.duration = 5
+    simulated_extraction.response = sent[0]
+    with pytest.raises(SpecificationEvidenceError) as error:
+        execution.run_interruptible_analysis((), client=execution.LegacyGeminiClient("offline"),
+                                             check_current=lambda: None)
+    assert error.value.evidence_failure == details
+    assert str(error.value) == "Evidence unresolved" and simulated_extraction.closed
 
 
 @pytest.mark.parametrize("failure_at", [10, 60, 600])

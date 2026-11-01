@@ -41,6 +41,8 @@ node_modules/
 /tmp/render-source-audit/
 /tmp/audit_render_sources.py
 /tmp/map_render_jobs_readonly.py
+/tmp/render-source-review/
+/tmp/inspect_render_sources.py
 dist/
 build/
 

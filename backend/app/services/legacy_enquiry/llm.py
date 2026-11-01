@@ -4,9 +4,11 @@ from collections import Counter
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+import json
 from typing import Any, Callable, Sequence
 
 from google.genai import types
+from pydantic import ValidationError
 
 from ...gemini_models import ThinkingLevel, validate_thinking_level
 from ..llm_interface import gemini_api_with_retry
@@ -19,6 +21,8 @@ from .parameter_extraction import (
 from ..specification_semantics import FIELD_DEFINITIONS, canonical_label, missing
 from ..specification_image_text import IMAGE_TRANSCRIPTION_PROMPT
 from ..specification_request_context import request_context_summary, select_client_request
+from ..source_text import require_json_safe_text
+from ..specification_failures import SpecificationEvidenceError
 
 
 GenerateContent = Callable[[str, Any, types.GenerateContentConfig], Any]
@@ -70,7 +74,7 @@ class LegacyGeminiClient:
     def extract_design_parameters(self, context: str, *, source_manifest=None) -> DesignParameterExtraction:
         from ..specification_recovery import (
             evidence_diagnostics, extraction_payload, merge_recovery,
-            repair_note_list_formatting, repair_image_company_citations,
+            repair_note_list_formatting, repair_image_company_citations, repair_message_dates, bound_verified_request_notes,
         )
         from ..performance_specification_evidence import (
             PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
@@ -97,15 +101,37 @@ class LegacyGeminiClient:
             response = requester(contents, stage=stage)
             parsed = getattr(response, "parsed", None)
             if isinstance(parsed, DesignParameterExtraction):
+                require_json_safe_text(parsed.model_dump())
                 return parsed
             if isinstance(parsed, Mapping):
-                return DesignParameterExtraction.model_validate(parsed)
-            response_text = getattr(response, "text", None)
-            if not isinstance(response_text, str) or not response_text.strip():
-                raise ValueError("parameter extraction returned no structured response")
-            return DesignParameterExtraction.model_validate_json(response_text)
+                require_json_safe_text(parsed)
+            else:
+                response_text = getattr(response, "text", None)
+                if not isinstance(response_text, str) or not response_text.strip():
+                    raise ValueError("parameter extraction returned no structured response")
+                parsed = json.loads(response_text)
+                require_json_safe_text(parsed)
+            bounded, repairs = bound_verified_request_notes(parsed, source_manifest)
+            try:
+                result = DesignParameterExtraction.model_validate(bounded)
+            except ValidationError as exc:
+                issues = exc.errors(include_input=False, include_context=False, include_url=False)
+                raise SpecificationEvidenceError("Invalid parameter extraction response: " + json.dumps(issues),
+                    {"schemaIssues": issues, "response": bounded, "sourceManifest": source_manifest or []}) from None
+            result._evidence_repairs.extend(repairs)
+            return result
 
         result = request(prompt, "parameter_extraction")
+
+        def evidence_failure(message):
+            provenance, field_issues = evidence_diagnostics(result, source_manifest)
+            payload = extraction_payload(result, source_manifest)
+            return SpecificationEvidenceError(message, {
+                "extraction": payload, "fieldIssues": field_issues,
+                "noteIssues": request_note_diagnostics(payload),
+                "provenance": {label: details for label, details in provenance.items() if label in field_issues},
+            })
+
         required = set(FIELD_DEFINITIONS) - {"Incoming Information"}
         fields = {canonical_label(key): value for key, value in result.as_canonical_parameters().items()}
         fields["Bauder Roof Num"] = result.bauder_roof_num
@@ -115,6 +141,7 @@ class LegacyGeminiClient:
         diagnostics = {}
         note_diagnostics = {}
         if source_manifest is not None:
+            repair_message_dates(result, source_manifest)
             repair_image_company_citations(result, source_manifest)
             repair_note_list_formatting(result, source_manifest)
             _, diagnostics = evidence_diagnostics(result, source_manifest)
@@ -155,8 +182,15 @@ class LegacyGeminiClient:
                 if not name.startswith("specification_") and missing(getattr(result, name)):
                     setattr(result, name, value)
             if source_manifest is not None:
+                repair_message_dates(recovery, source_manifest)
                 repair_image_company_citations(recovery, source_manifest)
-                merge_recovery(result, recovery, source_manifest)
+                try:
+                    merge_recovery(result, recovery, source_manifest)
+                except ValidationError as exc:
+                    raise evidence_failure("Invalid merged evidence: " + json.dumps(
+                        exc.errors(include_input=False, include_context=False, include_url=False))) from None
+                except ValueError as exc:
+                    raise evidence_failure(str(exc)) from None
             else:
                 unique = {e.model_dump_json(): e for e in (*result.specification_evidence, *recovery.specification_evidence)}
                 result.specification_evidence = list(unique.values())
@@ -185,12 +219,25 @@ class LegacyGeminiClient:
                 roles = {label: dict(sorted(Counter(e.role for e in result.specification_evidence
                                                    if e.field == label).items()))
                          for label in sorted(unresolved)}
-                raise ValueError("Specification evidence recovery unresolved: " + str(unresolved)
-                                 + "; evidence_roles=" + str(roles))
-            resolve_request_notes(extraction_payload(result, source_manifest))
+                raise evidence_failure("Specification evidence recovery unresolved: " + str(unresolved)
+                                       + "; evidence_roles=" + str(roles))
+            try:
+                resolve_request_notes(extraction_payload(result, source_manifest))
+            except ValidationError as exc:
+                raise evidence_failure("Invalid request notes: " + json.dumps(
+                    exc.errors(include_input=False, include_context=False, include_url=False))) from None
+            except ValueError as exc:
+                raise evidence_failure(str(exc)) from None
         # Merging two individually bounded responses must not bypass the local
         # array limits and leave an oversized extraction for the publisher.
-        DesignParameterExtraction.model_validate(result.model_dump())
+        try:
+            DesignParameterExtraction.model_validate(result.model_dump())
+        except ValidationError as exc:
+            message = "Invalid merged extraction: " + json.dumps(
+                exc.errors(include_input=False, include_context=False, include_url=False))
+            if source_manifest is not None:
+                raise evidence_failure(message) from None
+            raise ValueError(message) from None
         return result
 
     def query_llm(self, context: str, query: str) -> str:

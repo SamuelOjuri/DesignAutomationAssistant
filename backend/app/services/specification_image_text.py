@@ -35,4 +35,4 @@ def literal_source_texts(source):
     # Metadata marks the new image contract, but never supplies the actual text.
     if "imageTextRegions" in source:
         return [region["text"] for region in literal_image_regions(source["text"])]
-    return [source["text"]]
+    return [source["text"], *([source["emailHtmlText"]] if source.get("emailHtmlText") else [])]

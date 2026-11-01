@@ -5,7 +5,9 @@ from datetime import datetime
 from email import policy
 from email.parser import BytesParser
 from email.utils import parsedate_to_datetime
+import hashlib
 import io
+import re
 from typing import Any, Optional, Protocol, Sequence, Union
 from zoneinfo import ZoneInfo
 
@@ -17,6 +19,30 @@ from .source_documents import (
 )
 from ..specification_semantics import COMPLETE_SOURCE_STATUSES
 from ..specification_request_context import attachment_message, parent_email, request_context_summary
+from ..source_text import clean_source_text
+
+
+def _html_source_metadata(header, content):
+    """Retain MIME HTML evidence, including CID references lost in plain text."""
+    from bs4 import BeautifulSoup
+
+    if not content:
+        return {}
+    text = clean_source_text(header) + "\n" + html_text(content)
+    result = {"emailHtmlText": text, "emailHtmlSha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+    # Mail gateways append the outer sender's legal footer after the original
+    # Word email container. It is outside the forwarded message inside that div.
+    soup = BeautifulSoup(content, "html.parser")
+    containers = soup.body.find_all("div", class_="WordSection1", recursive=False) if soup.body else []
+    if len(containers) == 1:
+        footer = html_text("".join(str(node) for node in containers[0].next_siblings))
+        if footer:
+            # HTML parsing/serialization may normalize CRLF and NBSP. Recover
+            # the actual contiguous suffix from the immutable extracted text.
+            match = re.search(r"\s+".join(re.escape(word) for word in footer.split()) + r"\s*$", text)
+            if match:
+                result["emailOuterFooterText"] = match[0]
+    return result
 
 
 class AttachmentTextExtractor(Protocol):
@@ -39,6 +65,7 @@ class AttachmentTextExtractor(Protocol):
 def process_email_content(
     email_content: bytes,
     filename: str,
+    *, source_metadata: dict | None = None,
 ) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]]]:
     if filename.lower().endswith(".msg"):
         with io.BytesIO(email_content) as email_buffer:
@@ -51,6 +78,8 @@ def process_email_content(
                     f"Date: {format_email_date(message.date or '')}\n"
                 )
                 body = message.body or html_text(message.htmlBody or b"")
+                if source_metadata is not None:
+                    source_metadata.update(_html_source_metadata(header, message.htmlBody))
                 attachments: list[dict[str, Any]] = []
                 inline_images: list[dict[str, Any]] = []
                 for attachment in message.attachments:
@@ -100,6 +129,10 @@ def process_email_content(
             body = body_part.get_content() if body_part is not None else ""
         if body_part is not None and body_part.get_content_type() == "text/html":
             body = html_text(body)
+        if source_metadata is not None:
+            html_part = message.get_body(preferencelist=("html",))
+            if html_part is not None:
+                source_metadata.update(_html_source_metadata(header, html_part.get_content()))
 
         attachments = []
         inline_images = []
@@ -123,7 +156,7 @@ def process_email_content(
                 attachments.append(
                     {"filename": attachment_filename, "content": content}
                 )
-    return header, body, attachments, inline_images
+    return clean_source_text(header), clean_source_text(body), attachments, inline_images
 
 
 def format_email_date(raw_date: Union[str, datetime]) -> str:
@@ -171,11 +204,13 @@ def extract_text_from_email(
     manifest: Optional[list[dict[str, Any]]] = None,
     source_prefix: str = "email",
     observed_at: str | None = None,
+    source_metadata: dict | None = None,
 ) -> str:
     records = [source_record(
         source_prefix + ":body", "Email body", email_text.encode("utf-8"),
         source_type="email_body", observed_at=observed_at, text=email_text,
     )]
+    records[0].update(source_metadata or {})
     attachments = list(attachments_data) + list(inline_images or ())
     results = {}
     if attachments:
@@ -211,7 +246,10 @@ def extract_text_from_email(
         + (f"VERIFIED CONTAINING MESSAGE DATE: {record['containingMessage']['sentDate']}\n"
            if record.get("containingMessage") else "")
         + ("EMAIL CONTENT:\n" if record["sourceType"] == "email_body" else "ATTACHMENT CONTENT:\n")
-        + record["text"] for record in records if record["status"] == "read"
+        + record["text"]
+        + ("\nHTML ALTERNATIVE OF THE SAME EMAIL (literal text and inline Content-IDs):\n"
+           + record["emailHtmlText"] if record.get("emailHtmlText") else "")
+        for record in records if record["status"] == "read"
     )
     if len(combined_text) > MAX_CONTEXT_CHARS:
         raise ValueError("Combined source text exceeds extraction limit; review required")

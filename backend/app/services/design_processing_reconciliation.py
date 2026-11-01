@@ -159,6 +159,7 @@ def reconcile_landing_zone_once(
     limit: Optional[int] = None,
     now: Optional[datetime] = None,
     discovered_items: Optional[dict[str, list[MondayGroupItem]]] = None,
+    retry_failed: bool = False,
 ) -> DesignProcessingReconciliationResult:
     configured_mode = mode or settings.design_processing_mode
     board_id = str(settings.design_processing_board_id)
@@ -171,6 +172,8 @@ def reconcile_landing_zone_once(
         )
     if limit is not None and limit < 1:
         raise ValueError("limit must be at least 1")
+    if retry_failed and item_id is None:
+        raise ValueError("retry_failed requires an explicit item_id")
 
     token = access_token or get_monday_ingestion_access_token()
     read_gateway = gateway or MondayDesignProcessingReadGateway(
@@ -332,13 +335,15 @@ def reconcile_landing_zone_once(
                     expected_group_id=group_id,
                     allowlist_item_ids=settings.design_processing_allowlist_item_ids,
                     now=checked_at,
+                    retry_failed=retry_failed,
                 )
                 if not dry_run:
                     from .performance_specification import cancel_specification, enqueue_specification
                     if snapshot.item_state != "active":
                         cancel_specification(db, snapshot.board_id, snapshot.item_id)
                     else:
-                        enqueue_specification(db, snapshot.board_id, snapshot.item_id, group_id=snapshot.group_id)
+                        enqueue_specification(db, snapshot.board_id, snapshot.item_id,
+                                              group_id=snapshot.group_id, reconcile=True)
                 if queue_result.item is not None:
                     queue_result.item.updated_at = checked_at
                 db.flush()
@@ -456,6 +461,8 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--item-id", default=None)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--retry-failed", action="store_true",
+                        help="Explicitly retry an exhausted execution; requires --item-id")
     args = parser.parse_args()
 
     db = SessionLocal()
@@ -465,6 +472,7 @@ def main() -> int:
             dry_run=args.dry_run,
             item_id=args.item_id,
             limit=args.limit,
+            retry_failed=args.retry_failed,
         )
     except (HTTPException, ValueError) as exc:
         detail = exc.detail if isinstance(exc, HTTPException) else str(exc)

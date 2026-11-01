@@ -171,7 +171,8 @@ class DesignParameterExtraction(BaseModel):
 
     specification_evidence: list[SpecificationEvidence] = Field(default_factory=list, max_length=512)
     specification_assessed_fields: list[SpecificationField] = Field(default_factory=list, max_length=18)
-    specification_request_notes: list[SpecificationRequestNote] = Field(default_factory=list, max_length=64)
+    specification_request_notes: list[SpecificationRequestNote] = Field(default_factory=list, max_length=64,
+        description="Project-specific constraints, options, exclusions and source links. Quote each verbatim, at most 2000 characters per note. Split long passages into separate contiguous excerpts; never summarize, splice passages or quote routine email/legal boilerplate.")
     _evidence_repairs: list[dict] = PrivateAttr(default_factory=list)
 
     def as_canonical_parameters(self) -> dict[str, str | None]:

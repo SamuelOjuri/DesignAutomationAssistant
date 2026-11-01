@@ -233,7 +233,7 @@ def test_linked_board_webhook_enqueues_active_dependents_without_source_item_ing
     event = monday_webhooks.normalize_webhook_payload({"event": {
         "boardId": "1825117125", "pulseId": "601", "columnId": "text3__1", "type": "change_column_value",
     }})
-    dispatch = SimpleNamespace()
+    dispatch = SimpleNamespace(webhook_event_id=uuid.uuid4())
     monday_webhooks._dispatch_auto_sync(case.db, dispatch, item=None, normalized=event)
     assert dispatch.outcome == "queued" and dispatch.result_json["dependentTasksQueued"] == 1
     assert case.db.query(AutoSyncJob).count() == 0

@@ -102,3 +102,37 @@ def test_runtime_metadata_identifies_deployment_without_exposing_environment(mon
     assert result["commit"] == "a" * 12 and result["array_bounds"] == 0
     assert result["python"] and result["google_genai"] and result["schema_sha256"]
     assert "DO_NOT_LOG" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("reason,code,text", [
+    ("RECITATION", "blocked_response", None),
+    ("SAFETY", "blocked_response", "Private partial source"),
+    ("MAX_TOKENS", "incomplete_response", "Private partial source"),
+    ("STOP", "empty_response", None),
+])
+def test_http_success_with_blocked_partial_or_empty_output_is_not_a_read_source(reason, code, text):
+    response = SimpleNamespace(text=text, candidates=[SimpleNamespace(finish_reason=reason,
+        finish_message="Private provider explanation")])
+    calls = []
+    def generate(*args):
+        calls.append(args)
+        return response
+    with pytest.raises(GeminiRequestFailure) as error:
+        GeminiJSONRequester(generate, "offline", config(), Result)("Private source", stage="parameter_extraction")
+    assert len(calls) == 1  # No schema fallback or repeated blocked requests.
+    assert error.value.details["code"] == code
+    assert error.value.details["finish_reason"] == (reason if reason != "STOP" else None)
+    assert "Private" not in str(error.value)
+
+
+def test_prompt_block_is_reported_even_without_candidates():
+    response = SimpleNamespace(prompt_feedback=SimpleNamespace(block_reason="OTHER"), candidates=[])
+    with pytest.raises(GeminiRequestFailure) as error:
+        request_gemini(lambda *_: response, "offline", [], types.GenerateContentConfig(), stage="image_text")
+    assert error.value.details["block_reason"] == "OTHER"
+
+
+def test_complete_text_and_parsed_only_test_responses_remain_usable():
+    for response in (SimpleNamespace(text="Complete", candidates=[SimpleNamespace(finish_reason=types.FinishReason.STOP)]),
+                     SimpleNamespace(parsed={"value": "Original"})):
+        assert request_gemini(lambda *_: response, "offline", [], types.GenerateContentConfig(), stage="image_text") is response

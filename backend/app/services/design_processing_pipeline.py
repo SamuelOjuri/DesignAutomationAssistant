@@ -456,7 +456,7 @@ def run_analysis_pipeline(
     )
     from .performance_specification import enqueue_specification
 
-    enqueue_specification(db, item.board_id, item.item_id, group_id=snapshot.group_id)
+    enqueue_specification(db, item.board_id, item.item_id, group_id=snapshot.group_id, immediate=True)
     db.flush([item, job])
 
     publication_allowed = _execution_is_allowed(

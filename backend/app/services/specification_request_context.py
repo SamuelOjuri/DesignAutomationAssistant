@@ -34,10 +34,21 @@ def message_timestamp(value):
 def email_messages(text):
     """Only header runs beginning with From; body dates cannot create headers."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    starts = [match.start() for match in re.finditer(r"(?mi)^From:[ \t]", text)]
+    # Apple reply headers are boundaries too, even when they cannot establish
+    # recipients for selecting a new client request.
+    apple = r"On (.+?), at (\d{1,2}:\d{2}(?::\d{2})?), (.+?<[^>]+>) wrote:"
+    starts = [match.start() for match in re.finditer(r"(?mi)^(?:From:[ \t]|" + apple + r")", text)]
     messages = []
     for index, start in enumerate(starts):
         block = text[start:starts[index + 1] if index + 1 < len(starts) else len(text)]
+        reply = re.match(apple, block, re.I)
+        if reply:
+            senders = _addresses([reply[3]])
+            date = reply[1] + " " + reply[2]
+            messages.append({"messageIndex": index, "sender": senders[0] if len(senders) == 1 else None,
+                "recipients": [], "sentDate": date, "sentAt": message_timestamp(date),
+                "requestRole": "forwarded_request", "headerSnippet": reply[0], "text": block})
+            continue
         headers = []
         values = {}
         after_blank = False
@@ -71,6 +82,26 @@ def email_messages(text):
     return messages
 
 
+def source_email_messages(source, *, include_plain=False):
+    """Associate facts with literal message boundaries in both MIME alternatives."""
+    html = source.get("emailHtmlText")
+    # HTML owns structural attribution when present. Plain text flattens a
+    # gateway footer into the last forwarded message and loses inline CIDs.
+    variants = ([source["text"], html] if include_plain else [html]) if html else [source["text"]]
+    messages = []
+    for text in variants:
+        parsed = email_messages(text)
+        footer = source.get("emailOuterFooterText")
+        if text == html and footer and text.endswith(footer) and parsed:
+            # This footer is a sibling of the outer HTML mail container, not
+            # part of its last forwarded message. Preserve the original text.
+            normalized_footer = footer.replace("\r\n", "\n").replace("\r", "\n")
+            parsed[-1]["text"] = parsed[-1]["text"].removesuffix(normalized_footer)
+            parsed[0]["text"] += "\n" + normalized_footer
+        messages.extend(parsed)
+    return messages
+
+
 def internal_address(address):
     domain = str(address or "").rsplit("@", 1)[-1].lower()
     domains = {part.strip().lower() for part in settings.design_processing_internal_email_domains.split(",") if part.strip()}
@@ -83,7 +114,7 @@ def select_client_request(manifest):
     for source in manifest:
         if source.get("sourceType") != "email_body" or source.get("status") != "read":
             continue
-        for message in email_messages(source["text"]):
+        for message in source_email_messages(source):
             if (message["sender"] and not internal_address(message["sender"])
                     and any(internal_address(a) for a in message["recipients"])):
                 candidates.append({**message, "sourceId": source["sourceId"]})
@@ -120,8 +151,12 @@ def attachment_messages(source, sources):
     parent = parent_email(source, sources)
     if not parent or not source.get("contentId"):
         return []
-    return [message for message in email_messages(parent["text"])
-            if contains_content_id(message["text"], source["contentId"])]
+    matches = {}
+    for message in source_email_messages(parent):
+        if contains_content_id(message["text"], source["contentId"]):
+            key = (message["messageIndex"], message["sender"], message["sentAt"], message["requestRole"])
+            matches.setdefault(key, message)
+    return list(matches.values())
 
 
 def attachment_message(source, sources):
@@ -136,20 +171,29 @@ def client_evidence_applies(evidence, source, sources, context, contains):
     """Company/contact/date must belong to the same selected client message."""
     if context is None:
         parent = source if source.get("sourceType") == "email_body" else parent_email(source, sources)
-        messages = email_messages(parent["text"]) if parent else []
+        messages = source_email_messages(parent) if parent else []
         return (evidence["request_role"] == "direct_request"
                 and not (messages and internal_address(messages[0]["sender"])))
     if source.get("sourceType") == "email_body":
-        return any(message["sender"] == context["sender"] and message["sentAt"] == context["sentAt"]
+        return any(_client_message_applies(evidence, message, context)
                    and contains(evidence["snippet"], message["text"])
-                   for message in email_messages(source["text"]))
+                   for message in source_email_messages(source))
     if source.get("sourceType") == "reviewed_crm":
         return evidence["request_role"] == "direct_request"
     parent = parent_email(source, sources)
     if parent and source.get("contentId"):
         messages = attachment_messages(source, sources)
-        return (any(message["sender"] == context["sender"] and message["sentAt"] == context["sentAt"] for message in messages)
+        return (any(_client_message_applies(evidence, message, context) for message in messages)
                 and all(message["sender"] in {None, context["sender"]} for message in messages))
     # Explicit requester forms, including standalone source documents.
     return evidence["request_role"] == "direct_request" and (
         parent is None or parent["sourceId"] == context["sourceId"])
+
+
+def _client_message_applies(evidence, message, context):
+    if message["sender"] != context["sender"] or not message["sentAt"]:
+        return False
+    # An earlier signature from this exact sender can identify the requester;
+    # it must not change Date Received or date another technical fact.
+    return (message["sentAt"] == context["sentAt"] or
+            (evidence["field"] in {"Company", "Contact"} and message["sentAt"] < context["sentAt"]))

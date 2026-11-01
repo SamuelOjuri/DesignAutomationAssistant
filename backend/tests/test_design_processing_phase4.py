@@ -317,6 +317,45 @@ def test_assigned_retry_is_cancelled_before_successor_insert(db_session):
     assert len([job for job in jobs if job.status == "scheduled"]) == 1
 
 
+def test_duplicate_notification_preserves_assigned_retry_backoff(db_session):
+    item, job = _stored_item(), _assigned_job(status="retry_wait")
+    due = NOW + timedelta(minutes=30)
+    job.scheduled_for = job.next_retry_at = due
+    job.attempt_count, job.last_error = 2, "Evidence unresolved"
+    db_session.add_all([item, job])
+    db_session.commit()
+    result = _queue(db_session, _snapshot())
+    db_session.commit()
+    assert result.job is job and job.status == "retry_wait"
+    assert _as_utc(job.scheduled_for) == _as_utc(job.next_retry_at) == due
+    assert job.attempt_count == 2 and job.last_error == "Evidence unresolved"
+
+
+def test_duplicate_notification_does_not_restart_exhausted_identity(db_session):
+    item, job = _stored_item(state="failed"), _assigned_job(status="failed")
+    job.attempt_count = job.max_attempts = 3
+    job.completed_at = NOW
+    db_session.add_all([item, job])
+    db_session.commit()
+    result = _queue(db_session, _snapshot())
+    assert result.outcome == "ignored" and result.readiness == "attempts_exhausted"
+    assert result.item.state == "failed" and db_session.query(DesignProcessingJob).count() == 1
+    fresh = _queue(db_session, _snapshot(input_revision="revision-b"))
+    assert fresh.outcome == "queued" and fresh.job.id != job.id
+
+
+def test_explicit_retry_can_restart_exhausted_identity(db_session):
+    item, job = _stored_item(state="failed"), _assigned_job(status="failed")
+    job.attempt_count = job.max_attempts = 3
+    job.completed_at = NOW
+    db_session.add_all([item, job])
+    db_session.commit()
+    result = queue_design_processing_snapshot(db_session, _snapshot(), trigger_type="reconciliation",
+        mode="enabled", pipeline_version=PIPELINE_VERSION, expected_board_id=BOARD_ID,
+        expected_group_id=LANDING_GROUP_ID, now=NOW, retry_failed=True)
+    assert result.outcome == "queued" and result.job.id != job.id
+
+
 def test_missing_name_replaces_stale_assigned_retry_with_readiness_job(db_session):
     item = _stored_item()
     stale_job = _assigned_job(status="retry_wait")

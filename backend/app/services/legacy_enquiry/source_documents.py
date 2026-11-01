@@ -26,6 +26,7 @@ from ..specification_semantics import (
     ENCRYPTED_PDF_SKIP_STATUS,
 )
 from ..specification_image_text import literal_image_regions
+from ..source_text import clean_source_text
 
 
 MAX_SOURCE_BYTES = 20 * 1024 * 1024
@@ -76,6 +77,8 @@ def _failure_summary(source):
             summary += f" ({error['message']})"
         else:
             summary += f" (stage={error.get('stage')}, http_status={error.get('http_status')}, mode={error.get('mode')})"
+            if error.get("code"):
+                summary += f" (code={error['code']}, finish_reason={error.get('finish_reason')})"
     return summary
 
 
@@ -98,6 +101,10 @@ class _HTMLText(HTMLParser):
             self.hidden += 1
         if tag in {"br", "p", "div", "tr", "blockquote", "hr"}:
             self.parts.append("\n")
+        if tag == "li":
+            self.parts.append("\n* ")
+        if tag in {"td", "th"}:
+            self.parts.append(" ")
         if tag == "img" and not self.hidden:
             source = dict(attrs).get("src") or ""
             if source.lower().startswith("cid:"):
@@ -106,7 +113,7 @@ class _HTMLText(HTMLParser):
     def handle_endtag(self, tag):
         if tag in {"script", "style"}:
             self.hidden = max(0, self.hidden - 1)
-        if tag in {"p", "div", "tr", "blockquote"}:
+        if tag in {"p", "div", "tr", "blockquote", "li"}:
             self.parts.append("\n")
 
     def handle_data(self, data):
@@ -117,7 +124,7 @@ class _HTMLText(HTMLParser):
 def html_text(content: str | bytes) -> str:
     parser = _HTMLText()
     parser.feed(content.decode("utf-8", errors="replace") if isinstance(content, bytes) else content)
-    return "".join(parser.parts).strip()
+    return clean_source_text("".join(parser.parts).strip())
 
 
 def extract_document(content: bytes, filename: str, extractor) -> str:
@@ -178,10 +185,10 @@ def extract_document(content: bytes, filename: str, extractor) -> str:
     if not isinstance(text, str) or not text.strip() or text.lstrip().lower().startswith((
         "error processing", "unable to process", "unsupported image format",
     )):
-        raise ValueError("Document extraction returned no readable text")
+        raise SourceDocumentError("no_readable_text", "Document extraction returned no readable text; review the source or retry transcription.")
     if len(text) > MAX_CONTEXT_CHARS:
-        raise ValueError("Source exceeds the extracted text limit")
-    return text
+        raise SourceDocumentError("source_text_limit", "Source exceeds the extracted text limit; split the source document.")
+    return clean_source_text(text)
 
 
 @dataclass
@@ -284,7 +291,7 @@ def source_record(source_id, filename, content, *, source_type, observed_at=None
     record = {
         "sourceId": source_id, "filename": filename, "sourceType": source_type,
         "contentSha256": hashlib.sha256(content).hexdigest(), "sizeBytes": len(content),
-        "observedAt": observed_at, "status": status, "text": text,
+        "observedAt": observed_at, "status": status, "text": clean_source_text(text),
     }
     if error:
         record["error"] = error

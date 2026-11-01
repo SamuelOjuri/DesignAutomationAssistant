@@ -905,6 +905,23 @@ def test_linked_changes_enqueue_dependents(case):
     assert current(case).requested_generation == generation + 1
 
 
+def test_reconciliation_preserves_specification_retry_deadline_and_attempts(case):
+    record = worker.enqueue_specification(case.db, BOARD, ITEM, group_id="topics", immediate=True)
+    record.attempt_count = 5
+    record.last_error = "Waiting for current extraction"
+    record.scheduled_for = worker.utc_now() + timedelta(minutes=30)
+    case.db.commit()
+    due, generation = record.scheduled_for, record.requested_generation
+    worker.enqueue_specification(case.db, BOARD, ITEM, group_id="topics", reconcile=True)
+    case.db.commit()
+    assert worker._aware(current(case).scheduled_for) == worker._aware(due)
+    assert current(case).attempt_count == 5 and current(case).requested_generation == generation
+    worker.enqueue_specification(case.db, BOARD, ITEM, group_id="topics")
+    case.db.commit()
+    assert worker._aware(current(case).scheduled_for) == worker._aware(due) and current(case).attempt_count == 5
+    assert current(case).requested_generation == generation + 1
+
+
 def test_missing_roof_number_is_optional_and_incoming_information_is_always_blank(case):
     case.item.extracted_parameters_json["performanceParameters"]["Bauder Roof Num"] = None
     case.item.extracted_parameters_json = with_evidence(case.item.extracted_parameters_json)

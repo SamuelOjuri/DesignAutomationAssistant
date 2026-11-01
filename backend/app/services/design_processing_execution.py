@@ -9,6 +9,7 @@ from typing import Callable, Optional
 from .legacy_enquiry.analysis import analyze_downloaded_email_assets
 from .legacy_enquiry.llm import LegacyGeminiClient
 from .legacy_enquiry.source_documents import IncompleteSourceExtraction
+from .specification_failures import SpecificationEvidenceError
 
 
 class DesignExtractionProcessError(RuntimeError):
@@ -50,6 +51,8 @@ def _analyze_in_child(connection, downloaded_assets, client):
     except Exception as exc:
         if isinstance(exc, IncompleteSourceExtraction):
             connection.send((False, {"sourceExtractionFailure": exc.manifest}))
+        elif isinstance(exc, SpecificationEvidenceError):
+            connection.send((False, {"specificationEvidenceFailure": exc.evidence_failure, "message": str(exc)}))
         else:
             connection.send((False, f"{type(exc).__name__}: {exc}"))
     finally:
@@ -128,6 +131,8 @@ def _run_in_process(
         if not succeeded:
             if isinstance(result, dict) and "sourceExtractionFailure" in result:
                 raise IncompleteSourceExtraction(result["sourceExtractionFailure"])
+            if isinstance(result, dict) and "specificationEvidenceFailure" in result:
+                raise SpecificationEvidenceError(result["message"], result["specificationEvidenceFailure"])
             raise _process_error(process, started_at, f"reported {result}")
         return result
     finally:

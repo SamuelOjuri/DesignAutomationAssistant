@@ -70,7 +70,7 @@ python -m backend.scripts.check_design_processing_sources
 ```
 
 This uses only synthetic DWG, ZIP, XLSX and encrypted-PDF bytes with no database or
-network calls. Expected output includes `status: ok`, `pipeline_revision: output-v16`,
+network calls. Expected output includes `status: ok`, `pipeline_revision: output-v17`,
 and all four checks with `passed: true`. It verifies that DWG and encrypted PDFs
 are skipped, ZIP members are read and long spreadsheet cells retain their final
 technical values. A `.dwg`
@@ -435,13 +435,97 @@ the database until all matching application/worker processes have stopped.
 
 ## Verification
 
-The current release requires fresh `output-v16` extraction and uses
+The current release requires fresh `output-v17` extraction and uses
 `performance-specification-v4` PDFs. Deploy matching API, design, reconciliation and
 specification workers, then run the normal reconciliation for the allowlisted items.
 No additional database migration is needed. The publisher compares the **full**
 configured pipeline identity, including model/thinking settings; matching stored
 desired/analyzed identities alone cannot authorize reuse of an older extraction.
 Retained PDFs remain available until a verified replacement succeeds.
+
+### November 1 source-email and retry corrections (`output-v17`)
+
+The email reader preserves a separate, hashed HTML text alternative alongside the
+plain body. Literal HTML Content-IDs associate signature images when Outlook/Apple
+plain text contains only an image filename or object placeholder. HTML gateway
+footers outside the outer Word email container belong to its sender, rather than
+the last forwarded correspondent. Apple reply headers also delimit messages.
+Company/Contact may use a verified earlier signature from the same sender; another
+sender's signature remains excluded. The selected client enquiry date is unchanged,
+and older signatures cannot date technical drawing/material facts. Excluded
+identity candidates retain their reason in provenance.
+An unsupported company citation to a website address can move to one literal logo
+region only when its Content-ID proves it belongs to that same signature. Repeated
+uses by that sender are allowed; branding associated with another sender is not.
+The claimed company name is preserved exactly, never derived from the domain.
+
+Contact can reorder an exact, single `From: "Surname, Given name" <address>` header
+without inventing name parts. A complete literal drawing reference remains valid
+when a response redundantly splits it at the underscore. Deterministic date repair
+restores a uniquely verified equivalent literal Date/Sent header. If the model cites
+another actual header in the same email, a technical excerpt can be rebound only
+when it occurs in one distinct message and is absent from the cited message; the
+literal containing header supplies both date and direct/forwarded role, with a
+before/after audit. Invented dates and repeated quotations still block. Long request
+notes can be split at whitespace only after the entire original contiguous excerpt
+verifies; all words survive, each citation remains bounded, and unverified or
+over-limit responses still block publication. No material aliases are inferred.
+
+Actual NUL characters in extracted source text become spaces before prompting and
+verification, preserving token boundaries and original file hashes. Literal
+`\\u0000` text is unchanged. Model-introduced NULs are rejected before persistence.
+Legacy stored payloads should be replaced by fresh extraction, not bulk-edited with
+SQL string replacement. Empty/failed text and size-limit errors carry safe source
+codes such as `no_readable_text` and `source_text_limit`.
+
+The two valid PNG plans for item `3313351849` returned HTTP-success responses with
+no text and `finish_reason=RECITATION` in the approved Gemini replay. The provider
+defines this as content flagged for recitation ([Gemini API response reference](https://ai.google.dev/api/generate-content#FinishReason)).
+Responses now preserve safe `blocked_response`, `incomplete_response` or
+`empty_response` diagnostics, including finish/block reasons. Partial text cannot
+be accepted as a complete source. Do not repeat unchanged blocked calls indefinitely,
+silently skip the plans, or disable provider safeguards. This item needs a reviewed
+source/transcription or a provider-side resolution before its source is complete.
+No automatic OCR fallback is claimed to capture diagram geometry or outlet locations.
+
+The supplied 15 emails cover eight blocked items. Final local validation of both
+sets of captured Gemini parameter responses succeeds for `3312713363`, `3313065024`,
+`3312835171`, `3317334071`, `3318408522`, `3312851487` and `3302170223`. Conflicting
+roof/material/U-value and other alternatives remain reviewable, rather than being
+silently selected. Captured-response checks do not guarantee future model output.
+The original bytes of both PNGs for `3313351849` were verified as readable PNGs;
+the captured provider blocks now reproduce the explicit failure diagnostics.
+Replays did not update Monday, the database or published PDFs. Source email bodies
+contained no NULs, so the origin of the legacy NUL payload is not proven by these
+files. Private emails, attachments and replay outputs are excluded from Git.
+
+Evidence failures now retain private replay data under
+`design_processing_jobs.result_json.specificationEvidenceFailure`, including source
+inventory, evidence, field/note diagnostics and excluded candidates. Schema failures
+retain their response and schema diagnostics there too. Source-read failures remain
+under `sourceExtractionFailure`. Worker exception summaries omit source excerpts;
+these private payloads are not suitable for public logs or issue reports.
+
+Duplicate notifications preserve unchanged extraction retry deadlines. Exhausted
+executions are not recreated by reconciliation/webhooks for the same input, pipeline
+and execution kind. Changed inputs or a new pipeline identity permit fresh work.
+After addressing a failure, an operator can explicitly retry one item with:
+
+```bash
+python -m backend.app.services.design_processing_reconciliation --item-id 3312851487 --retry-failed
+```
+
+`--retry-failed` requires `--item-id`; `--dry-run` previews it. Normal reconciliation
+after deployment is sufficient for old pipeline identities. Periodic specification
+reconciliation leaves already-scheduled refreshes and retry counts alone. Other
+notifications preserve failure counts; an explicit immediate request or completed
+fresh extraction wakes publication promptly. Successful refreshes clear the count.
+
+Deploy matching API, design, reconciliation and specification workers. No schema
+migration is required. Keep the existing admission cutoff and allowlist: the five
+previously unregistered items need an eligibility check, not automatic historical
+backfill. Verified roof/value conflicts continue to publish review details, while
+unverified evidence retains the last successful PDF.
 
 Images now transcribe coherent visible text into bounded `[TEXT REGION n]` blocks,
 with visual descriptions separate. Evidence and constraint excerpts use those literal

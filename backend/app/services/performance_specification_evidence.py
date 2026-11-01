@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import timezone
+from email.utils import getaddresses
 import re
 from zoneinfo import ZoneInfo
 
@@ -14,8 +15,8 @@ from .specification_semantics import (
     SpecificationRequestNote, drawing_reference_key, missing, tp_reference_revision,
 )
 from .specification_request_context import (
-    CLIENT_FIELDS, attachment_message, client_evidence_applies, email_messages,
-    parent_email, select_client_request,
+    CLIENT_FIELDS, attachment_message, client_evidence_applies,
+    parent_email, select_client_request, source_email_messages,
 )
 from .specification_image_text import literal_source_texts
 
@@ -94,11 +95,30 @@ def _title_block_reference_parts(snippet):
 
 def _value_supported(evidence):
     value, snippet = evidence["value"], evidence["snippet"]
+    if evidence["field"] == "Contact":
+        headers = re.findall(r"(?mi)^From:[ \t]*([^\r\n]+)", snippet)
+        if len(headers) == 1:
+            addresses = getaddresses(headers)
+            if len(addresses) == 1 and "@" in addresses[0][1]:
+                parts = addresses[0][0].split(",")
+                if len(parts) == 2 and all(part.strip() for part in parts):
+                    # Outlook's literal 'Surname, Given name' display name.
+                    # Reorder whole parts only; no initials or inferred names.
+                    if _normal(value) == _normal(parts[1] + " " + parts[0]):
+                        return True
     if evidence.get("reference_parts"):
         parts = evidence["reference_parts"]
         verified = _title_block_reference_parts(snippet)
         if evidence["field"] not in {"Drawing Reference", "Revision"} or len(parts) != 2:
             return False
+        # Some responses redundantly split an already literal reference at '_'.
+        # The full identifier must still occur contiguously in this same excerpt.
+        literal = parts[0] + "_" + parts[1]
+        suffix = tp_reference_revision(literal, confirmed_crm=True)
+        if suffix and _contains_excerpt(literal, snippet):
+            expected = literal if evidence["field"] == "Drawing Reference" else suffix
+            if _normal(value) == _normal(expected):
+                return True
         combined = parts[0] + " - " + parts[1]
         separate_cells = verified is not None and tuple(map(_normal, parts)) == verified
         # Some responses redundantly split an already contiguous reference.
@@ -225,6 +245,7 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
     client_request = select_client_request(manifest)
     candidates = defaultdict(list)
     rejected = defaultdict(list)
+    excluded = defaultdict(list)
     issues = {}
     for value in extraction.get("specificationEvidence") or []:
         evidence = SpecificationEvidence.model_validate(value).model_dump()
@@ -244,6 +265,7 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         source = sources.get(evidence["source_id"])
         if (source is not None and label in CLIENT_FIELDS
                 and not client_evidence_applies(evidence, source, sources, client_request, _contains_excerpt)):
+            excluded[label].append({**evidence, "reason": "Evidence does not belong to the selected client request"})
             continue
         if (source is None or source["status"] != "read"
                 or not _source_contains_excerpt(source, evidence["snippet"])):
@@ -278,15 +300,21 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
             observed_at = containing["sentAt"]
         if evidence["message_date"]:
             try:
-                messages = email_messages(source["text"]) if source["sourceType"] == "email_body" else []
-                message_verified = (not messages or any(
+                messages = source_email_messages(source, include_plain=True) if source["sourceType"] == "email_body" else []
+                identity_context_date = (
+                    label in {"Company", "Contact"} and client_request is not None
+                    and _normal(evidence["message_date"]) == _normal(client_request["sentDate"])
+                    and evidence["request_role"] in {client_request["requestRole"], "document"}
+                    and client_evidence_applies(evidence, source, sources, client_request, _contains_excerpt)
+                )
+                message_verified = (identity_context_date or not messages or any(
                     _normal(message["sentDate"]) == _normal(evidence["message_date"])
                     and _contains_excerpt(evidence["snippet"], message["text"])
                     and evidence["request_role"] in {message["requestRole"], "document"}
                     for message in messages))
                 if (not message_verified
                         or (source.get("contentId") and not _has_parent_request_date(evidence, source, sources))
-                        or (_normal(evidence["message_date"]) not in _normal(source["text"])
+                        or (not any(_normal(evidence["message_date"]) in _normal(text) for text in literal_source_texts(source))
                      and not _has_parent_request_date(evidence, source, sources))
                         or not re.search(r"\b(?:19|20)\d{2}\b", evidence["message_date"])):
                     raise ValueError("Unverified message date")
@@ -368,6 +396,7 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
             "source": "Email/Attachment", "status": "conflict" if label in issues else "provided" if selected else "missing",
             "selected": selected, "candidates": list(candidates[label]),
             **({"rejectedCandidates": rejected[label]} if rejected[label] else {}),
+            **({"excludedCandidates": excluded[label]} if excluded[label] else {}),
             "rationale": "Most recent applicable request within the confirmed scope; common values may span roofs",
         }
     return raw, provenance, issues

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
@@ -25,6 +25,7 @@ from ..specification_semantics import COMPLETE_SOURCE_STATUSES, SpecificationEvi
 from ..specification_request_context import (
     email_messages, internal_address, select_client_request,
 )
+from ..source_text import require_json_safe_text
 
 
 class LegacyAnalysisClient(AttachmentTextExtractor, Protocol):
@@ -90,7 +91,9 @@ def analyze_downloaded_email_assets(
             supplementary_records.extend(records)
             continue
         try:
-            header, body, attachments, inline_images = process_email_content(content, downloaded.source.filename)
+            metadata = {}
+            header, body, attachments, inline_images = process_email_content(
+                content, downloaded.source.filename, source_metadata=metadata)
         except Exception as exc:
             manifest.append(source_record(f"asset:{downloaded.source.asset_id}", downloaded.source.filename, content,
                                           source_type="email_body", status="failed:" + type(exc).__name__))
@@ -103,15 +106,16 @@ def analyze_downloaded_email_assets(
             request_time = request_time.astimezone(timezone.utc).isoformat()
         except (TypeError, ValueError, OverflowError):
             request_time = None  # Upload time is not the date of the request.
-        parsed_assets.append((request_time or "", downloaded.source.asset_id, downloaded, header, body, attachments, inline_images))
+        parsed_assets.append((request_time or "", downloaded.source.asset_id, downloaded, header, body, attachments, inline_images, metadata))
     # Display chronologically. ID is only a stable tie-breaker, never recency.
-    for request_time, _, downloaded, header, body, attachments, inline_images in sorted(parsed_assets, key=lambda entry: (entry[0], int(entry[1]))):
+    for request_time, _, downloaded, header, body, attachments, inline_images, metadata in sorted(parsed_assets, key=lambda entry: (entry[0], int(entry[1]))):
         email_text = f"{header}\n{body}"
         try:
             extracted = extract_text_from_email(
                 email_text, attachments, extractor=client, inline_images=inline_images,
                 manifest=manifest, source_prefix=f"asset:{downloaded.source.asset_id}",
                 observed_at=request_time or None,
+                source_metadata=metadata,
             )
         except IncompleteSourceExtraction:
             continue  # Finish the inventory, then retry the incomplete extraction.
@@ -171,7 +175,7 @@ def analyze_downloaded_email_assets(
         )]
     elif dated_requests and not internal_only:
         latest = max(dated_requests, key=lambda entry: (entry[0], int(entry[1])))
-        timestamp, asset_id, _, header, _, _, _ = latest
+        timestamp, asset_id, _, header, _, _, _, _ = latest
         request_date = parsedate_to_datetime(next(line[6:] for line in header.splitlines() if line.startswith("Date: ")))
         structured_parameters.date_received = request_date.strftime("%d %b %Y")
         structured_parameters.hour_received = request_date.strftime("%H:%M")
@@ -208,7 +212,7 @@ def analyze_downloaded_email_assets(
     parameters["Reason for Change"] = "Reviewer decision required"
     sources["Reason for Change"] = "Business Rule"
 
-    return LegacyAnalysisResult(
+    result = LegacyAnalysisResult(
         parameters=parameters,
         sources=sources,
         project_name=project_name,
@@ -225,3 +229,5 @@ def analyze_downloaded_email_assets(
         specification_assessed_fields=tuple(structured_parameters.specification_assessed_fields),
         source_manifest=tuple(manifest),
     )
+    require_json_safe_text(asdict(result))
+    return result

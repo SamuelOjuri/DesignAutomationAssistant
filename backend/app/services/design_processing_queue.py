@@ -228,9 +228,12 @@ def _wake_unclaimed_job(
     trigger_type: str,
     readiness_stage: Optional[str],
     now: datetime,
+    inputs_changed: bool = False,
 ) -> None:
     if job.status == "running":
         return
+    if job.status == "retry_wait" and not inputs_changed:
+        return  # Duplicate notifications must preserve the retry/readiness deadline.
     job.trigger_type = trigger_type
     job.status = "scheduled"
     # Repeated notifications must not move already-due work behind newer jobs.
@@ -296,6 +299,7 @@ def queue_design_processing_snapshot(
     expected_group_id: str,
     allowlist_item_ids: Iterable[str] = (),
     now: datetime,
+    retry_failed: bool = False,
 ) -> DesignProcessingQueueResult:
     if mode == "off":
         return DesignProcessingQueueResult(
@@ -366,6 +370,7 @@ def queue_design_processing_snapshot(
         initial_state="scheduled",
         now=now,
     )
+    previous_identity, previous_state = desired_identity(item), item.state
     active_job = _active_job_query(
         db,
         board_id=item.board_id,
@@ -438,6 +443,10 @@ def queue_design_processing_snapshot(
             trigger_type=trigger_type,
             readiness_stage=readiness_stage,
             now=now,
+            inputs_changed=(previous_identity != desired_identity(item)
+                            or (execution_identity(active_job) is None
+                                and previous_state in {"waiting_for_name", "waiting_for_email"}
+                                and previous_state != refreshed.readiness)),
         )
         return DesignProcessingQueueResult(
             item=item,
@@ -468,6 +477,21 @@ def queue_design_processing_snapshot(
             created_item=created_item,
         )
 
+    identity = desired_identity(item)
+    if identity is not None and not retry_failed:
+        # An attempt budget belongs to this execution identity, not to each new
+        # webhook/reconciliation job. A changed input/pipeline is fresh work.
+        latest = db.query(DesignProcessingJob).filter_by(
+            board_id=item.board_id, item_id=item.item_id,
+            execution_input_revision=identity.input_revision,
+            execution_pipeline_version=identity.pipeline_version,
+            execution_kind=next_obligation(item, publication_allowed=publication_allowed),
+        ).order_by(DesignProcessingJob.created_at.desc(), DesignProcessingJob.id.desc()).first()
+        if latest is not None and latest.status == "failed" and latest.attempt_count >= latest.max_attempts:
+            return DesignProcessingQueueResult(
+                item=item, job=latest, outcome="ignored", readiness="attempts_exhausted",
+                created_item=created_item,
+            )
     job, created_job = _create_job(
         db,
         item,

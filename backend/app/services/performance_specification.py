@@ -56,7 +56,7 @@ def _record(db, board_id, item_id):
     return query.with_for_update() if db.get_bind().dialect.name == "postgresql" else query
 
 
-def enqueue_specification(db, board_id, item_id, *, group_id=None, immediate=False):
+def enqueue_specification(db, board_id, item_id, *, group_id=None, immediate=False, reconcile=False):
     if not settings.performance_specification_enabled:
         return None
     board_id, item_id = str(board_id), str(item_id)
@@ -74,11 +74,17 @@ def enqueue_specification(db, board_id, item_id, *, group_id=None, immediate=Fal
         attempt_count=0,
     ).on_conflict_do_nothing(index_elements=["board_id", "item_id"]))
     record = _record(db, board_id, item_id).one()
+    if reconcile and record.scheduled_for is not None:
+        return record  # Periodic discovery is not a new source-change notification.
     record.requested_generation += 1
     due = utc_now() + timedelta(seconds=0 if immediate else settings.auto_sync_debounce_seconds)
     # Immediate work must not be postponed by a later duplicate notification.
-    record.scheduled_for = min(_aware(record.scheduled_for), due) if record.scheduled_for else due
-    record.attempt_count = 0
+    if record.scheduled_for:
+        choose = max if record.attempt_count and not immediate else min
+        record.scheduled_for = choose(_aware(record.scheduled_for), due)
+    else:
+        record.scheduled_for = due
+    # Failure history is cleared by a successful refresh, not by notifications.
     return record
 
 

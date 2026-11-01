@@ -14,7 +14,7 @@ from .performance_specification_evidence import (
 from .specification_semantics import EVIDENCE_VERSION, canonical_label, missing, tp_reference_revision
 from .specification_image_text import literal_image_regions
 from .specification_request_context import (
-    attachment_message, parent_email, request_context_summary, select_client_request,
+    attachment_message, attachment_messages, parent_email, request_context_summary, select_client_request, source_email_messages,
 )
 
 
@@ -37,11 +37,81 @@ def evidence_diagnostics(result, manifest):
     return provenance, issues
 
 
+def bound_verified_request_notes(data, manifest):
+    """Split an oversized literal citation without truncating a constraint."""
+    sources = {s["sourceId"]: s for s in manifest or []}
+    if not isinstance(data, dict) or not isinstance(data.get("specification_request_notes", []), list):
+        return data, []  # The original model schema reports the type error.
+    notes, repairs = [], []
+    for note in data.get("specification_request_notes", []):
+        text = note.get("snippet") if isinstance(note, dict) else None
+        source = sources.get(note.get("source_id")) if isinstance(note, dict) else None
+        if (not isinstance(text, str) or len(text) <= 2000 or not source or source["status"] != "read"
+                or not _source_contains_excerpt(source, text)):
+            notes.append(note)
+            continue
+        pieces = []
+        remaining = text
+        while len(remaining) > 2000:
+            # Keep words, signed numbers and URLs intact. An unbroken long token
+            # stays invalid; truncation would turn it into a different claim.
+            stops = list(re.finditer(r"\s+", remaining[:2001]))
+            if not stops:
+                pieces = []
+                break
+            stop = stops[-1].start()
+            if stop == 0:
+                pieces = []
+                break
+            pieces.append({**note, "snippet": remaining[:stop]})
+            remaining = remaining[stops[-1].end():]
+        if not pieces:
+            notes.append(note)
+            continue
+        if remaining:
+            pieces.append({**note, "snippet": remaining})
+        notes.extend(pieces)
+        repairs.append({"reason": "Split a verified contiguous note into bounded citations",
+                        "before": note, "after": pieces, "contentSha256": source["contentSha256"]})
+    return {**data, "specification_request_notes": notes}, repairs
+
+
 def repair_image_company_citations(result, manifest):
     """Restore one complete literal image region; never change the claimed name."""
     sources = {source["sourceId"]: source for source in manifest}
     for index, old in enumerate(result.specification_evidence):
         source = sources.get(old.source_id)
+        if (old.field == "Company" and source and source["status"] == "read"
+                and source["sourceType"] == "email_body" and not _value_supported(old.model_dump())
+                and _source_contains_excerpt(source, old.snippet)):
+            # A URL cannot establish a company name. The exact claimed branding
+            # may instead be in one CID-linked logo in that same signature.
+            messages = [m for m in source_email_messages(source)
+                        if _contains_excerpt(old.snippet, m["text"])
+                        and old.request_role in {m["requestRole"], "document"}
+                        and (not old.message_date or _normal(old.message_date) == _normal(m["sentDate"]))]
+            matches = []
+            if len(messages) == 1 and messages[0]["sender"] and messages[0]["sentAt"]:
+                for image in manifest:
+                    if (image["status"] != "read" or not image.get("imageTextRegions")
+                            or parent_email(image, sources) is not source):
+                        continue
+                    associated = attachment_messages(image, sources)
+                    if (not any(all(m[k] == messages[0][k] for k in ("sender", "sentAt", "messageIndex")) for m in associated)
+                            or any(m["sender"] != messages[0]["sender"] for m in associated)):
+                        continue
+                    for region in literal_image_regions(image["text"]):
+                        if _contains_excerpt(old.value, region["text"]):
+                            matches.append((image, region))
+            if len(matches) == 1:
+                image, region = matches[0]
+                new = old.model_copy(update={"source_id": image["sourceId"], "snippet": region["text"],
+                                             "location": "TEXT REGION " + region["id"]})
+                result.specification_evidence[index] = new
+                result._evidence_repairs.append({"reason": "Verified same-message inline company citation repair",
+                    "before": old.model_dump(), "after": new.model_dump(),
+                    "contentSha256": image["contentSha256"], "parentEmailContentSha256": source["contentSha256"]})
+                continue
         if (old.field != "Company" or not source or source["status"] != "read"
                 or not source.get("imageTextRegions")):
             continue
@@ -181,7 +251,7 @@ def _date_repair_allowed(old, new, sources):
     source = sources.get(old.source_id)
     if (not old.message_date or not new["message_date"] or old.source_id != new["source_id"]
             or not source
-            or _contains_excerpt(old.message_date, source["text"])):
+            or _source_contains_excerpt(source, old.message_date)):
         return False
     try:
         if any(not re.search(r"\b(?:19|20)\d{2}\b", value) for value in (old.message_date, new["message_date"])):
@@ -193,34 +263,67 @@ def _date_repair_allowed(old, new, sources):
         return False
     if source["sourceType"] == "attachment":
         message = attachment_message(source, sources)
+        if not source.get("contentId") and old.request_role != "forwarded_request":
+            parent = parent_email(source, sources)
+            if parent and source.get("observedAt") == parent.get("observedAt"):
+                message = next((m for m in source_email_messages(parent) if m["messageIndex"] == 0), None)
         return (message is not None and _normal(message["sentDate"]) == _normal(new["message_date"])
-                and _contains_excerpt(new["snippet"], source["text"])
+                and _source_contains_excerpt(source, new["snippet"])
                 and old.request_role in {message["requestRole"], "document"})
     if source["sourceType"] != "email_body":
         return False
-    text = source["text"].replace("\r\n", "\n").replace("\r", "\n")
-    blocks = re.split(r"(?m)(?=^From:[ \t])", text)
-    blocks = [block for block in blocks if block.startswith("From:")]
-    matches = []
-    for index, block in enumerate(blocks):
-        headers = []
-        for line in block.splitlines():
-            if not line.strip():
-                continue
-            if re.match(r"^(?:From|To|Cc|Bcc|Subject|Date|Sent):", line, re.IGNORECASE):
-                headers.append(line)
-            elif line[0].isspace():
-                continue  # Folded header continuation.
-            else:
-                break
-        dates = [match[1] for line in headers
-                 if (match := re.match(r"^(?:Date|Sent):[ \t]*(.+)$", line, re.IGNORECASE))]
-        if (len(dates) == 1 and _normal(dates[0]) == _normal(new["message_date"])
-                and _contains_excerpt(new["snippet"], block)
-                and ((old.request_role == "forwarded_request" and index > 0)
-                     or (old.request_role == "direct_request" and index == 0))):
-            matches.append(index)
+    matches = {(m["sender"], m["sentAt"], m["messageIndex"]) for m in source_email_messages(source)
+               if _normal(m["sentDate"]) == _normal(new["message_date"])
+               and _contains_excerpt(new["snippet"], m["text"])
+               and old.request_role == m["requestRole"]}
     return len(matches) == 1
+
+
+def repair_message_dates(result, manifest):
+    """Restore a uniquely verified literal header, never guess a fact's date."""
+    sources = {s["sourceId"]: s for s in manifest}
+    for index, old in enumerate(result.specification_evidence):
+        source = sources.get(old.source_id)
+        if not old.message_date or not source or source["status"] != "read":
+            continue
+        parent = source if source["sourceType"] == "email_body" else parent_email(source, sources)
+        if not parent:
+            continue
+        if source["sourceType"] == "email_body":
+            # A model can attach a quoted passage to the outer reply's literal
+            # date. Correct that citation only when it belongs to one distinct,
+            # addressed message and the old header demonstrably lacks the quote.
+            # Invented dates and passages repeated across replies remain invalid.
+            messages = source_email_messages(source, include_plain=True)
+            old_messages = [m for m in messages if _normal(m["sentDate"]) == _normal(old.message_date)]
+            matching = {(m["sender"], m["sentAt"], m["messageIndex"], m["requestRole"]): m
+                        for m in messages if _contains_excerpt(old.snippet, m["text"])}
+            if (old.field not in {"Company", "Contact", "Date Received"}
+                    and old_messages and len(matching) == 1
+                    and not any(_contains_excerpt(old.snippet, m["text"]) for m in old_messages)):
+                message = next(iter(matching.values()))
+                if message["sender"] and message["sentAt"]:
+                    new = old.model_copy(update={"message_date": message["sentDate"],
+                                                 "request_role": message["requestRole"]})
+                    result.specification_evidence[index] = new
+                    result._evidence_repairs.append({"reason": "Verified unique containing-message citation repair",
+                        "before": old.model_dump(), "after": new.model_dump(),
+                        "contentSha256": source["contentSha256"],
+                        **({"emailHtmlSha256": source["emailHtmlSha256"]} if source.get("emailHtmlSha256") else {})})
+                    continue
+        replacements = {}
+        for message in source_email_messages(parent):
+            if _normal(message["sentDate"]) == _normal(old.message_date):
+                continue
+            proposed = old.model_copy(update={"message_date": message["sentDate"]})
+            if _date_repair_allowed(old, proposed.model_dump(), sources):
+                replacements[message["sentDate"]] = proposed
+        if len(replacements) == 1:
+            new = next(iter(replacements.values()))
+            result.specification_evidence[index] = new
+            result._evidence_repairs.append({"reason": "Verified literal message-date formatting repair",
+                "before": old.model_dump(), "after": new.model_dump(),
+                "contentSha256": source["contentSha256"], "parentEmailContentSha256": parent["contentSha256"]})
 
 
 def _issuer_repair_allowed(old, new):
@@ -239,7 +342,7 @@ def _issuer_repair_allowed(old, new):
 def _merge_request_notes(initial, recovery, manifest):
     repair_note_list_formatting(initial, manifest)
     repair_note_list_formatting(recovery, manifest)
-    initial._evidence_repairs.extend(recovery._evidence_repairs)
+    initial._evidence_repairs.extend(r for r in recovery._evidence_repairs if r not in initial._evidence_repairs)
     before = request_note_diagnostics(extraction_payload(initial, manifest))
     after = request_note_diagnostics(extraction_payload(recovery, manifest))
     sources = {s["sourceId"]: s for s in manifest}

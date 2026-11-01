@@ -502,9 +502,24 @@ def test_attachment_read_failure_retains_manifest_and_schedules_extraction_retry
     failure_log = next(record.getMessage() for record in caplog.records if "failed runtime=" in record.getMessage())
     runtime = json.loads(failure_log.split("runtime=", 1)[1])
     assert runtime["worker_id"] == "phase5-worker"
-    assert runtime["pipeline_revision"] == "output-v16"
+    assert runtime["pipeline_revision"] == "output-v17"
     assert runtime["commit"] == "a" * 12 and runtime["pid"] > 0
     assert "test-token" not in failure_log
+
+
+def test_evidence_failure_retains_private_replay_payload_on_job(db_session, golden, monkeypatch):
+    from backend.app.services.specification_failures import SpecificationEvidenceError
+    golden_input, _ = golden
+    _queue(db_session, _snapshot(golden_input))
+    details = {"fieldIssues": {"Company": "Unverified"}, "extraction": {"sourceManifest": []}}
+    def fail(*args, **kwargs):
+        raise SpecificationEvidenceError("Evidence recovery unresolved", details)
+    monkeypatch.setattr(FakeLegacyClient, "extract_design_parameters", fail)
+    result, _, _, _, storage = _run_shadow(db_session, golden_input)
+    job = db_session.query(DesignProcessingJob).one()
+    assert result.retry_wait == 1 and not storage.objects
+    assert job.result_json["specificationEvidenceFailure"] == details
+    assert job.last_error == "Evidence recovery unresolved"
 
 
 def test_allowlist_removal_during_extraction_holds_execution_without_rendering(db_session, golden, monkeypatch):

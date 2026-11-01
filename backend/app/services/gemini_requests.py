@@ -53,7 +53,7 @@ class GeminiRequestFailure(RuntimeError):
 
 def request_gemini(generate_content, model, contents, config, *, stage, input_bytes=None):
     try:
-        return generate_content(model, contents, config)
+        response = generate_content(model, contents, config)
     except Exception as exc:
         status = getattr(exc, "code", None)
         status = int(status) if isinstance(status, (int, str)) and str(status).isdecimal() else None
@@ -69,6 +69,30 @@ def request_gemini(generate_content, model, contents, config, *, stage, input_by
         # Provider exception bodies may include URLs, keys or source excerpts.
         # Keep them out of both the process traceback and the persisted error.
         raise GeminiRequestFailure(details) from None
+    # HTTP success can still contain a blocked, truncated or empty candidate.
+    # Never treat a partial transcription as a complete source, and retain only
+    # bounded provider enums (not finish messages or response/source contents).
+    def safe_enum(value):
+        value = getattr(value, "value", value)
+        return value if isinstance(value, str) and re.fullmatch(r"[A-Z_]{1,64}", value) else None
+
+    candidates = getattr(response, "candidates", None) or []
+    reasons = [safe_enum(getattr(candidate, "finish_reason", None)) for candidate in candidates]
+    block_reason = safe_enum(getattr(getattr(response, "prompt_feedback", None), "block_reason", None))
+    failed_reason = next((reason for reason in reasons if reason not in {None, "STOP", "FINISH_REASON_UNSPECIFIED"}), None)
+    blocked = block_reason not in {None, "BLOCK_REASON_UNSPECIFIED"}
+    if failed_reason or blocked:
+        code = "incomplete_response" if failed_reason == "MAX_TOKENS" else "blocked_response"
+    elif getattr(response, "parsed", None) is None and not str(getattr(response, "text", "") or "").strip():
+        code = "empty_response"
+    else:
+        return response
+    schema = getattr(config, "response_json_schema", None)
+    details = runtime_diagnostics(model, str(getattr(getattr(config, "thinking_config", None), "thinking_level", "")), schema)
+    details.update({"stage": stage, "http_status": None, "error_type": "GeminiResponseError", "code": code,
+                    "mode": "structured" if schema else "json" if config.response_mime_type == "application/json" else "text",
+                    "finish_reason": failed_reason, "block_reason": block_reason, "input_bytes": input_bytes})
+    raise GeminiRequestFailure(details) from None
 
 
 def source_failure_details(exc):
