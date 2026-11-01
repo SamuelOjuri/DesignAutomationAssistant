@@ -31,7 +31,9 @@ from .auto_sync import (
     log_refresh_decision,
     utc_now,
 )
-from .auto_sync_policy import ACTIVE_JOB_STATUSES, INACTIVE_SOURCE_STATES, AutoSyncPolicy, policy_from_settings
+from .auto_sync_policy import (
+    ACTIVE_JOB_STATUSES, INACTIVE_SOURCE_STATES, RETIRED_SOURCE_OUTCOME, AutoSyncPolicy, policy_from_settings,
+)
 from .monday_metadata import enqueue_metadata, refresh_metadata_from_item
 
 logger = logging.getLogger(__name__)
@@ -488,6 +490,14 @@ def detect_completed_transitions_once(
         query = query.filter(Task.item_id == item_id)
     if external_task_key is not None:
         query = query.filter(Task.external_task_key == external_task_key)
+    if item_id is None and external_task_key is None:
+        # A retired deletion has no Monday source left to observe. Only an explicit
+        # item check or a webhook showing the item again revisits it.
+        query = query.filter(or_(
+            Task.auto_sync_state != "deleted",
+            AutoSyncReconciliationCheck.last_outcome.is_(None),
+            AutoSyncReconciliationCheck.last_outcome != RETIRED_SOURCE_OUTCOME,
+        ))
     candidate_ids = {row.item_id for row in query.with_entities(Task.item_id).all()}
     source_unavailable_deferred = 0
     if not force and item_id is None and external_task_key is None:
@@ -538,7 +548,10 @@ def detect_completed_transitions_once(
             except HTTPException as exc:
                 if exc.status_code != 404 or exc.detail != "monday item not found":
                     raise
-                if not dry_run:
+                check = db.get(AutoSyncReconciliationCheck, (policy.board_id, task.item_id, "completed_transition"))
+                retired = (task.auto_sync_state == "deleted" and check is not None
+                           and check.last_outcome == RETIRED_SOURCE_OUTCOME)
+                if not dry_run and not retired:
                     _record_check(
                         db, board_id=policy.board_id, item_id=task.item_id, scope="completed_transition",
                         outcome="source_unavailable", reason="source_unavailable",

@@ -18,6 +18,7 @@ from ..db import SessionLocal
 from ..models import DesignProcessingItem, DesignProcessingReconciliationCheck
 from ..monday_client import MondayGroupItem, MondayItemUnavailable, list_items_in_groups
 from .auto_sync import get_monday_ingestion_access_token, utc_now
+from .auto_sync_policy import RETIRED_SOURCE_OUTCOME
 from .design_processing_observability import log_design_processing_event
 from .design_processing_queue import publication_allowed_for_item, queue_design_processing_snapshot
 from .design_processing_policy import design_scope_exclusion, eligible_design_group_ids
@@ -215,6 +216,8 @@ def reconcile_landing_zone_once(
         candidates_by_id = {candidate.item_id: candidate for candidate in candidates}
         for item in tracked:
             check = checks.get(item.item_id)
+            if check is not None and check.last_outcome == RETIRED_SOURCE_OUTCOME:
+                continue  # Confirmed deleted on Monday; nothing remains to observe.
             if item.state != "ready_for_review" or (
                 check is not None and check.last_outcome == "unavailable"
             ):
@@ -303,7 +306,8 @@ def reconcile_landing_zone_once(
                 next_check_at = checked_at + timedelta(
                     seconds=settings.design_processing_unavailable_recheck_seconds,
                 )
-                if not dry_run:
+                previous = db.get(DesignProcessingReconciliationCheck, (board_id, summary.item_id))
+                if not dry_run and (previous is None or previous.last_outcome != RETIRED_SOURCE_OUTCOME):
                     _record_check(
                         db, board_id=board_id, item_id=summary.item_id,
                         outcome="unavailable", reason="item_unavailable_to_worker",

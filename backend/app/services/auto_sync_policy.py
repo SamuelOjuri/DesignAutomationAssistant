@@ -10,6 +10,10 @@ from ..config import settings
 EXECUTION_STATES = ("queued", "syncing", "completed", "failed")
 SYNC_RESULTS = ("done", "unchanged", "skipped", "failed")
 INACTIVE_SOURCE_STATES = ("archived", "deleted")
+# Reconciliation-check outcome for an operator-confirmed deletion that Monday no
+# longer returns at all. Scheduled checks skip it; a visible item clears it.
+RETIRED_SOURCE_OUTCOME = "retired"
+RETIRED_SOURCE_REASON = "confirmed_deleted"
 LIFECYCLE_STATES = (
     "active",
     *INACTIVE_SOURCE_STATES,

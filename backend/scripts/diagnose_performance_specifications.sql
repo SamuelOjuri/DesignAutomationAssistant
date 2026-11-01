@@ -13,6 +13,11 @@
 -- checked_at is the last successful specification completion, not the last attempt.
 -- Generations count refresh notifications, not separate queued jobs or PDFs.
 -- The lease expiry below assumes the worker's default 3600-second timeout.
+-- Monday lookups come from the lifecycle and design reconciliation checks. If the
+-- latest lookup returned no item (deleted and purged, or hidden from the worker),
+-- extraction_diagnostic is monday_item_unavailable. Confirm the deletion in the
+-- board activity log, then run backend.app.services.monday_item_retirement; retired
+-- items become deleted tasks and leave this active-item report.
 WITH latest_tasks AS (
     -- Keep one current observation per board/item even if account keys differ.
     SELECT DISTINCT ON (task.board_id, task.item_id)
@@ -40,6 +45,9 @@ SELECT
     t.source_group_title,
     t.item_id,
     i.state AS design_state,
+    monday_lookup.outcome AS monday_latest_lookup_outcome,
+    GREATEST(lifecycle.last_attempted_at, design_lookup.last_attempted_at) AS monday_last_lookup_at,
+    GREATEST(lifecycle.last_checked_at, design_lookup.last_checked_at) AS monday_last_seen_at,
     s.review_json->'source' AS review_source,
     i.latest_desired_input_revision,
     i.latest_analyzed_input_revision,
@@ -51,6 +59,8 @@ SELECT
     (i.extracted_parameters_json IS NOT NULL AND extraction.payload IS NULL)
         AS extraction_json_has_null_escape,
     CASE
+        WHEN monday_lookup.outcome IN ('source_unavailable', 'unavailable')
+            THEN 'monday_item_unavailable'
         WHEN i.item_id IS NULL THEN 'item_not_registered'
         WHEN i.extracted_parameters_json IS NOT NULL AND extraction.payload IS NULL
             THEN 'extraction_payload_contains_null_character'
@@ -104,6 +114,23 @@ SELECT
 FROM active_items AS t
 LEFT JOIN design_processing_items AS i
     ON i.board_id = t.board_id AND i.item_id = t.item_id
+LEFT JOIN auto_sync_reconciliation_checks AS lifecycle
+    ON lifecycle.board_id = t.board_id
+   AND lifecycle.item_id = t.item_id
+   AND lifecycle.scope = 'completed_transition'
+LEFT JOIN design_processing_reconciliation_checks AS design_lookup
+    ON design_lookup.board_id = t.board_id AND design_lookup.item_id = t.item_id
+LEFT JOIN LATERAL (
+    -- The most recent lookup by either checker reflects current Monday visibility.
+    SELECT observation.outcome
+    FROM (VALUES
+        (lifecycle.last_outcome, lifecycle.last_attempted_at),
+        (design_lookup.last_outcome, design_lookup.last_attempted_at)
+    ) AS observation(outcome, attempted_at)
+    WHERE observation.attempted_at IS NOT NULL
+    ORDER BY observation.attempted_at DESC
+    LIMIT 1
+) AS monday_lookup ON TRUE
 LEFT JOIN LATERAL (
     SELECT CASE
         -- An odd run of backslashes followed by u0000 encodes a JSON null

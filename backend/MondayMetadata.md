@@ -84,7 +84,8 @@ report Hub B as its group; state takes precedence over group membership. A confi
 archival sets the stored task to `auto_sync_state=archived` and
 `auto_sync_enabled=false`. A confirmed `state: deleted` receives equivalent handling
 with `auto_sync_state=deleted`. An empty/unavailable item response does not establish
-either state and continues to produce `source_unavailable` without changing stored data.
+either state and continues to produce `source_unavailable` without changing stored data,
+until an operator retires a confirmed deletion (see below).
 Missing or unsupported state values cannot activate a task.
 
 Confirmed inactive source items cancel scheduled/running document jobs and metadata
@@ -121,6 +122,37 @@ show `archived`, disabled auto-sync, no pending metadata/document work, and no p
 deadline; retained project data should remain intact. These commands read Monday and
 update only the application database. Keep subsequent lifecycle sweeps running so
 restoration can be detected. This code change does not itself update production rows.
+
+### Retiring deletions Monday has purged
+
+Monday keeps deleted items in its trash only temporarily. A deletion missed during
+that window (for example, before delete webhooks were handled) leaves the task
+active, and every lifecycle sweep then receives an empty lookup and records
+`source_unavailable` again, hourly and indefinitely. Items `3060123740`,
+`3075247527`, `3082706182`, `3117296334` and `3129334277` were deleted on the board
+in July 2026 (confirmed in its activity log) but remained active Hub A/B tasks.
+
+After confirming such a deletion, retire it:
+
+```bash
+python -m backend.app.services.monday_item_retirement --item-id 3060123740 3075247527 3082706182 3117296334 3129334277 --dry-run
+python -m backend.app.services.monday_item_retirement --item-id 3060123740 3075247527 3082706182 3117296334 3129334277
+```
+
+The command first re-reads each item including inactive ones and refuses any item
+Monday still returns (`visible_on_monday`, for example archived or still in the
+trash); normal reconciliation handles those. Untracked IDs report `not_tracked`.
+For a confirmed-unavailable item it applies the same `state: deleted` lifecycle as a
+live delete event to every task row, preserving its last stored group, cancels
+document jobs, metadata refreshes and the performance specification, cancels any
+design-processing job and marks the design item `ineligible`. It then records the
+terminal reconciliation outcome `retired` / `confirmed_deleted`. Scheduled lifecycle
+and design sweeps (including `--force`) skip retired deleted items, and coverage no
+longer counts them. Explicit item checks still query Monday but keep the marker. If
+the item becomes visible again, its webhook or an explicit item check restores normal
+handling. Stored snapshots, files and retention holds are unchanged, and no migration
+is required. The command exits non-zero unless every requested item was retired (or,
+with `--dry-run`, would be).
 
 ## Read-only API validation / Postman
 
