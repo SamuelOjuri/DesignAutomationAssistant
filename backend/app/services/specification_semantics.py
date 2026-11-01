@@ -112,6 +112,17 @@ def normalize_reference_dashes(value):
     return value.translate(_REFERENCE_DASHES) if isinstance(value, str) else value
 
 
+U_VALUE_FIELDS = frozenset({"Target U Value", "Target Min U Value"})
+
+
+def normalize_unit_spacing(value):
+    """'0.15W/m²K' and '0.15 W/m²K' state the same U-value; other text is unchanged.
+
+    One canonical space keeps a bare number such as 0.15 a whole word.
+    """
+    return re.sub(r"(?<=\d)\s*(?=W\s*/)", " ", value, flags=re.IGNORECASE) if isinstance(value, str) else value
+
+
 def tp_reference_revision(reference: str | None, *, confirmed_crm: bool = False) -> str | None:
     """Accepted drawing families, preserving branding and the complete suffix.
 

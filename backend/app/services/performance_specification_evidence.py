@@ -11,9 +11,9 @@ from zoneinfo import ZoneInfo
 from dateutil.parser import isoparse, parse as parse_datetime
 
 from .specification_semantics import (
-    COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, FIELD_DEFINITIONS, REFERENCE_FIELDS, SpecificationEvidence,
-    SpecificationRequestNote, drawing_reference_key, missing, normalize_reference_dashes, scale_ratio,
-    tp_reference_revision,
+    COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, FIELD_DEFINITIONS, REFERENCE_FIELDS, U_VALUE_FIELDS,
+    SpecificationEvidence, SpecificationRequestNote, drawing_reference_key, missing,
+    normalize_reference_dashes, normalize_unit_spacing, scale_ratio, tp_reference_revision,
 )
 from .specification_request_context import (
     CLIENT_FIELDS, attachment_message, client_evidence_applies,
@@ -28,6 +28,9 @@ VALUE_CONFLICT = "Conflicting roof/drawing/request values require a confirmed ta
 UNDATED_SCOPE_CONFLICT = "Undated project-wide value conflicts with the selected roof"
 PAGE_SIZE_CONFLICT = "Title-block paper size differs from the PDF page dimensions; confirm the intended drawing size"
 PAGE_SIZE_UNCERTAIN = "Ambiguous title-block paper size requires confirmation"
+# Extraction cannot read Monday CRM. The publisher confirms such a literal D.S/bare
+# reference against a CRM drawing or replaces this with a review-required issue.
+UNCONFIRMED_REFERENCE = "Drawing Reference requires Monday CRM confirmation as a TaperedPlus drawing"
 
 
 def _parse_message_date(value):
@@ -70,6 +73,15 @@ def _reference_normal(value):
     return _normal(normalize_reference_dashes(value))
 
 
+def _comparable_value(field, value):
+    """Presentation-only differences per field; numbers, words and order are unchanged."""
+    if field in REFERENCE_FIELDS:
+        return normalize_reference_dashes(value)
+    if field in U_VALUE_FIELDS:
+        return normalize_unit_spacing(value)
+    return value
+
+
 def _contains_reference(value, snippet):
     # The snippet itself is verified literally against its source first; only
     # the drawing-reference value may read a typographic dash as '-'.
@@ -85,8 +97,8 @@ def _candidate_key(evidence):
             return evidence.get(key)
         if key == "value" and evidence.get("field") == "Scale" and scale_ratio(evidence.get(key)):
             return scale_ratio(evidence.get(key))
-        if key == "value" and evidence.get("field") in REFERENCE_FIELDS:
-            return _reference_normal(evidence.get(key))
+        if key == "value":
+            return _normal(_comparable_value(evidence.get("field"), evidence.get(key)))
         return _normal(evidence.get(key))
     return tuple(part(key) for key in (
         "field", "value", "source_id", "scope", "issuer", "role", "request_role", "message_date",
@@ -166,6 +178,8 @@ def _value_supported(evidence):
                 return True
     if evidence["field"] in REFERENCE_FIELDS:
         return _contains_reference(value, snippet)
+    if evidence["field"] in U_VALUE_FIELDS:
+        return _contains_excerpt(normalize_unit_spacing(value), normalize_unit_spacing(snippet))
     return evidence["field"] == "Date Received" or _contains_excerpt(value, snippet)
 
 
@@ -297,13 +311,19 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         if label in {"Bauder Roof Num", "Date Received"} and source["sourceType"] != "email_body":
             reject("Evidence does not meet this field's required email/request scope")
             continue
+        unconfirmed_reference = False
         if label == "Drawing Reference" and not tp_reference_revision(evidence["value"]):
-            # Unprefixed references require an explicit verified TP issuer claim.
-            if (evidence["issuer"] != "TaperedPlus" or not re.search(r"Tapered\s*Plus", evidence["snippet"], re.IGNORECASE)
-                    or not tp_reference_revision(evidence["value"], confirmed_crm=True)):
+            # Unprefixed references require an explicit verified TP issuer claim
+            # or, for a literal D.S/bare reference, Monday CRM confirmation.
+            tp_issued = evidence["issuer"] == "TaperedPlus" and re.search(
+                r"Tapered\s*Plus", evidence["snippet"], re.IGNORECASE)
+            if (not tp_reference_revision(evidence["value"], confirmed_crm=True)
+                    or (evidence["issuer"] == "TaperedPlus" and not tp_issued)):
                 reject("Drawing Reference is not verified as TaperedPlus-issued")
                 continue
-        if (label == "Drawing Reference" and evidence["issuer"]
+            # Another issuer cannot confirm the reference, so its quotation is moot.
+            unconfirmed_reference = not tp_issued
+        if (label == "Drawing Reference" and evidence["issuer"] and not unconfirmed_reference
                 and not _contains_excerpt(evidence["issuer"], evidence["snippet"])
                 and not (evidence["issuer"] == "TaperedPlus" and (
                     re.match(r"TP\s*\d", evidence["value"], re.IGNORECASE)
@@ -350,7 +370,8 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
                 continue
         candidates[label].append({**evidence, "observedAt": observed_at,
                                   "sourceObservedAt": source.get("observedAt"),
-                                  "filename": source["filename"], "contentSha256": source["contentSha256"]})
+                                  "filename": source["filename"], "contentSha256": source["contentSha256"],
+                                  **({"crmConfirmation": "required"} if unconfirmed_reference else {})})
         if label == "Page Size" and re.fullmatch(r"(?:ISO\s*)?[ABC][A-Z]", evidence["value"].strip(), re.IGNORECASE):
             issues[label] = PAGE_SIZE_UNCERTAIN
         if label == "Page Size" and source.get("pdfPageSizes"):
@@ -407,11 +428,12 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         current = [e for e in current if not any(
             _normal(e["value"]) != _normal(other["value"]) and _equivalent_description(e, other)
             for other in current)]
-        distinct = {_excerpt_normal(normalize_reference_dashes(e["value"]) if label in REFERENCE_FIELDS else e["value"])
-                    for e in current}
+        distinct = {_excerpt_normal(_comparable_value(label, e["value"])) for e in current}
         if len(distinct) > 1:
             issues[label] = VALUE_CONFLICT
         selected = current[0] if len(distinct) == 1 else None
+        if selected is not None and all(e.get("crmConfirmation") == "required" for e in current):
+            issues.setdefault(label, UNCONFIRMED_REFERENCE)
         scalar = extracted.get(label, extracted.get(label.replace("U Value", "U-Value")))
         if selected is None and not missing(scalar):
             issues.setdefault(label, "Populated extraction has no verified applicable evidence")

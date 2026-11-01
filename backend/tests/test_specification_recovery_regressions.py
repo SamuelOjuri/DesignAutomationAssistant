@@ -5,7 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
-from backend.app.services.performance_specification_evidence import resolve_email_evidence, resolve_request_notes
+from backend.app.services.performance_specification_evidence import (
+    UNCONFIRMED_REFERENCE, resolve_email_evidence, resolve_request_notes,
+)
 from backend.app.services.specification_recovery import extraction_payload, repair_note_list_formatting
 from backend.app.services.specification_semantics import drawing_reference_key, scale_ratio, tp_reference_revision
 from backend.tests.test_specification_evidence import candidate, extraction, source
@@ -272,19 +274,22 @@ def test_redundant_reference_parts_cannot_change_literal_suffix(parts):
     assert "Revision" in resolve_email_evidence(extraction([source("asset:1:attachment:0", text)], [evidence]))[2]
 
 
-@pytest.mark.parametrize("number,allowed", [("AX12345_26.01 - B", True), ("TP12345_26.01 - B", True),
-                                          ("12345_26.01 - B", False), ("D.S - 12345_26.01 - B", False)])
-def test_only_self_identifying_reference_can_drop_unquoted_issuer(number, allowed):
+@pytest.mark.parametrize("number,self_identifying", [("AX12345_26.01 - B", True), ("TP12345_26.01 - B", True),
+                                                   ("12345_26.01 - B", False), ("D.S - 12345_26.01 - B", False)])
+def test_only_self_identifying_reference_can_drop_unquoted_issuer(number, self_identifying):
     evidence = candidate("Drawing Reference", number, number, issuer="Invented Ltd")
     initial = parameters(drawing_reference=number, specification_evidence=[evidence])
     recovery = parameters(drawing_reference=number, specification_evidence=[{**evidence, "issuer": None}])
     manifest = [source("asset:1:attachment:0", number)]
-    if allowed:
-        result = extract_twice(initial, recovery, manifest)
+    result = extract_twice(initial, recovery, manifest)
+    if self_identifying:
         assert result._evidence_repairs[0]["after"]["issuer"] is None
     else:
-        with pytest.raises(ValueError, match="recovery unresolved"):
-            extract_twice(initial, recovery, manifest)
+        # A bare/D.S reference is neither confirmed nor blocked by a non-TP issuer:
+        # no issuer repair is claimed, and Monday CRM decides at publication.
+        assert not result._evidence_repairs
+        issues = resolve_email_evidence(extraction_payload(result, manifest))[2]
+        assert issues["Drawing Reference"] == UNCONFIRMED_REFERENCE
 
 
 def test_company_recovery_cannot_expand_brand_to_unquoted_legal_name():
@@ -458,5 +463,91 @@ def test_reference_recovery_may_restate_an_en_dash_with_the_standard_hyphen():
                            parameters(drawing_reference=new["value"], specification_evidence=[new]), manifest)
     raw, _, issues = resolve_email_evidence(extraction_payload(result, manifest))
     assert raw["Drawing Reference"] == "TP18954_26.03 - A" and "Drawing Reference" not in issues
+    repair, = result._evidence_repairs
+    assert (repair["before"]["value"], repair["after"]["value"]) == (old["value"], new["value"])
+
+
+DS_TEXT = "Reference: D.S - 00121_26.01 - D"
+
+
+@pytest.mark.parametrize("issuer", ["AXTER", None])
+def test_literal_ds_reference_without_tp_issuer_awaits_crm_confirmation(issuer):
+    # Render job e30fd92c: an AXTER-labelled D.S reference cannot be confirmed by extraction.
+    data = extraction([source("asset:1:attachment:0", DS_TEXT)],
+                      [candidate("Drawing Reference", "D.S - 00121_26.01 \u2013 D", DS_TEXT, issuer=issuer)])
+    raw, provenance, issues = resolve_email_evidence(data)
+    assert raw["Drawing Reference"] == "D.S - 00121_26.01 - D"
+    assert issues["Drawing Reference"] == UNCONFIRMED_REFERENCE
+    assert provenance["Drawing Reference"]["selected"]["crmConfirmation"] == "required"
+    assert "rejectedCandidates" not in provenance["Drawing Reference"]
+
+
+@pytest.mark.parametrize("value,issuer,reason", [
+    ("D.S - 00121_26.01 - D", "TaperedPlus", "Drawing Reference is not verified as TaperedPlus-issued"),
+    ("00121", None, "Drawing Reference is not verified as TaperedPlus-issued"),
+    ("D.S - 00121_26.02 - D", None, "Raw value is absent from the supporting excerpt"),
+])
+def test_ds_reference_still_rejects_unsupported_claims(value, issuer, reason):
+    data = extraction([source("asset:1:attachment:0", DS_TEXT)],
+                      [candidate("Drawing Reference", value, DS_TEXT, issuer=issuer)])
+    _, provenance, issues = resolve_email_evidence(data)
+    assert issues["Drawing Reference"] == reason
+    assert provenance["Drawing Reference"]["rejectedCandidates"][0]["status"] == "unverified"
+
+
+def test_tp_evidenced_ds_reference_needs_no_crm_confirmation():
+    text = "Tapered Plus drawing D.S - 00121_26.01 - D"
+    data = extraction([source("asset:1:attachment:0", text)],
+                      [candidate("Drawing Reference", "D.S - 00121_26.01 - D", text, issuer="TaperedPlus")])
+    raw, _, issues = resolve_email_evidence(data)
+    assert raw["Drawing Reference"] == "D.S - 00121_26.01 - D" and "Drawing Reference" not in issues
+
+
+def test_unconfirmed_ds_reference_does_not_fail_extraction():
+    evidence = candidate("Drawing Reference", "D.S - 00121_26.01 - D", DS_TEXT, issuer="AXTER")
+    manifest = [source("asset:1:attachment:0", DS_TEXT)]
+    initial = parameters(drawing_reference=evidence["value"], specification_evidence=[evidence])
+    result = extract_twice(initial, initial, manifest)
+    assert resolve_email_evidence(extraction_payload(result, manifest))[2]["Drawing Reference"] == UNCONFIRMED_REFERENCE
+
+
+U_VALUE_NOTE = "Notes: Falls Updated to 1:60 and 1:40, U-Value Changed to 0.15W/m\u00b2K"
+
+
+@pytest.mark.parametrize("value,text", [
+    ("0.15 W/m\u00b2K", U_VALUE_NOTE),  # Render job 9f990ae5.
+    ("0.15W/m\u00b2K", "U-Value: 0.15 W/m\u00b2K"),
+    ("0.15", "U-Value: 0.15 W/m\u00b2K"),  # A bare number remains a whole word.
+    ("0.18", "U-Value*: 0.22 W/m\u00b2K (0.18 Target)"),
+])
+def test_u_value_number_unit_spacing_is_presentation(value, text):
+    data = extraction([source("asset:1:attachment:0", text)], [candidate("Target U Value", value, text)])
+    raw, _, issues = resolve_email_evidence(data)
+    assert raw["Target U Value"] == value and "Target U Value" not in issues
+
+
+@pytest.mark.parametrize("value", ["0.16 W/m\u00b2K", "0.1 5W/m\u00b2K", "0.15 W/mK", "0.15 W/m\u00b2K (target)"])
+def test_u_value_spacing_tolerance_never_changes_the_number_or_unit(value):
+    data = extraction([source("asset:1:attachment:0", U_VALUE_NOTE)], [candidate("Target U Value", value, U_VALUE_NOTE)])
+    assert "Target U Value" in resolve_email_evidence(data)[2]
+
+
+def test_spacing_variants_of_one_u_value_are_not_a_conflict():
+    data = extraction([source("asset:1:attachment:0", U_VALUE_NOTE)], [
+        candidate("Target U Value", "0.15 W/m\u00b2K", U_VALUE_NOTE, issuer="AXTER"),
+        candidate("Target U Value", "0.15W/m\u00b2K", U_VALUE_NOTE),
+    ])
+    raw, _, issues = resolve_email_evidence(data)
+    assert raw["Target U Value"] == "0.15 W/m\u00b2K" and "Target U Value" not in issues
+
+
+def test_u_value_recovery_may_restate_unit_spacing_and_is_audited():
+    manifest = [source("asset:1:attachment:0", U_VALUE_NOTE)]
+    old = candidate("Target U Value", "0.15 W/m\u00b2K", U_VALUE_NOTE + " Unverified tail")
+    new = candidate("Target U Value", "0.15W/m\u00b2K", U_VALUE_NOTE)
+    result = extract_twice(parameters(target_u_value=old["value"], specification_evidence=[old]),
+                           parameters(target_u_value=new["value"], specification_evidence=[new]), manifest)
+    raw, _, issues = resolve_email_evidence(extraction_payload(result, manifest))
+    assert raw["Target U Value"] == "0.15W/m\u00b2K" and "Target U Value" not in issues
     repair, = result._evidence_repairs
     assert (repair["before"]["value"], repair["after"]["value"]) == (old["value"], new["value"])

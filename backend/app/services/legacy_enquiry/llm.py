@@ -77,7 +77,7 @@ class LegacyGeminiClient:
             repair_note_list_formatting, repair_image_company_citations, repair_message_dates, bound_verified_request_notes,
         )
         from ..performance_specification_evidence import (
-            PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
+            PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNCONFIRMED_REFERENCE, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
             request_note_diagnostics, resolve_request_notes,
         )
         prompt = f"""
@@ -207,7 +207,8 @@ class LegacyGeminiClient:
         if source_manifest is not None:
             provenance, diagnostics = evidence_diagnostics(result, source_manifest)
             unresolved = {label: reason for label, reason in diagnostics.items()
-                          if (reason not in {VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT, PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN}
+                          if (reason not in {VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT, PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN,
+                                             UNCONFIRMED_REFERENCE}
                               and not (label in {"Date Received", "Revision"}
                                        and reason == "Populated extraction has no verified applicable evidence"))
                           or any(e["status"] == "unverified" for e in provenance[label].get("rejectedCandidates", []))}

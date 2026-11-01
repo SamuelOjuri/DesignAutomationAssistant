@@ -504,6 +504,24 @@ and the number and letter cannot change. The resolved Drawing Reference/Revision
 use the standard `-` for CAD export, while provenance keeps the literal value.
 This resolved item `3317798940` (job `feffdc95`) offline from its stored payload.
 
+A literal D.S or bare drawing reference without verified TaperedPlus issuer
+evidence (for example, labelled `AXTER`) no longer fails extraction, because only
+Monday CRM can confirm it. It resolves with the non-blocking issue `Drawing
+Reference requires Monday CRM confirmation as a TaperedPlus drawing`, and its
+candidate is marked `crmConfirmation: required`. The publisher accepts it only
+when it matches a CRM drawing; otherwise it requires review (`Requested
+drawing/roof is missing or ambiguous` or `Reference is not a verified TaperedPlus
+drawing`). An unevidenced `TaperedPlus` issuer claim, a value absent from its
+excerpt, or a non-reference value is still rejected. This resolved item
+`3319900903` (job `e30fd92c`) offline.
+
+Target U Value and Target Min U Value ignore spacing between the number and its
+`W/…` unit (`0.15 W/m²K` = `0.15W/m²K`) when verifying a value against its excerpt
+and comparing candidates, so both forms do not create a value conflict. The
+number and unit text must still match. This resolved item `3319691617` (job
+`9f990ae5`) offline. Replaying all 1,104 stored extractions and recent failure
+payloads changed only these two failures, so existing published PDFs are unchanged.
+
 The two valid PNG plans for item `3313351849` returned HTTP-success responses with
 no text and `finish_reason=RECITATION` in the approved Gemini replay. The provider
 defines this as content flagged for recitation ([Gemini API response reference](https://ai.google.dev/api/generate-content#FinishReason)).

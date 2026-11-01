@@ -12,8 +12,8 @@ from .performance_specification_evidence import (
     resolve_email_evidence, resolve_request_notes, _source_contains_excerpt,
 )
 from .specification_semantics import (
-    EVIDENCE_VERSION, REFERENCE_FIELDS, canonical_label, missing, normalize_reference_dashes, scale_ratio,
-    tp_reference_revision,
+    EVIDENCE_VERSION, REFERENCE_FIELDS, U_VALUE_FIELDS, canonical_label, missing, normalize_reference_dashes,
+    normalize_unit_spacing, scale_ratio, tp_reference_revision,
 )
 from .specification_image_text import literal_image_regions
 from .specification_request_context import (
@@ -202,6 +202,10 @@ def _same_value(old, new):
         # A typographic dash in a drawing reference is the standard '-'.
         return (_excerpt_normal(normalize_reference_dashes(old.value))
                 == _excerpt_normal(normalize_reference_dashes(new["value"])))
+    if old.field in U_VALUE_FIELDS:
+        # Number-unit spacing only; the number and unit text must be identical.
+        return (_excerpt_normal(normalize_unit_spacing(old.value))
+                == _excerpt_normal(normalize_unit_spacing(new["value"])))
     if old.field == "Drawing Title":
         # Restore a possessive apostrophe that the model dropped from a name.
         # Keep every letter, number and other punctuation mark; this is not a
@@ -341,7 +345,7 @@ def _issuer_repair_allowed(old, new):
         return True
     # A self-identifying TP/AX reference may retain its exact value while the
     # recovery removes an unquoted issuer or quotes the literal source branding.
-    # Bare/D.S references still need their verified TP issuer to validate.
+    # Bare/D.S references need a verified TP issuer or Monday CRM confirmation.
     return (old.field == "Drawing Reference" and old.issuer
             and tp_reference_revision(old.value) is not None
             and not _contains_excerpt(old.issuer, old.snippet)

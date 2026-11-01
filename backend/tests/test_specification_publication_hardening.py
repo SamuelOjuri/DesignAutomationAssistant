@@ -14,11 +14,13 @@ from backend.app.services.legacy_enquiry.email_extraction import extract_text_fr
 from backend.app.services.performance_specification_evidence import (
     PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, VALUE_CONFLICT, resolve_email_evidence, resolve_request_notes,
 )
-from backend.app.services.performance_specification_sources import resolve_specification_sources
+from backend.app.services.performance_specification_sources import (
+    SpecificationReviewRequired, resolve_specification_sources,
+)
 from backend.app.services.specification_recovery import extraction_payload
 from backend.app.services.specification_semantics import tp_reference_revision
 from backend.tests.test_specification_evidence import candidate, extraction, source
-from backend.tests.test_performance_specification import case, current, pdf_text, run, column
+from backend.tests.test_performance_specification import case, current, pdf_text, run, column, relation
 from backend.app.services.performance_specification_contract import FIELD_NAMES
 
 
@@ -241,6 +243,41 @@ def test_ax_crm_reference_is_selected_and_keeps_its_full_revision(case):
     resolved = resolve_specification_sources(case.gateway, case.item)
     assert resolved["raw"]["Drawing Reference"] == "AX 16670_26.12 - B"
     assert resolved["raw"]["Revision"] == "26.12 - B"
+
+
+def _with_ds_email_reference(case, issuer):
+    # The model typeset its value with an en dash; the cited title block is literal.
+    data = deepcopy(case.item.extracted_parameters_json)
+    data["performanceParameters"]["Drawing Reference"] = "D.S - 00121_26.01 \u2013 D"
+    for evidence in data["specificationEvidence"]:
+        if evidence["field"] == "Drawing Reference":
+            evidence.update(value="D.S - 00121_26.01 \u2013 D", snippet="Reference: D.S - 00121_26.01 - D", issuer=issuer)
+    data["sourceManifest"][0]["text"] += "\nReference: D.S - 00121_26.01 - D"
+    case.item.extracted_parameters_json = data
+
+
+@pytest.mark.parametrize("issuer", ["AXTER", None])
+def test_ds_email_reference_is_confirmed_by_its_crm_drawing(case, issuer):
+    case.gateway.project["subitems"][0]["name"] = "D.S - 00121_26.01 - D"
+    _with_ds_email_reference(case, issuer)
+    resolved = resolve_specification_sources(case.gateway, case.item)
+    assert resolved["raw"]["Drawing Reference"] == "D.S - 00121_26.01 - D"
+    assert resolved["raw"]["Revision"] == "26.01 - D"
+    assert resolved["sources"]["Drawing Reference"]["source"] == "Monday CRM"
+    assert "Drawing Reference" not in resolved["issues"]
+
+
+@pytest.mark.parametrize("linked_project,reason", [
+    (True, "Requested drawing/roof is missing or ambiguous"),
+    (False, "Reference is not a verified TaperedPlus drawing"),
+])
+def test_ds_email_reference_unconfirmed_by_crm_requires_review(case, linked_project, reason):
+    if not linked_project:
+        case.gateway.holding["column_values"][0] = relation("board_relation_mkpbm5np", [])
+    _with_ds_email_reference(case, "AXTER")
+    with pytest.raises(SpecificationReviewRequired) as error:
+        resolve_specification_sources(case.gateway, case.item)
+    assert error.value.issues["Drawing Reference"] == reason
 
 
 def test_verified_constraints_are_published_and_bad_notes_preserve_last_pdf(case):
