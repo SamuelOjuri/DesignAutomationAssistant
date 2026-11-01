@@ -84,6 +84,8 @@ def _log_worker_batch(
     worker_id: str,
     mode: DesignProcessingMode,
 ) -> None:
+    if not any(asdict(result).values()):
+        return  # An idle poll every few seconds is not an event.
     log_design_processing_event(
         logger,
         "worker_batch",
@@ -91,6 +93,17 @@ def _log_worker_batch(
         mode=mode,
         **asdict(result),
     )
+
+
+def configure_worker_logging() -> None:
+    """Show the worker's own INFO events (job outcomes, shutdown releases) on Render.
+
+    Third-party libraries stay at WARNING so per-request HTTP logging is not emitted.
+    Run with ``python -m``, this module logs as ``__main__`` rather than ``backend``.
+    """
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    for name in ("backend", logger.name):
+        logging.getLogger(name).setLevel(logging.INFO)
 
 
 def default_worker_id() -> str:
@@ -1276,6 +1289,7 @@ def main() -> int:
     parser.add_argument("--heartbeat-interval-seconds", type=float, default=60.0)
     parser.add_argument("--poll-interval-seconds", type=float, default=5.0)
     args = parser.parse_args()
+    configure_worker_logging()
     if not settings.design_processing_worker_enabled:
         logger.info("Design-processing worker is disabled")
         return 0

@@ -134,6 +134,38 @@ def repair_image_company_citations(result, manifest):
         })
 
 
+def repair_template_markers(result, manifest):
+    """Restore literal ***…*** template markers that a response dropped from its value.
+
+    Specification templates mark unresolved text with ***. Removing them would hide
+    that, so the verifier rejects such a value. The repair uses only the verified
+    excerpt itself: the value's words, in order, must form one unique contiguous
+    passage of it whose markers are balanced. No other word or character changes.
+    """
+    sources = {source["sourceId"]: source for source in manifest}
+    marker = r"(?:\*{3})?"
+    for index, old in enumerate(result.specification_evidence):
+        source = sources.get(old.source_id)
+        if (not source or source["status"] != "read" or "*" in old.value
+                or _value_supported(old.model_dump()) or not _source_contains_excerpt(source, old.snippet)):
+            continue
+        pattern = (r"(?<![\w*])" + r"\s+".join(marker + re.escape(token) + marker for token in old.value.split())
+                   + r"(?![\w*])")
+        matches = list(re.finditer(pattern, re.sub(r"\\([*`])", r"\1", old.snippet), re.IGNORECASE))
+        if len(matches) != 1:
+            continue
+        markers = len(re.findall(r"\*{3}", matches[0][0]))
+        new = old.model_copy(update={"value": matches[0][0]})
+        if not markers or markers % 2 or not _value_supported(new.model_dump()):
+            continue
+        result.specification_evidence[index] = new
+        result._evidence_repairs.append({
+            "reason": "Verified literal template-marker repair",
+            "before": old.model_dump(), "after": new.model_dump(),
+            "contentSha256": source["contentSha256"],
+        })
+
+
 def _list_text_positions(text):
     """Normalize only list presentation, retaining offsets into the literal source."""
     omitted = set()

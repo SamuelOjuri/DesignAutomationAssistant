@@ -522,6 +522,16 @@ number and unit text must still match. This resolved item `3319691617` (job
 `9f990ae5`) offline. Replaying all 1,104 stored extractions and recent failure
 payloads changed only these two failures, so existing published PDFs are unchanged.
 
+Specification templates mark unresolved text with `***…***`, and the verifier still
+rejects a value that drops those markers. During extraction, a deterministic repair
+restores them only when the value's words, in order, form one unique contiguous
+passage of its own verified excerpt with balanced markers; changed, reordered or
+ambiguous values are left for the verifier to reject. Each repair is audited as
+`Verified literal template-marker repair`. For item `3316985606` (job `84ec79b2`),
+`Polyester reinforced ***PVC/ FPO*** single ply membrane` is restored and Membrane
+publishes as a reviewable conflict with the email's `single ply`. Stored
+extractions are not re-resolved by this repair, so published PDFs are unchanged.
+
 The two valid PNG plans for item `3313351849` returned HTTP-success responses with
 no text and `finish_reason=RECITATION` in the approved Gemini replay. The provider
 defines this as content flagged for recitation ([Gemini API response reference](https://ai.google.dev/api/generate-content#FinishReason)).

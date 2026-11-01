@@ -8,8 +8,12 @@ from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.performance_specification_evidence import (
     UNCONFIRMED_REFERENCE, resolve_email_evidence, resolve_request_notes,
 )
-from backend.app.services.specification_recovery import extraction_payload, repair_note_list_formatting
-from backend.app.services.specification_semantics import drawing_reference_key, scale_ratio, tp_reference_revision
+from backend.app.services.specification_recovery import (
+    extraction_payload, repair_note_list_formatting, repair_template_markers,
+)
+from backend.app.services.specification_semantics import (
+    SpecificationEvidence, drawing_reference_key, scale_ratio, tp_reference_revision,
+)
 from backend.tests.test_specification_evidence import candidate, extraction, source
 from backend.tests.test_specification_publication_hardening import extract_twice, parameters
 
@@ -551,3 +555,37 @@ def test_u_value_recovery_may_restate_unit_spacing_and_is_audited():
     assert raw["Target U Value"] == "0.15W/m\u00b2K" and "Target U Value" not in issues
     repair, = result._evidence_repairs
     assert (repair["before"]["value"], repair["after"]["value"]) == (old["value"], new["value"])
+
+
+J42_TEXT = r"1.8. Waterproof covering: Polyester reinforced \*\*\*PVC/ FPO\*\*\* single ply membrane."
+J42_LITERAL = "Polyester reinforced ***PVC/ FPO*** single ply membrane"
+
+
+@pytest.mark.parametrize("snippet", [
+    "Waterproof covering: Polyester reinforced ***PVC/ FPO*** single ply membrane.",
+    r"Waterproof covering: Polyester reinforced \*\*\*PVC/ FPO\*\*\* single ply membrane.",
+])
+def test_dropped_template_markers_are_restored_from_the_cited_excerpt(snippet):
+    # Render job 84ec79b2: the response removed *** from a specification template value.
+    evidence = candidate("Membrane", "Polyester reinforced PVC/ FPO single ply membrane", snippet)
+    manifest = [source("asset:1:attachment:0", J42_TEXT)]
+    initial = parameters(membrane=evidence["value"], specification_evidence=[evidence])
+    result = extract_twice(initial, initial, manifest)
+    raw, _, issues = resolve_email_evidence(extraction_payload(result, manifest))
+    assert raw["Membrane"] == J42_LITERAL and "Membrane" not in issues
+    repair = next(r for r in result._evidence_repairs if r["reason"] == "Verified literal template-marker repair")
+    assert (repair["before"]["value"], repair["after"]["value"]) == (evidence["value"], J42_LITERAL)
+    assert repair["after"]["snippet"] == snippet and repair["contentSha256"] == "abc"
+
+
+@pytest.mark.parametrize("value,snippet", [
+    ("Polyester reinforced PVC single ply membrane", J42_LITERAL),  # A word was removed.
+    ("Polyester reinforced FPO/ PVC single ply membrane", J42_LITERAL),  # Words were reordered.
+    ("Polyester PVC/ FPO single ply", "Polyester ***PVC/ FPO single ply"),  # Unbalanced markers.
+    ("PVC/ FPO single ply", "***PVC/ FPO*** single ply; ***PVC/ FPO*** single ply"),  # Ambiguous passage.
+])
+def test_template_marker_repair_never_changes_words_or_guesses(value, snippet):
+    result = SimpleNamespace(specification_evidence=[SpecificationEvidence.model_validate(
+        candidate("Membrane", value, snippet))], _evidence_repairs=[])
+    repair_template_markers(result, [source("asset:1:attachment:0", snippet)])
+    assert result.specification_evidence[0].value == value and not result._evidence_repairs

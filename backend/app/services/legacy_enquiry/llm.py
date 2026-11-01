@@ -75,6 +75,7 @@ class LegacyGeminiClient:
         from ..specification_recovery import (
             evidence_diagnostics, extraction_payload, merge_recovery,
             repair_note_list_formatting, repair_image_company_citations, repair_message_dates, bound_verified_request_notes,
+            repair_template_markers,
         )
         from ..performance_specification_evidence import (
             PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNCONFIRMED_REFERENCE, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
@@ -143,6 +144,7 @@ class LegacyGeminiClient:
         if source_manifest is not None:
             repair_message_dates(result, source_manifest)
             repair_image_company_citations(result, source_manifest)
+            repair_template_markers(result, source_manifest)
             repair_note_list_formatting(result, source_manifest)
             _, diagnostics = evidence_diagnostics(result, source_manifest)
             gaps |= set(diagnostics)
@@ -184,6 +186,7 @@ class LegacyGeminiClient:
             if source_manifest is not None:
                 repair_message_dates(recovery, source_manifest)
                 repair_image_company_citations(recovery, source_manifest)
+                repair_template_markers(recovery, source_manifest)
                 try:
                     merge_recovery(result, recovery, source_manifest)
                 except ValidationError as exc:

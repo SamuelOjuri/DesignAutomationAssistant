@@ -189,6 +189,8 @@ Coalescing must never mutate `execution_kind`, `execution_input_revision`, or `e
 
 On SIGTERM or SIGINT (Render sends SIGTERM on every deploy or restart), the worker interrupts its current job, terminates the extraction child, and releases its own running jobs through the same recovery rules instead of leaving a one-hour lease. The interrupted job keeps its queue position for immediate retry, and the attempt started by that run is refunded because a platform stop is not a job failure. A process killed without a signal (for example, out of memory) still relies on lease expiry.
 
+The worker logs its own INFO events (`worker_job_outcome`, `worker_shutdown_release`, `worker_shutdown`, and `worker_batch` when a poll recovers or claims work) as `design_processing_event=…` lines. Idle polls are not logged, and third-party libraries stay at WARNING.
+
 **Input Revision**
 
 Treat the parsed `files` array in `file_mkpbm883.value` as the authoritative Email-column membership list. Fetch the current item by item ID, including:

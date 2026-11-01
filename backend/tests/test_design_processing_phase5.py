@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import logging
 from pathlib import Path
 import signal
 import tempfile
@@ -1246,6 +1247,30 @@ def test_stop_signal_raises_once_and_never_interrupts_the_release(no_stop_signal
         design_processing_worker._request_shutdown(signal.SIGTERM, None)
     assert no_stop_signal.is_set()
     design_processing_worker._request_shutdown(signal.SIGTERM, None)  # Ignored while releasing.
+
+
+def test_idle_worker_polls_are_not_logged_but_work_is(caplog):
+    caplog.set_level(logging.INFO, logger=design_processing_worker.logger.name)
+    batch = design_processing_worker.DesignProcessingWorkerResult
+    design_processing_worker._log_worker_batch(batch(), worker_id="w", mode="enabled")
+    assert "worker_batch" not in caplog.text
+    design_processing_worker._log_worker_batch(batch(claimed=1, analyzed=1), worker_id="w", mode="enabled")
+    assert "worker_batch" in caplog.text
+
+
+def test_worker_logging_shows_app_events_without_third_party_requests(monkeypatch):
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "handlers", [])
+    saved = {name: logging.getLogger(name).level for name in ("", "backend", design_processing_worker.logger.name)}
+    try:
+        design_processing_worker.configure_worker_logging()
+        assert len(root.handlers) == 1
+        assert design_processing_worker.logger.isEnabledFor(logging.INFO)
+        assert logging.getLogger("backend.app.services.design_processing_pipeline").isEnabledFor(logging.INFO)
+        assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
+    finally:
+        for name, level in saved.items():
+            logging.getLogger(name).setLevel(level)
 
 
 def test_worker_shutdown_releases_running_job_for_immediate_retry(db_session, golden, monkeypatch, no_stop_signal):
