@@ -23,7 +23,7 @@ SPECIFICATION_VERSION = "performance-specification-v4"
 NOT_PROVIDED = "Not Provided"
 SOURCE_REVIEW_DETAILS = {
     PROVIDER_RECITATION_REVIEW_STATUS: (
-        "Not transcribed. Gemini withheld the transcription (finish_reason=RECITATION), so its "
+        "Not transcribed. AI model withheld the transcription (finish_reason=RECITATION), so its "
         "contents were not used. Review this source before relying on this specification."
     ),
 }
