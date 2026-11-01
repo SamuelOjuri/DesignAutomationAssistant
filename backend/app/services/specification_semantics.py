@@ -102,6 +102,16 @@ def canonical_label(label: str) -> str:
     return label.replace("U-Value", "U Value")
 
 
+REFERENCE_FIELDS = frozenset({"Drawing Reference", "Revision"})
+# Outlook and word processors often typeset 'TP123_45.67 - A' with an en dash.
+_REFERENCE_DASHES = str.maketrans(dict.fromkeys("\u2010\u2011\u2012\u2013\u2014\u2015\u2212", "-"))
+
+
+def normalize_reference_dashes(value):
+    """Read typographic dashes in a drawing reference as the standard '-'."""
+    return value.translate(_REFERENCE_DASHES) if isinstance(value, str) else value
+
+
 def tp_reference_revision(reference: str | None, *, confirmed_crm: bool = False) -> str | None:
     """Accepted drawing families, preserving branding and the complete suffix.
 
@@ -110,13 +120,14 @@ def tp_reference_revision(reference: str | None, *, confirmed_crm: bool = False)
     """
     prefix = r"(?:(?:TP|AX)\s*|D\.S\s*-\s*)?" if confirmed_crm else r"(?:TP|AX)\s*"
     pattern = prefix + r"\d+_\d+\.\d+(?:\s*-\s*[A-Z]+)?"
+    reference = normalize_reference_dashes(reference)
     if reference and re.fullmatch(pattern, reference.strip(), re.IGNORECASE):
         return reference.split("_", 1)[1].strip()
     return None
 
 
 def drawing_reference_key(reference: str | None) -> str:
-    value = re.sub(r"\s+", "", str(reference or "")).casefold()
+    value = re.sub(r"\s+", "", normalize_reference_dashes(str(reference or ""))).casefold()
     # Bare CRM references and TP-prefixed references share a family; AX does not.
     return value.removeprefix("tp") if re.match(r"^(?:tp)?\d+_", value) else value
 

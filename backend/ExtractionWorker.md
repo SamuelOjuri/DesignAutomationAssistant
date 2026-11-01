@@ -187,6 +187,8 @@ Create a PostgreSQL partial unique index allowing only one active design-process
 
 Coalescing must never mutate `execution_kind`, `execution_input_revision`, or `execution_pipeline_version` on a running job. An event received while a job is running updates only the item row’s latest desired identity and sets `supersession_requested_at` when it differs from the running execution identity. At each worker checkpoint, lock the item and job rows and compare desired identity with execution identity. On mismatch, set the old job to `cancelled`, record the superseding revision, clear its lease, and insert the successor job in the same transaction after flushing the terminal status so the active-job unique index remains valid. Recovery of an expired lease applies the same comparison before retrying work.
 
+On SIGTERM or SIGINT (Render sends SIGTERM on every deploy or restart), the worker interrupts its current job, terminates the extraction child, and releases its own running jobs through the same recovery rules instead of leaving a one-hour lease. The interrupted job keeps its queue position for immediate retry, and the attempt started by that run is refunded because a platform stop is not a job failure. A process killed without a signal (for example, out of memory) still relies on lease expiry.
+
 **Input Revision**
 
 Treat the parsed `files` array in `file_mkpbm883.value` as the authoritative Email-column membership list. Fetch the current item by item ID, including:

@@ -7,7 +7,7 @@ import pytest
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.performance_specification_evidence import resolve_email_evidence, resolve_request_notes
 from backend.app.services.specification_recovery import extraction_payload, repair_note_list_formatting
-from backend.app.services.specification_semantics import scale_ratio
+from backend.app.services.specification_semantics import drawing_reference_key, scale_ratio, tp_reference_revision
 from backend.tests.test_specification_evidence import candidate, extraction, source
 from backend.tests.test_specification_publication_hardening import extract_twice, parameters
 
@@ -408,3 +408,55 @@ def test_scale_recovery_cannot_change_the_ratio(recovered):
         extract_twice(parameters(scale="1:50", specification_evidence=[candidate("Scale", "1:50", text)]),
                       parameters(scale=recovered, specification_evidence=[candidate("Scale", recovered, text)]),
                       [source("asset:1:attachment:0", text)])
+
+
+EN_DASH_EMAIL = "Please proceed with TP18954_26.03 \u2013 A as reduced insulation thickness."
+
+
+@pytest.mark.parametrize("dash", ["\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2015", "\u2212"])
+def test_typographic_dash_in_a_reference_is_the_standard_hyphen(dash):
+    reference = f"TP18954_26.03 {dash} A"
+    assert tp_reference_revision(reference) == "26.03 - A"
+    assert tp_reference_revision(f"D.S {dash} 18954_26.03 {dash} A", confirmed_crm=True) == "26.03 - A"
+    assert drawing_reference_key(reference) == drawing_reference_key("TP18954_26.03 - A")
+
+
+def test_en_dash_email_reference_resolves_to_the_standard_reference_and_revision():
+    # Render job feffdc95: Outlook typeset the TaperedPlus reference with an en dash.
+    reference = candidate("Drawing Reference", "TP18954_26.03 \u2013 A", EN_DASH_EMAIL, issuer="TaperedPlus")
+    revision = candidate("Revision", "26.03 \u2013 A", EN_DASH_EMAIL, issuer="TaperedPlus")
+    raw, provenance, issues = resolve_email_evidence(
+        extraction([source("asset:1:attachment:0", EN_DASH_EMAIL)], [reference, revision]))
+    assert (raw["Drawing Reference"], raw["Revision"]) == ("TP18954_26.03 - A", "26.03 - A")
+    assert "Drawing Reference" not in issues and "Revision" not in issues
+    assert provenance["Drawing Reference"]["selected"]["value"] == "TP18954_26.03 \u2013 A"
+
+
+@pytest.mark.parametrize("value,verified", [
+    ("TP18954_26.03 - A", True), ("TP18954_26.03 \u2013 B", False), ("TP18954_26.04 - A", False),
+])
+def test_reference_dash_equivalence_never_changes_the_number_or_letter(value, verified):
+    data = extraction([source("asset:1:attachment:0", EN_DASH_EMAIL)],
+                      [candidate("Drawing Reference", value, EN_DASH_EMAIL)])
+    raw, _, issues = resolve_email_evidence(data)
+    assert (raw["Drawing Reference"] == "TP18954_26.03 - A") is verified
+    assert ("Drawing Reference" in issues) is not verified
+
+
+def test_reference_excerpt_must_still_match_its_source_literally():
+    snippet = EN_DASH_EMAIL.replace("\u2013", "-")
+    data = extraction([source("asset:1:attachment:0", EN_DASH_EMAIL)],
+                      [candidate("Drawing Reference", "TP18954_26.03 - A", snippet)])
+    assert resolve_email_evidence(data)[2]["Drawing Reference"] == "Supporting source/excerpt could not be verified"
+
+
+def test_reference_recovery_may_restate_an_en_dash_with_the_standard_hyphen():
+    manifest = [source("asset:1:attachment:0", EN_DASH_EMAIL)]
+    old = candidate("Drawing Reference", "TP18954_26.03 \u2013 A", EN_DASH_EMAIL + " Unverified tail")
+    new = candidate("Drawing Reference", "TP18954_26.03 - A", EN_DASH_EMAIL)
+    result = extract_twice(parameters(drawing_reference=old["value"], specification_evidence=[old]),
+                           parameters(drawing_reference=new["value"], specification_evidence=[new]), manifest)
+    raw, _, issues = resolve_email_evidence(extraction_payload(result, manifest))
+    assert raw["Drawing Reference"] == "TP18954_26.03 - A" and "Drawing Reference" not in issues
+    repair, = result._evidence_repairs
+    assert (repair["before"]["value"], repair["after"]["value"]) == (old["value"], new["value"])

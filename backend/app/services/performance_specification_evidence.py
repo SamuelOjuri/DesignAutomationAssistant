@@ -11,8 +11,9 @@ from zoneinfo import ZoneInfo
 from dateutil.parser import isoparse, parse as parse_datetime
 
 from .specification_semantics import (
-    COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, FIELD_DEFINITIONS, SpecificationEvidence,
-    SpecificationRequestNote, drawing_reference_key, missing, scale_ratio, tp_reference_revision,
+    COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, FIELD_DEFINITIONS, REFERENCE_FIELDS, SpecificationEvidence,
+    SpecificationRequestNote, drawing_reference_key, missing, normalize_reference_dashes, scale_ratio,
+    tp_reference_revision,
 )
 from .specification_request_context import (
     CLIENT_FIELDS, attachment_message, client_evidence_applies,
@@ -65,6 +66,16 @@ def _source_contains_excerpt(source, excerpt):
     return any(_contains_excerpt(excerpt, text) for text in literal_source_texts(source))
 
 
+def _reference_normal(value):
+    return _normal(normalize_reference_dashes(value))
+
+
+def _contains_reference(value, snippet):
+    # The snippet itself is verified literally against its source first; only
+    # the drawing-reference value may read a typographic dash as '-'.
+    return _contains_excerpt(normalize_reference_dashes(value), normalize_reference_dashes(snippet))
+
+
 def _candidate_key(evidence):
     # A repaired excerpt may replace a rejected one only for the same claim.
     # Different values, sources, scopes, roles or dates still require review.
@@ -74,6 +85,8 @@ def _candidate_key(evidence):
             return evidence.get(key)
         if key == "value" and evidence.get("field") == "Scale" and scale_ratio(evidence.get(key)):
             return scale_ratio(evidence.get(key))
+        if key == "value" and evidence.get("field") in REFERENCE_FIELDS:
+            return _reference_normal(evidence.get(key))
         return _normal(evidence.get(key))
     return tuple(part(key) for key in (
         "field", "value", "source_id", "scope", "issuer", "role", "request_role", "message_date",
@@ -86,7 +99,7 @@ def _title_block_reference_parts(snippet):
     Never combine numbers from different drawings or select among revision rows.
     The caller still verifies the entire contiguous block against its source.
     """
-    text = _excerpt_normal(snippet)
+    text = normalize_reference_dashes(_excerpt_normal(snippet))
     numbers = re.findall(
         r"(?<!\w)(?:(?:TP|AX)\s*|D\.S\s*-\s*)?\d+_\d+\.\d+(?:\s*-\s*[A-Z]+)?(?!\w|\.\w)",
         text, re.IGNORECASE,
@@ -116,40 +129,43 @@ def _value_supported(evidence):
     if evidence.get("reference_parts"):
         parts = evidence["reference_parts"]
         verified = _title_block_reference_parts(snippet)
-        if evidence["field"] not in {"Drawing Reference", "Revision"} or len(parts) != 2:
+        if evidence["field"] not in REFERENCE_FIELDS or len(parts) != 2:
             return False
         # Some responses redundantly split an already literal reference at '_'.
         # The full identifier must still occur contiguously in this same excerpt.
         literal = parts[0] + "_" + parts[1]
         suffix = tp_reference_revision(literal, confirmed_crm=True)
-        if suffix and _contains_excerpt(literal, snippet):
+        if suffix and _contains_reference(literal, snippet):
             expected = literal if evidence["field"] == "Drawing Reference" else suffix
-            if _normal(value) == _normal(expected):
+            if _reference_normal(value) == _reference_normal(expected):
                 return True
         combined = parts[0] + " - " + parts[1]
-        separate_cells = verified is not None and tuple(map(_normal, parts)) == verified
+        separate_cells = verified is not None and tuple(map(_reference_normal, parts)) == verified
         # Some responses redundantly split an already contiguous reference.
         # Accept only that exact reference, with an unrevised number and letter;
         # never assemble pieces from unrelated passages.
         literal_reference = (
             re.fullmatch(r"\d+\.\d+", tp_reference_revision(parts[0], confirmed_crm=True) or "")
-            and re.fullmatch(r"[A-Za-z]+", parts[1]) and _contains_excerpt(combined, snippet)
+            and re.fullmatch(r"[A-Za-z]+", parts[1]) and _contains_reference(combined, snippet)
         )
         if not (separate_cells or literal_reference):
             return False
         expected = combined if evidence["field"] == "Drawing Reference" else tp_reference_revision(combined, confirmed_crm=True)
-        return _normal(value) == _normal(expected)
+        return _reference_normal(value) == _reference_normal(expected)
     if evidence["field"] == "Revision":
         # A suffix follows '_' inside an identifier, where a word-boundary
         # substring check would otherwise reject a perfectly literal revision.
-        for match in re.finditer(r"(?<!\w)(?:(?:TP|AX)\s*|D\.S\s*-\s*)?\d+_\d+\.\d+(?:\s*-\s*[A-Z]+)?(?!\w|\.\w)", snippet, re.IGNORECASE):
-            if _normal(tp_reference_revision(match[0], confirmed_crm=True)) == _normal(value):
+        for match in re.finditer(r"(?<!\w)(?:(?:TP|AX)\s*|D\.S\s*-\s*)?\d+_\d+\.\d+(?:\s*-\s*[A-Z]+)?(?!\w|\.\w)",
+                                 normalize_reference_dashes(snippet), re.IGNORECASE):
+            if _reference_normal(tp_reference_revision(match[0], confirmed_crm=True)) == _reference_normal(value):
                 return True
         parts = _title_block_reference_parts(snippet)
         if parts:
             suffix = tp_reference_revision(parts[0] + " - " + parts[1], confirmed_crm=True)
-            if _normal(value) == _normal(suffix):
+            if _reference_normal(value) == _reference_normal(suffix):
                 return True
+    if evidence["field"] in REFERENCE_FIELDS:
+        return _contains_reference(value, snippet)
     return evidence["field"] == "Date Received" or _contains_excerpt(value, snippet)
 
 
@@ -391,14 +407,18 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         current = [e for e in current if not any(
             _normal(e["value"]) != _normal(other["value"]) and _equivalent_description(e, other)
             for other in current)]
-        distinct = {_excerpt_normal(e["value"]) for e in current}
+        distinct = {_excerpt_normal(normalize_reference_dashes(e["value"]) if label in REFERENCE_FIELDS else e["value"])
+                    for e in current}
         if len(distinct) > 1:
             issues[label] = VALUE_CONFLICT
         selected = current[0] if len(distinct) == 1 else None
         scalar = extracted.get(label, extracted.get(label.replace("U Value", "U-Value")))
         if selected is None and not missing(scalar):
             issues.setdefault(label, "Populated extraction has no verified applicable evidence")
-        raw[label] = selected["value"] if selected else None
+        # Resolved references use the standard '-' for CAD export and CRM matching;
+        # the selected evidence below keeps its literal value and excerpt.
+        raw[label] = (None if not selected else normalize_reference_dashes(selected["value"])
+                      if label in REFERENCE_FIELDS else selected["value"])
         provenance[label] = {
             "source": "Email/Attachment", "status": "conflict" if label in issues else "provided" if selected else "missing",
             "selected": selected, "candidates": list(candidates[label]),

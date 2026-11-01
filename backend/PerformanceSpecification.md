@@ -497,6 +497,13 @@ This resolved item `3318413027` (job `5af08583`) offline from its stored failure
 payload. It is a verifier change only, so `output-v17` is unchanged and no
 re-extraction is forced; deploy the design worker and specification publisher.
 
+Drawing references read typographic dashes (U+2010–U+2015 and U+2212, such as
+Outlook's en dash in `TP18954_26.03 – A`) as `-` when parsing, comparing and
+matching CRM drawings. The supporting excerpt must still match its source exactly,
+and the number and letter cannot change. The resolved Drawing Reference/Revision
+use the standard `-` for CAD export, while provenance keeps the literal value.
+This resolved item `3317798940` (job `feffdc95`) offline from its stored payload.
+
 The two valid PNG plans for item `3313351849` returned HTTP-success responses with
 no text and `finish_reason=RECITATION` in the approved Gemini replay. The provider
 defines this as content flagged for recitation ([Gemini API response reference](https://ai.google.dev/api/generate-content#FinishReason)).

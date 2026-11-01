@@ -5,7 +5,9 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
+import signal
 import tempfile
+import threading
 from types import SimpleNamespace
 import uuid
 
@@ -1230,3 +1232,92 @@ def test_expired_superseded_lease_is_cancelled_and_replaced_in_sqlite(db_session
     assert jobs[0].superseded_by_revision == "revision-b"
     assert jobs[1].status == "scheduled"
     assert len([candidate for candidate in jobs if candidate.status in {"scheduled", "running", "retry_wait"}]) == 1
+
+
+@pytest.fixture()
+def no_stop_signal(monkeypatch):
+    stopping = threading.Event()
+    monkeypatch.setattr(design_processing_worker, "_shutdown_requested", stopping)
+    return stopping
+
+
+def test_stop_signal_raises_once_and_never_interrupts_the_release(no_stop_signal):
+    with pytest.raises(design_processing_worker.WorkerShutdown, match="SIGTERM"):
+        design_processing_worker._request_shutdown(signal.SIGTERM, None)
+    assert no_stop_signal.is_set()
+    design_processing_worker._request_shutdown(signal.SIGTERM, None)  # Ignored while releasing.
+
+
+def test_worker_shutdown_releases_running_job_for_immediate_retry(db_session, golden, monkeypatch, no_stop_signal):
+    golden_input, _ = golden
+    _queue(db_session, _snapshot(golden_input))
+    original = FakeLegacyClient.extract_design_parameters
+    stopped = []
+
+    def stop_during_first_extraction(self, *args, **kwargs):
+        if not stopped:
+            stopped.append(True)
+            raise design_processing_worker.WorkerShutdown("SIGTERM")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(FakeLegacyClient, "extract_design_parameters", stop_during_first_extraction)
+    with pytest.raises(design_processing_worker.WorkerShutdown):
+        _run_shadow(db_session, golden_input)
+
+    job = db_session.query(DesignProcessingJob).one()
+    assert job.status == "retry_wait" and job.locked_by is None and job.heartbeat_at is None
+    assert job.execution_kind == "analysis" and job.attempt_count == 0  # A platform stop is not an attempt.
+    assert job.next_retry_at == job.scheduled_for and job.scheduled_for <= utc_now().replace(tzinfo=None)
+    assert job.last_error == design_processing_worker.SHUTDOWN_RELEASE_REASON
+    assert not (job.result_json or {}).get("specificationEvidenceFailure")
+
+    result, *_ = _run_shadow(db_session, golden_input)  # The replacement worker claims it at once.
+    job = db_session.query(DesignProcessingJob).one()
+    assert result.analyzed == 1 and job.attempt_count == 1
+
+
+def test_failure_raised_by_a_stop_signal_is_released_not_recorded(db_session, golden, monkeypatch, no_stop_signal):
+    golden_input, _ = golden
+    _queue(db_session, _snapshot(golden_input))
+
+    def child_killed_by_the_same_signal(*args, **kwargs):
+        no_stop_signal.set()
+        raise RuntimeError("Design extraction process failure: exited without a result")
+
+    monkeypatch.setattr(FakeLegacyClient, "extract_design_parameters", child_killed_by_the_same_signal)
+    with pytest.raises(design_processing_worker.WorkerShutdown):
+        _run_shadow(db_session, golden_input)
+    job = db_session.query(DesignProcessingJob).one()
+    assert job.status == "retry_wait" and job.attempt_count == 0
+    assert job.last_error == design_processing_worker.SHUTDOWN_RELEASE_REASON
+
+
+def test_shutdown_release_keeps_queue_position_and_touches_only_this_worker(db_session):
+    now = utc_now()
+    scheduled = now - timedelta(minutes=30)
+    pipeline = settings.design_processing_pipeline_version
+    rows = []
+    for item_id, worker_id in (("1001", "stopping-worker"), ("1002", "other-worker")):
+        rows.append(DesignProcessingItem(
+            id=uuid.uuid4(), board_id=BOARD_ID, item_id=item_id, state="processing", warnings_json=[],
+            latest_desired_input_revision="revision-a", latest_desired_pipeline_version=pipeline,
+            created_at=scheduled, updated_at=now,
+        ))
+        rows.append(DesignProcessingJob(
+            id=uuid.uuid4(), board_id=BOARD_ID, item_id=item_id, trigger_type="test",
+            execution_kind="analysis", execution_input_revision="revision-a",
+            execution_pipeline_version=pipeline, status="running", stage="extracting",
+            scheduled_for=scheduled, attempt_count=1, readiness_check_count=0, max_attempts=3,
+            locked_by=worker_id, locked_at=now, heartbeat_at=now, created_at=scheduled, updated_at=now,
+        ))
+    db_session.add_all(rows)
+    db_session.commit()
+
+    # Without a claim-time count this run never began an attempt, so none is refunded.
+    released = design_processing_worker.release_jobs_for_shutdown(db_session, worker_id="stopping-worker", now=now)
+
+    stopping, other = (db_session.query(DesignProcessingJob).filter_by(item_id=item_id).one() for item_id in ("1001", "1002"))
+    assert released == 1
+    assert stopping.status == "retry_wait" and stopping.locked_by is None and stopping.attempt_count == 1
+    assert stopping.next_retry_at == stopping.scheduled_for == scheduled.replace(tzinfo=None)
+    assert other.status == "running" and other.locked_by == "other-worker"

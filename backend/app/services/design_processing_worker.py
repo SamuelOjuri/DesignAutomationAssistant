@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 import logging
 import json
+import signal
 import socket
 import threading
 import time
@@ -97,6 +98,31 @@ def default_worker_id() -> str:
         f"{socket.gethostname()}:{settings.design_processing_board_id}:"
         f"{time.time_ns()}"
     )
+
+
+class WorkerShutdown(BaseException):
+    """The platform asked this worker process to stop (for example, a deploy).
+
+    A BaseException, like KeyboardInterrupt, so job failure handlers cannot
+    record a platform stop as a failed attempt.
+    """
+
+
+_shutdown_requested = threading.Event()
+
+
+def _request_shutdown(signum, frame) -> None:
+    if _shutdown_requested.is_set():
+        return  # Never interrupt the job release started by the first signal.
+    _shutdown_requested.set()
+    raise WorkerShutdown(signal.Signals(signum).name)
+
+
+def _raise_if_shutting_down(exc: BaseException) -> None:
+    # A stop signal can also kill the extraction child, surfacing as an ordinary
+    # failure. That is still a platform stop, not a failed attempt.
+    if _shutdown_requested.is_set():
+        raise WorkerShutdown("shutdown during job failure handling") from exc
 
 
 def _supports_skip_locked(db: Session) -> bool:
@@ -379,6 +405,8 @@ def _recover_locked_expired_job(
     mode: DesignProcessingMode,
     allowlist_item_ids: Iterable[str],
     now: datetime,
+    reason: str = "Worker lease expired",
+    retry_at: Optional[datetime] = None,
 ) -> None:
     identity = execution_identity(job)
     execution_kind = job.execution_kind or "analysis"
@@ -421,21 +449,21 @@ def _recover_locked_expired_job(
         )
     elif identity is None:
         job.status = "scheduled"
-        job.scheduled_for = now
+        job.scheduled_for = retry_at or now
         job.next_retry_at = None
         job.locked_at = None
         job.locked_by = None
         job.heartbeat_at = None
-        job.last_error = "Worker lease expired during readiness validation"
+        job.last_error = f"{reason} during readiness validation"
         job.updated_at = now
     elif job.attempt_count >= job.max_attempts:
-        fail_job(item, job, error="Worker lease expired", now=now)
+        fail_job(item, job, error=reason, now=now)
     else:
         schedule_execution_retry(
             item,
             job,
-            scheduled_for=now,
-            error="Worker lease expired",
+            scheduled_for=retry_at or now,
+            error=reason,
             now=now,
         )
 
@@ -554,6 +582,63 @@ def recover_expired_design_processing_leases(
     if job_ids:
         db.commit()
     return recovered
+
+
+SHUTDOWN_RELEASE_REASON = "Worker stopped by platform shutdown"
+
+
+def release_jobs_for_shutdown(
+    db: Session,
+    *,
+    worker_id: str,
+    mode: DesignProcessingMode = "enabled",
+    allowlist_item_ids: Iterable[str] = (),
+    attempts_at_claim: Optional[dict[object, int]] = None,
+    now: Optional[datetime] = None,
+) -> int:
+    """Return this worker's running jobs to the queue instead of stranding their leases.
+
+    A platform stop is not a job failure: the attempt it started is refunded and
+    the job keeps its queue position. Policy, supersession and readiness rules are
+    the same as lease recovery. Without a claim-time count, no attempt began.
+    """
+    released_at = now or utc_now()
+    db.rollback()
+    job_ids = [job_id for (job_id,) in db.query(DesignProcessingJob.id).filter(
+        DesignProcessingJob.status == "running",
+        DesignProcessingJob.locked_by == worker_id,
+    )]
+    released = 0
+    for job_id in job_ids:
+        item, job = lock_design_processing_item_and_job(db, job_id)
+        if item is None or job is None or job.status != "running" or job.locked_by != worker_id:
+            continue
+        claimed_attempts = (attempts_at_claim or {}).get(job_id)
+        if claimed_attempts is not None and job.attempt_count > claimed_attempts:
+            job.attempt_count = claimed_attempts
+        _recover_locked_expired_job(
+            db,
+            item,
+            job,
+            mode=mode,
+            allowlist_item_ids=allowlist_item_ids,
+            now=released_at,
+            reason=SHUTDOWN_RELEASE_REASON,
+            retry_at=job.scheduled_for or released_at,
+        )
+        released += 1
+        log_design_processing_event(
+            logger,
+            "worker_shutdown_release",
+            worker_id=worker_id,
+            board_id=job.board_id,
+            item_id=job.item_id,
+            job_id=str(job.id),
+            status=job.status,
+            attempt_count=job.attempt_count,
+        )
+    db.commit()
+    return released
 
 
 def _cancel_or_replace_mismatched_job(
@@ -1000,6 +1085,7 @@ def execute_claimed_analysis_job(
             )
     except Exception as exc:
         db.rollback()
+        _raise_if_shutting_down(exc)
         # An external call can fail at the same time that the item is completed.
         # Prefer cancellation to scheduling another attempt when that is known.
         try:
@@ -1096,52 +1182,69 @@ def run_worker_once(
         thinking_level=settings.design_processing_thinking_level,
     )
     storage = artifact_storage or SupabaseDesignArtifactStorage()
-    jobs = claim_due_design_processing_jobs(
-        db,
-        worker_id=resolved_worker_id,
-        limit=claim_limit,
-        mode=configured_mode,
-        allowlist_item_ids=settings.design_processing_allowlist_item_ids,
-    )
+    attempts_at_claim: dict[object, int] = {}
     outcomes: dict[str, int] = {}
-    for job in jobs:
-        try:
-            outcome = execute_claimed_design_processing_job(
-                db,
-                job.id,
-                worker_id=resolved_worker_id,
-                access_token=token,
-                gateway=read_gateway,
-                analysis_client=client,
-                artifact_storage=storage,
-                mode=configured_mode,
-                execution_policy=runtime_policy,
-                downloader=downloader,
-                heartbeat_interval_seconds=heartbeat_interval_seconds,
-            )
-        except Exception as exc:
-            db.rollback()
-            logger.exception(
-                "Unhandled error while executing design-processing job %s",
-                job.id,
-            )
-            outcome = _record_execution_failure_safely(
-                db,
-                job.id,
-                worker_id=resolved_worker_id,
-                error=str(exc)[:2000],
-            )
-        outcomes[outcome] = outcomes.get(outcome, 0) + 1
-        log_design_processing_event(
-            logger,
-            "worker_job_outcome",
+    try:
+        jobs = claim_due_design_processing_jobs(
+            db,
             worker_id=resolved_worker_id,
-            board_id=job.board_id,
-            item_id=job.item_id,
-            job_id=str(job.id),
-            execution_kind=job.execution_kind,
-            outcome=outcome,
+            limit=claim_limit,
+            mode=configured_mode,
+            allowlist_item_ids=settings.design_processing_allowlist_item_ids,
         )
+        attempts_at_claim.update((job.id, job.attempt_count) for job in jobs)
+        for job in jobs:
+            try:
+                outcome = execute_claimed_design_processing_job(
+                    db,
+                    job.id,
+                    worker_id=resolved_worker_id,
+                    access_token=token,
+                    gateway=read_gateway,
+                    analysis_client=client,
+                    artifact_storage=storage,
+                    mode=configured_mode,
+                    execution_policy=runtime_policy,
+                    downloader=downloader,
+                    heartbeat_interval_seconds=heartbeat_interval_seconds,
+                )
+            except Exception as exc:
+                db.rollback()
+                _raise_if_shutting_down(exc)
+                logger.exception(
+                    "Unhandled error while executing design-processing job %s",
+                    job.id,
+                )
+                outcome = _record_execution_failure_safely(
+                    db,
+                    job.id,
+                    worker_id=resolved_worker_id,
+                    error=str(exc)[:2000],
+                )
+            outcomes[outcome] = outcomes.get(outcome, 0) + 1
+            log_design_processing_event(
+                logger,
+                "worker_job_outcome",
+                worker_id=resolved_worker_id,
+                board_id=job.board_id,
+                item_id=job.item_id,
+                job_id=str(job.id),
+                execution_kind=job.execution_kind,
+                outcome=outcome,
+            )
+    except WorkerShutdown:
+        try:
+            release_jobs_for_shutdown(
+                db,
+                worker_id=resolved_worker_id,
+                mode=configured_mode,
+                allowlist_item_ids=settings.design_processing_allowlist_item_ids,
+                attempts_at_claim=attempts_at_claim,
+            )
+        except Exception:
+            db.rollback()
+            logger.exception("Unable to release design-processing jobs at shutdown; their leases will expire")
+        raise
     result = DesignProcessingWorkerResult(
         recovered=recovered,
         claimed=len(jobs),
@@ -1183,21 +1286,28 @@ def main() -> int:
         LegacyGeminiClient(settings.design_processing_extraction_model,
                            thinking_level=settings.design_processing_thinking_level).parameter_extraction_config.response_json_schema,
     )}), flush=True)
-    while True:
-        db = SessionLocal()
-        try:
-            run_worker_once(
-                db,
-                worker_id=worker_id,
-                claim_limit=args.claim_limit,
-                lease_timeout_seconds=args.lease_timeout_seconds,
-                heartbeat_interval_seconds=args.heartbeat_interval_seconds,
-            )
-        finally:
-            db.close()
-        if args.once:
-            return 0
-        time.sleep(max(args.poll_interval_seconds, 0.1))
+    # Render sends SIGTERM on deploy/restart and SIGKILLs after its grace period.
+    for stop_signal in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(stop_signal, _request_shutdown)
+    try:
+        while True:
+            db = SessionLocal()
+            try:
+                run_worker_once(
+                    db,
+                    worker_id=worker_id,
+                    claim_limit=args.claim_limit,
+                    lease_timeout_seconds=args.lease_timeout_seconds,
+                    heartbeat_interval_seconds=args.heartbeat_interval_seconds,
+                )
+            finally:
+                db.close()
+            if args.once:
+                return 0
+            time.sleep(max(args.poll_interval_seconds, 0.1))
+    except WorkerShutdown as stop:
+        log_design_processing_event(logger, "worker_shutdown", worker_id=worker_id, reason=str(stop))
+        return 0
 
 
 if __name__ == "__main__":

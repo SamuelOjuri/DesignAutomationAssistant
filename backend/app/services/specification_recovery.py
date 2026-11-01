@@ -11,7 +11,10 @@ from .performance_specification_evidence import (
     _contains_excerpt, _excerpt_normal, _normal, _parse_message_date, _value_supported, request_note_diagnostics,
     resolve_email_evidence, resolve_request_notes, _source_contains_excerpt,
 )
-from .specification_semantics import EVIDENCE_VERSION, canonical_label, missing, scale_ratio, tp_reference_revision
+from .specification_semantics import (
+    EVIDENCE_VERSION, REFERENCE_FIELDS, canonical_label, missing, normalize_reference_dashes, scale_ratio,
+    tp_reference_revision,
+)
 from .specification_image_text import literal_image_regions
 from .specification_request_context import (
     attachment_message, attachment_messages, parent_email, request_context_summary, select_client_request, source_email_messages,
@@ -195,6 +198,10 @@ def repair_note_list_formatting(result, manifest):
 def _same_value(old, new):
     if _excerpt_normal(old.value) == _excerpt_normal(new["value"]):
         return True
+    if old.field in REFERENCE_FIELDS:
+        # A typographic dash in a drawing reference is the standard '-'.
+        return (_excerpt_normal(normalize_reference_dashes(old.value))
+                == _excerpt_normal(normalize_reference_dashes(new["value"])))
     if old.field == "Drawing Title":
         # Restore a possessive apostrophe that the model dropped from a name.
         # Keep every letter, number and other punctuation mark; this is not a
