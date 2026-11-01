@@ -78,8 +78,8 @@ class LegacyGeminiClient:
             repair_template_markers,
         )
         from ..performance_specification_evidence import (
-            PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNCONFIRMED_REFERENCE, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
-            request_note_diagnostics, resolve_request_notes,
+            PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, REVIEW_PREFIX_REFERENCE, UNCONFIRMED_REFERENCE,
+            UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT, request_note_diagnostics, resolve_request_notes,
         )
         prompt = f"""
         Please analyze the following information extracted from emails, PDF documents, and images:
@@ -211,7 +211,7 @@ class LegacyGeminiClient:
             provenance, diagnostics = evidence_diagnostics(result, source_manifest)
             unresolved = {label: reason for label, reason in diagnostics.items()
                           if (reason not in {VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT, PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN,
-                                             UNCONFIRMED_REFERENCE}
+                                             UNCONFIRMED_REFERENCE, REVIEW_PREFIX_REFERENCE}
                               and not (label in {"Date Received", "Revision"}
                                        and reason == "Populated extraction has no verified applicable evidence"))
                           or any(e["status"] == "unverified" for e in provenance[label].get("rejectedCandidates", []))}

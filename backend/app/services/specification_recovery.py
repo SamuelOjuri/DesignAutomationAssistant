@@ -8,8 +8,8 @@ unsupported TP issuer can be corrected only to literal source branding.
 import re
 
 from .performance_specification_evidence import (
-    _contains_excerpt, _excerpt_normal, _normal, _parse_message_date, _value_supported, request_note_diagnostics,
-    resolve_email_evidence, resolve_request_notes, _source_contains_excerpt,
+    _comparable_value, _contains_excerpt, _excerpt_normal, _normal, _parse_message_date, _value_supported,
+    request_note_diagnostics, resolve_email_evidence, resolve_request_notes, _source_contains_excerpt,
 )
 from .specification_semantics import (
     EVIDENCE_VERSION, REFERENCE_FIELDS, U_VALUE_FIELDS, canonical_label, missing, normalize_reference_dashes,
@@ -449,24 +449,26 @@ def merge_recovery(initial, recovery, manifest):
             retained.append(old)
     unique = {e.model_dump_json(): e for e in (*retained, *recovery.specification_evidence)}
     initial.specification_evidence = list(unique.values())
-    # A populated scalar may be withdrawn only when a literal, verified
-    # non-request candidate identifies that exact fact (e.g. achieved U-value).
+    # A populated scalar without any requested citation can never be published.
+    # Withdraw it when a literal, verified non-request candidate identifies that
+    # exact fact (e.g. achieved U-value, existing drawing), even if recovery restated it.
     for name in type(initial).model_fields:
         if name.startswith("specification_"):
             continue
         value = getattr(initial, name)
-        if missing(value) or not missing(getattr(recovery, name)):
+        if missing(value):
             continue
         label = next((canonical_label(k) for k in recovery.as_canonical_parameters()
                       if k.lower().replace("-", "_").replace(" ", "_") == name), None)
         if not label or any(e.field == label and e.role == "requested" for e in initial.specification_evidence):
             continue
-        for evidence in recovery.specification_evidence:
+        for evidence in initial.specification_evidence:
             source = sources.get(evidence.source_id)
             if label == "Decking" and evidence.role == "baseline":
                 continue  # Described existing decking remains an applicable fact.
             if (evidence.field == label and evidence.role in {"achieved", "baseline", "withdrawn", "lookup"}
-                    and _normal(value) == _normal(evidence.value) and source and source["status"] == "read"
+                    and _normal(_comparable_value(label, value)) == _normal(_comparable_value(label, evidence.value))
+                    and source and source["status"] == "read"
                     and _contains_excerpt(evidence.snippet, source["text"]) and _value_supported(evidence.model_dump())):
                 setattr(initial, name, None)
                 initial._evidence_repairs.append({"reason": "Verified fact is not a current request",

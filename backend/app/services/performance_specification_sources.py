@@ -12,10 +12,10 @@ from .design_processing_inputs import parse_design_processing_target
 from .legacy_enquiry.formatting import format_date_for_monday
 from .performance_specification_contract import FIELD_NAMES, missing
 from .performance_specification_evidence import (
-    PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
+    PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, REVIEW_PREFIX_REFERENCE, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
     resolve_baseline_drawing_identity, resolve_email_evidence, resolve_request_notes,
 )
-from .specification_semantics import drawing_reference_key, tp_reference_revision
+from .specification_semantics import drawing_reference_key, review_prefix_reference, tp_reference_revision
 
 
 class SpecificationSourceError(ValueError):
@@ -409,7 +409,8 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
             if "Drawing Reference" in issues:
                 require_review("Drawing Reference", issues["Drawing Reference"])
             identity_candidates, identity_issue = resolve_baseline_drawing_identity(extraction)
-            if identity_issue:
+            # A review-prefix identity still selects its CRM drawing; it is flagged below.
+            if identity_issue and identity_issue != REVIEW_PREFIX_REFERENCE:
                 require_review("Drawing Reference", identity_issue)
             if identity_candidates:
                 requested_value = identity_candidates[0]["value"]
@@ -437,7 +438,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
             # A newer letter revision of the same drawing may replace an archived
             # request. Never select a different numbered roof/drawing series.
             def series(name):
-                match = re.fullmatch(r"((?:(?:tp|ax)|d\.s-)?\d+_\d+\.\d+)-([a-z]+)", reference(name))
+                match = re.fullmatch(r"((?:[a-z]{2}|d\.s-)?\d+_\d+\.\d+)-([a-z]+)", reference(name))
                 return (match[1].lower(), match[2].upper()) if match else None
             wanted = series(requested_value)
             same_series = []
@@ -459,7 +460,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
             apply("Drawing Title", _read_column(title, dependencies, gateway), project, title["id"])
         if selected_drawing is not None:
             name = str(selected_drawing.get("name") or "")
-            if tp_reference_revision(name, confirmed_crm=True):
+            if tp_reference_revision(name, confirmed_crm=True, review_prefix=True):
                 apply("Drawing Reference", name, selected_drawing, "name")
             apply_columns(selected_drawing, "drawing")
 
@@ -487,9 +488,12 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
     confirmed_reference = provenance["Drawing Reference"].get("source") == "Monday CRM" or any(
         e.get("issuer") == "TaperedPlus" for e in provenance["Drawing Reference"].get("candidates", [])
     )
-    suffix = tp_reference_revision(raw.get("Drawing Reference"), confirmed_crm=confirmed_reference)
+    suffix = tp_reference_revision(raw.get("Drawing Reference"), confirmed_crm=confirmed_reference, review_prefix=True)
     if raw.get("Drawing Reference") and suffix is None:
         issues["Drawing Reference"] = "Reference is not a verified TaperedPlus drawing"
+    if review_prefix_reference(raw.get("Drawing Reference")):
+        # Accepted, including from CRM, but never published as a verified TP drawing.
+        issues.setdefault("Drawing Reference", REVIEW_PREFIX_REFERENCE)
     if suffix:
         rejected_revisions = provenance["Revision"].get("rejectedCandidates", [])
         revision_value = raw.get("Revision")
@@ -517,7 +521,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
     # Unverified evidence and incomplete/ambiguous CRM reads still fail the refresh.
     publishable_conflicts = {
         VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT, PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, MULTI_MATERIAL,
-        UNASSIGNED_DRAWING,
+        UNASSIGNED_DRAWING, REVIEW_PREFIX_REFERENCE,
         "Revision conflicts with the selected TaperedPlus drawing reference",
     }
     if any(reason not in publishable_conflicts

@@ -548,6 +548,41 @@ on its new model response. When such a conflict masks an unverified candidate, t
 failure also logs `unverified_candidates` with fixed verifier reasons only, never
 values or excerpts.
 
+A U-value restated with a unit is also `redundant` when a verified bare value cites
+the same source, excerpt, scope, roles and date, states the identical number, and
+the unit occurs in that excerpt. In `U-Value*: 0.22 W/m²K (0.18 Target)` the unit
+is printed beside 0.22, so `0.18 W/m²K` is not literal, but it adds nothing to the
+verified `0.18`. The issuer is not compared, because it is verified only for
+Drawing References. A different number, unit, roof, date or excerpt still blocks,
+as does a unit-bearing value without a verified bare sibling. Item `3319900903`
+(job `e30fd92c`) failed all three attempts on this duplicate (`AXTER LTD`, `ROOFS 2
+& 3`); its Target U Value now resolves to `0.18`.
+
+A populated scalar with no `requested` citation can never be published. It is now
+withdrawn whenever a verified non-request candidate (achieved, baseline, withdrawn
+or lookup; never applicable baseline Decking) states the same value, reading
+reference dashes and U-value unit spacing as presentation, even when the recovery
+response restates the scalar. Each withdrawal is audited as `Verified fact is not a
+current request`. For item `3305468770` (job `246c1170`), both responses filled
+Drawing Reference `FA18910_26.01 - A` and Revision `26.01 - A` from two baseline
+citations of an attachment's `PROJECT DETAILS` block, so recovery could never clear
+them. Both scalars are now withdrawn and the reference remains baseline identity.
+
+Drawing references whose two-letter prefix is neither `TP` nor the accepted `AX`
+family (for example `FA18910_26.01 - A`) are accepted, but never as verified
+TaperedPlus drawings. A literal requested or baseline reference parses like a TP
+reference: its suffix supplies the Revision, a matching CRM drawing name is
+selected, and a newer letter in the same series may replace it. The Drawing
+Reference always carries the publishable review issue `Drawing Reference prefix is
+not TP; confirm this drawing reference`, including when CRM confirms the name, so
+its CAD value is left blank with the reported reference in the PDF. Issuer claims
+cannot confirm or reject such a reference, and its value must still be literal.
+Without a unique CRM drawing match it still requires review, like a TP reference.
+Three-letter prefixes, `TP`, `AX`, D.S and bare references are unchanged. These
+are verifier and publisher changes only, so `output-v17` is unchanged and no
+re-extraction is forced. After deploying the design worker and specification
+publisher, retry both exhausted jobs with `retry-failed-job`.
+
 The two valid PNG plans for item `3313351849` returned HTTP-success responses with
 no text and `finish_reason=RECITATION` in the approved Gemini replay. The provider
 defines this as content flagged for recitation ([Gemini API response reference](https://ai.google.dev/api/generate-content#FinishReason)).

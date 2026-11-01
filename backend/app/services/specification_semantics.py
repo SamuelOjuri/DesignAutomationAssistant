@@ -123,14 +123,36 @@ def normalize_unit_spacing(value):
     return re.sub(r"(?<=\d)\s*(?=W\s*/)", " ", value, flags=re.IGNORECASE) if isinstance(value, str) else value
 
 
-def tp_reference_revision(reference: str | None, *, confirmed_crm: bool = False) -> str | None:
+# Any other two-letter prefix (e.g. FA18910_26.01 - A) is accepted for review only.
+REVIEW_REFERENCE_PREFIX = r"(?!TP|AX)[A-Z]{2}\s*"
+_REFERENCE_NUMBER = r"\d+_\d+\.\d+(?:\s*-\s*[A-Z]+)?"
+# A literal reference inside source text, including review-only prefixes.
+REFERENCE_TEXT_PATTERN = (
+    r"(?<!\w)(?:(?:TP|AX)\s*|D\.S\s*-\s*|" + REVIEW_REFERENCE_PREFIX + r")?"
+    + _REFERENCE_NUMBER + r"(?!\w|\.\w)"
+)
+
+
+def review_prefix_reference(reference: str | None) -> bool:
+    """A reference whose two-letter prefix is neither TP nor the accepted AX family."""
+    reference = normalize_reference_dashes(reference)
+    return bool(reference and re.fullmatch(
+        REVIEW_REFERENCE_PREFIX + _REFERENCE_NUMBER, reference.strip(), re.IGNORECASE))
+
+
+def tp_reference_revision(reference: str | None, *, confirmed_crm: bool = False,
+                          review_prefix: bool = False) -> str | None:
     """Accepted drawing families, preserving branding and the complete suffix.
 
     AX is an explicitly accepted legacy family. Bare numbers and D.S require
     confirmed CRM membership or independently verified TP correspondence.
+    Other two-letter prefixes parse only with review_prefix; callers must flag
+    those references for review rather than treat them as verified TP drawings.
     """
     prefix = r"(?:(?:TP|AX)\s*|D\.S\s*-\s*)?" if confirmed_crm else r"(?:TP|AX)\s*"
-    pattern = prefix + r"\d+_\d+\.\d+(?:\s*-\s*[A-Z]+)?"
+    if review_prefix:
+        prefix = r"(?:" + REVIEW_REFERENCE_PREFIX + "|" + prefix + ")"
+    pattern = prefix + _REFERENCE_NUMBER
     reference = normalize_reference_dashes(reference)
     if reference and re.fullmatch(pattern, reference.strip(), re.IGNORECASE):
         return reference.split("_", 1)[1].strip()
