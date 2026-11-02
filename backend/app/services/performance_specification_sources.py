@@ -15,7 +15,9 @@ from .performance_specification_evidence import (
     PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, REVIEW_PREFIX_REFERENCE, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
     resolve_baseline_drawing_identity, resolve_email_evidence, resolve_request_notes,
 )
-from .specification_semantics import drawing_reference_key, review_prefix_reference, tp_reference_revision
+from .specification_semantics import (
+    drawing_reference_key, normalize_reference_dashes, review_prefix_reference, tp_reference_revision,
+)
 
 
 class SpecificationSourceError(ValueError):
@@ -35,6 +37,10 @@ class SpecificationValueConflict(SpecificationSourceError):
 MULTI_MATERIAL = "Multiple CRM material selections require a scoped specification"
 UNASSIGNED_DRAWING = (
     "No requested TaperedPlus drawing reference identifies a single linked drawing. "
+    "Confirm the drawing reference; drawing-specific CRM values have not been used"
+)
+UNMATCHED_REVIEW_PREFIX = (
+    "Drawing Reference prefix is not TP and matches no single linked drawing. "
     "Confirm the drawing reference; drawing-specific CRM values have not been used"
 )
 
@@ -418,6 +424,21 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
                     "status": "baseline_reference", "reference": requested_value,
                     "evidence": identity_candidates,
                 }
+        drawing_identities = [
+            {"boardId": str(drawing["board"]["id"]), "itemId": str(drawing["id"]),
+             "reference": str(drawing.get("name") or "")}
+            for drawing in sorted(drawings, key=lambda drawing: str(drawing["id"]))
+        ]
+
+        def unmatched_review_prefix():
+            # Another two-letter prefix publishes for review without a CRM drawing;
+            # an unmatched TP/AX, D.S or bare reference still blocks.
+            if not review_prefix_reference(requested_value):
+                require_review("Drawing Reference", "Requested drawing/roof is missing or ambiguous")
+            return {**(drawing_selection or {}), "status": "unmatched_review_prefix",
+                    "reason": UNMATCHED_REVIEW_PREFIX, "reference": requested_value,
+                    "candidates": drawing_identities}
+
         requested = reference(requested_value)
         matches = [drawing for drawing in drawings if requested and
                    reference(drawing.get("name")) == requested]
@@ -428,11 +449,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
         elif drawings and not requested:
             drawing_selection = {
                 "status": "unassigned", "reason": UNASSIGNED_DRAWING,
-                "candidates": [
-                    {"boardId": str(drawing["board"]["id"]), "itemId": str(drawing["id"]),
-                     "reference": str(drawing.get("name") or "")}
-                    for drawing in sorted(drawings, key=lambda drawing: str(drawing["id"]))
-                ],
+                "candidates": drawing_identities,
             }
         elif drawings:
             # A newer letter revision of the same drawing may replace an archived
@@ -450,10 +467,10 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
             if len(same_series) == 1:
                 selected_drawing = same_series[0]
             else:
-                require_review("Drawing Reference", "Requested drawing/roof is missing or ambiguous")
+                drawing_selection = unmatched_review_prefix()
         elif drawing_selection and drawing_selection["status"] == "baseline_reference":
-            require_review("Drawing Reference", "Requested drawing/roof is missing or ambiguous")
-        if drawing_selection is None or drawing_selection["status"] != "unassigned":
+            drawing_selection = unmatched_review_prefix()
+        if drawing_selection is None or drawing_selection["status"] not in {"unassigned", "unmatched_review_prefix"}:
             apply_columns(project, "project", tuple(label for label in FIELD_NAMES if label != "Drawing Reference"))
         title = next((col for col in _columns(project) if col["id"] == "text3__1"), None)
         if title is not None:
@@ -484,6 +501,18 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
                 issues[label] = scoped_issues[label]
     if drawing_selection and drawing_selection["status"] == "unassigned":
         issues["Drawing Reference"] = UNASSIGNED_DRAWING
+        provenance["Drawing Reference"]["status"] = "conflict"
+    elif drawing_selection and drawing_selection["status"] == "unmatched_review_prefix":
+        if raw.get("Drawing Reference") is None:
+            # A baseline identity is not request evidence; it is published only for review.
+            raw["Drawing Reference"] = normalize_reference_dashes(drawing_selection["reference"])
+            provenance["Drawing Reference"] = {
+                "source": "Email/Attachment", "selected": None,
+                "candidates": drawing_selection.get("evidence", []),
+                "rationale": "Existing drawing identity; no single linked drawing matches",
+            }
+        if issues.get("Drawing Reference") in {None, REVIEW_PREFIX_REFERENCE}:
+            issues["Drawing Reference"] = UNMATCHED_REVIEW_PREFIX
         provenance["Drawing Reference"]["status"] = "conflict"
     confirmed_reference = provenance["Drawing Reference"].get("source") == "Monday CRM" or any(
         e.get("issuer") == "TaperedPlus" for e in provenance["Drawing Reference"].get("candidates", [])
@@ -521,7 +550,7 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
     # Unverified evidence and incomplete/ambiguous CRM reads still fail the refresh.
     publishable_conflicts = {
         VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT, PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, MULTI_MATERIAL,
-        UNASSIGNED_DRAWING, REVIEW_PREFIX_REFERENCE,
+        UNASSIGNED_DRAWING, REVIEW_PREFIX_REFERENCE, UNMATCHED_REVIEW_PREFIX,
         "Revision conflicts with the selected TaperedPlus drawing reference",
     }
     if any(reason not in publishable_conflicts

@@ -257,8 +257,9 @@ when absent; manufacturer references such as `RLTF-002` are not treated as TP re
 `drawingItemId` stays null. A populated holding Drawing Reference participates in
 selection before drawing fields are read, so confirmation can resolve the review
 on a later refresh. A conflicting or unverified requested/baseline TP identity,
-an unmatched specified drawing among existing drawings, multiple linked projects,
-or an incomplete source read still blocks replacement.
+an unmatched specified drawing among existing drawings (except a non-TP/AX
+two-letter prefix, which publishes for review as described below), multiple linked
+projects, or an incomplete source read still blocks replacement.
 
 The October 31 two-email replay resolved `3312713363` through its verified baseline
 `TP18675_26.01 - C`. For `3315502554`, the email-only review path retained the Atrium
@@ -577,7 +578,20 @@ Reference always carries the publishable review issue `Drawing Reference prefix 
 not TP; confirm this drawing reference`, including when CRM confirms the name, so
 its CAD value is left blank with the reported reference in the PDF. Issuer claims
 cannot confirm or reject such a reference, and its value must still be literal.
-Without a unique CRM drawing match it still requires review, like a TP reference.
+Without a unique CRM drawing match (none or several active drawings, and no unique
+newer letter in the same series), a requested or baseline review-prefix reference
+now publishes rather than blocking: the PDF shows the reported reference with the
+issue `Drawing Reference prefix is not TP and matches no single linked drawing.
+Confirm the drawing reference; drawing-specific CRM values have not been used`, and
+`drawingSelection.status = unmatched_review_prefix` lists the candidate drawings.
+Like the unassigned path, it skips project specification rollups and all
+drawing-specific fields, keeps the reference's Revision suffix and leaves
+`drawingItemId` null. An unmatched TP, AX, D.S or bare reference still blocks.
+Item `3320450547` (requested `GA13167_24.02 - F`, read from a truncated filename in a
+tablet screenshot, with two active F drawings in CRM) and the baseline
+`GA13639_24.01 - D` (`3295510085`) and `FA15081_26.03 - B` (`3324209177`) replayed
+read-only as publishable review PDFs. The publisher's retry schedule picks them up
+after deployment; no extraction rerun or migration is needed.
 Three-letter prefixes, `TP`, `AX`, D.S and bare references are unchanged. These
 are verifier and publisher changes only, so `output-v17` is unchanged and no
 re-extraction is forced. After deploying the design worker and specification

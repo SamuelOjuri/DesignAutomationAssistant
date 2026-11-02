@@ -6,7 +6,9 @@ import pytest
 
 from backend.app.models import PerformanceSpecificationArtifact
 from backend.app.services.performance_specification_evidence import REVIEW_PREFIX_REFERENCE
-from backend.app.services.performance_specification_sources import resolve_specification_sources
+from backend.app.services.performance_specification_sources import (
+    UNMATCHED_REVIEW_PREFIX, resolve_specification_sources,
+)
 from backend.tests.test_performance_specification import (
     BOARD, ITEM, case, column, current, pdf_text, relation, run,
 )
@@ -206,11 +208,39 @@ def test_review_prefix_reference_selects_its_crm_drawing_and_publishes_for_revie
     assert "confirm this drawing reference" in text and FA_REFERENCE in text
 
 
-def test_review_prefix_reference_without_unique_crm_drawing_still_blocks(case):
-    add_baseline(without_requested_reference(case), FA_REFERENCE, issuer=None)
-    assert run(case) == ["failed"]
-    assert current(case).review_json["issues"]["Drawing Reference"] == "Requested drawing/roof is missing or ambiguous"
-    assert not case.gateway.uploads
+@pytest.mark.parametrize("role,drawings", [
+    ("baseline", "unmatched"), ("requested", "unmatched"), ("baseline", "none"),
+])
+def test_review_prefix_reference_without_unique_crm_drawing_publishes_for_review(case, role, drawings):
+    # Items 3320450547 (requested GA13167_24.02 - F), 3295510085 and 3324209177
+    # (baseline GA/FA references) matched no single CRM drawing and published nothing.
+    if role == "baseline":
+        add_baseline(without_requested_reference(case), FA_REFERENCE, issuer=None)
+    else:
+        requested_review_prefix_reference(case)
+    if drawings == "unmatched":
+        case.gateway.project["subitems"][0]["name"] = "18910_26.01 - A - Roof 2"
+        add_drawing(case, "18910_26.01 - A - Roof 2A")
+        for drawing in case.gateway.project["subitems"]:
+            drawing["column_values"] = None  # Drawing fields are outside the confirmed scope.
+    else:
+        case.gateway.project["subitems"] = []
+    assert run(case) == ["published"]
+    record, published = current(case), artifact(case)
+    assert record.review_json["status"] == "published_with_review"
+    source = record.source_json
+    assert source["drawingItemId"] is None
+    assert source["drawingSelection"]["status"] == "unmatched_review_prefix"
+    assert [c["itemId"] for c in source["drawingSelection"]["candidates"]] == (
+        ["9101", "9102"] if drawings == "unmatched" else [])
+    assert source["raw"]["Drawing Reference"] == FA_REFERENCE
+    assert source["raw"]["Revision"] == "26.01 - A"
+    assert source["issues"] == {"Drawing Reference": UNMATCHED_REVIEW_PREFIX}
+    assert all(read["itemId"] in {"901", ITEM} for read in source["crmReads"])
+    assert published.translation_json["values"]["Drawing Reference"] is None
+    text = pdf_text(case.gateway.uploads[0][1])
+    assert FA_REFERENCE in text and "matches no single linked drawing" in text
+    assert run(case) == ["unchanged"] and len(case.gateway.uploads) == 1
 
 
 def test_review_prefix_reference_without_linked_project_publishes_for_review(case):
