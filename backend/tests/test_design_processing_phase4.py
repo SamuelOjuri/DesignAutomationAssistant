@@ -478,6 +478,7 @@ def test_webhook_fetches_once_and_dispatches_consumers_independently(
     ("shadow", "unrelated_column"),
 ])
 def test_webhook_skips_snapshot_when_no_consumer_needs_it(webhook_client, db_session, monkeypatch, mode, column_id):
+    monkeypatch.setattr(settings, "performance_specification_enabled", False)
     monkeypatch.setattr(settings, "auto_sync_board_id", "another-board")
     monkeypatch.setattr(settings, "design_processing_mode", mode)
     monkeypatch.setattr(monday_webhooks, "get_monday_ingestion_access_token", lambda: pytest.fail("no remote work needed"))

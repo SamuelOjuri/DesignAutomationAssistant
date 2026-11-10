@@ -1,0 +1,10 @@
+{
+  "name": "Specification Review",
+  "featureType": "Item View",
+  "hosting": "iframe URL",
+  "route": "/specification-review",
+  "board": "Projects Holding Page",
+  "identity": "Monday SDK context and sessionToken",
+  "registration": "manual Developer Center configuration; substitute the deployed main_app HTTPS origin",
+  "preserveExistingLauncher": true
+}

@@ -89,7 +89,7 @@ def _parse_state(state: str) -> dict:
     except jwt.PyJWTError:
         raise HTTPException(status_code=400, detail="Invalid state")
     mode = payload.get("mode")
-    if mode not in {"connect", "monday_first"}:
+    if mode not in {"connect", "monday_first", "specification_review"}:
         raise HTTPException(status_code=400, detail="Invalid state payload")
     return payload
 
@@ -181,6 +181,11 @@ def _oauth_failure_response(request: Request, state_payload: dict, exc: HTTPExce
     if state_payload["mode"] == "monday_first":
         handoff_code = quote(str(state_payload.get("handoff_code") or ""), safe="")
         retry_url = _main_app_url(f"/monday-handoff/{handoff_code}")
+    elif state_payload["mode"] == "specification_review":
+        retry_url = _main_app_url("/specification-review?") + urlencode({
+            "boardId": str(state_payload.get("board_id") or ""),
+            "itemId": str(state_payload.get("item_id") or ""),
+        })
     else:
         retry_url = _main_app_url("/connect-monday?") + urlencode({
             "returnTo": _safe_return_to(state_payload.get("return_to"), "/?monday=connected"),
@@ -269,8 +274,12 @@ def _upsert_monday_link(
     link.app_user_id = app_user.id
     if refresh_token:
         link.refresh_token = refresh_token
-    if expires_in:
-        link.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+    # Expiry belongs to the replacement token. A nonexpiring reconnect must not
+    # inherit the previous token's expired timestamp and loop back to OAuth.
+    link.token_expires_at = (
+        datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+        if expires_in is not None else None
+    )
     return link
 
 
@@ -363,7 +372,35 @@ def monday_callback(
     monday_email = me.get("email")
     monday_user_name = me.get("name")
 
-    if state_payload["mode"] == "monday_first":
+    if state_payload["mode"] == "specification_review":
+        from ..services.specification_review_auth import ReviewItemContext, live_review_item
+
+        try:
+            context = ReviewItemContext(
+                accountId=state_payload.get("monday_account_id"),
+                boardId=state_payload.get("board_id"), itemId=state_payload.get("item_id"),
+            )
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid review return context") from None
+        if (
+            context.accountId != monday_account_id
+            or str(state_payload.get("monday_user_id")) != monday_user_id
+        ):
+            raise HTTPException(status_code=403, detail="Monday OAuth identity does not match review")
+        live_review_item(
+            access_token, account_id=monday_account_id, user_id=monday_user_id,
+            board_id=context.boardId, item_id=context.itemId,
+        )
+        app_user = _app_user_for_monday_identity(
+            db, monday_account_id=monday_account_id, monday_user_id=monday_user_id,
+            monday_email=monday_email, monday_user_name=monday_user_name,
+        )
+        # No handoff, ingestion or cookie session is created for an embedded
+        # review. The view bootstraps again with a fresh SDK token after OAuth.
+        return_to = _main_app_url("/specification-review?") + urlencode({
+            "boardId": context.boardId, "itemId": context.itemId,
+        })
+    elif state_payload["mode"] == "monday_first":
         handoff_code = _validate_handoff_code(db, str(state_payload.get("handoff_code") or ""))
         if (
             str(handoff_code.monday_account_id) != monday_account_id
@@ -409,7 +446,10 @@ def monday_callback(
     )
 
     response = RedirectResponse(return_to)
-    create_app_session(db, response, app_user_id=app_user.id, request=request)
+    if state_payload["mode"] != "specification_review":
+        create_app_session(db, response, app_user_id=app_user.id, request=request)
+    else:
+        response.headers.update({"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
     db.commit()
     return response
 

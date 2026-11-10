@@ -375,7 +375,7 @@ def repair_message_dates(result, manifest):
 def _issuer_repair_allowed(old, new):
     if _normal(old.issuer) == _normal(new["issuer"]):
         return True
-    # A self-identifying TP/AX reference may retain its exact value while the
+    # A structurally valid two-letter reference may retain its exact value while the
     # recovery removes an unquoted issuer or quotes the literal source branding.
     # Bare/D.S references need a verified TP issuer or Monday CRM confirmation.
     return (old.field == "Drawing Reference" and old.issuer

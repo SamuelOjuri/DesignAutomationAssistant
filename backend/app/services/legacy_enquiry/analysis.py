@@ -26,6 +26,7 @@ from ..specification_request_context import (
     email_messages, internal_address, select_client_request,
 )
 from ..source_text import require_json_safe_text
+from ..specification_intent import build_request_intent, reason_for_change
 
 
 class LegacyAnalysisClient(AttachmentTextExtractor, Protocol):
@@ -55,6 +56,7 @@ class LegacyAnalysisResult:
     source_manifest: tuple[dict, ...] = ()
     specification_request_notes: tuple[dict, ...] = ()
     specification_evidence_repairs: tuple[dict, ...] = ()
+    specification_request_intent: dict = field(default_factory=dict)
 
 
 def analyze_downloaded_email_assets(
@@ -209,8 +211,9 @@ def analyze_downloaded_email_assets(
     if not project_name:
         raise ValueError("project-name extraction returned no title")
     sources = {parameter: "Email Content" for parameter in parameters}
-    parameters["Reason for Change"] = "Reviewer decision required"
-    sources["Reason for Change"] = "Business Rule"
+    intent = build_request_intent(manifest, structured_parameters.specification_request_intent)
+    parameters["Reason for Change"] = reason_for_change(intent)
+    sources["Reason for Change"] = "AI recommendation from Email Context"
 
     result = LegacyAnalysisResult(
         parameters=parameters,
@@ -226,6 +229,7 @@ def analyze_downloaded_email_assets(
         specification_evidence=tuple(e.model_dump() for e in structured_parameters.specification_evidence),
         specification_request_notes=tuple(n.model_dump() for n in structured_parameters.specification_request_notes),
         specification_evidence_repairs=tuple(structured_parameters._evidence_repairs),
+        specification_request_intent=intent.model_dump(mode="json"),
         specification_assessed_fields=tuple(structured_parameters.specification_assessed_fields),
         source_manifest=tuple(manifest),
     )

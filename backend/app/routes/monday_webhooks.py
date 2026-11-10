@@ -36,6 +36,7 @@ from ..services.design_processing_inputs import (
 )
 from ..services.design_processing_observability import log_design_processing_event
 from ..services.design_processing_queue import queue_design_processing_snapshot
+from ..services.specification_policy import specification_processing_enabled, specification_processing_allowed
 
 router = APIRouter(prefix="/api/monday/webhooks", tags=["monday"])
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ logger = logging.getLogger(__name__)
 WEBHOOK_PROCESSING_LEASE = timedelta(minutes=5)
 WEBHOOK_DISPATCH_LEASE = timedelta(minutes=5)
 DESIGN_OUTPUT_COLUMN_IDS = frozenset({"file_mkza7y37", "file_mm59rntf"})
+SPECIFICATION_IGNORED_HOLDING_COLUMN_IDS = frozenset({"date_mkpb23av", "board_relation_mm3c4g5x"})
 DESIGN_CREATE_EVENT_TYPES = frozenset({"create_item", "create_pulse"})
 DESIGN_MOVE_EVENT_TYPES = frozenset(
     {
@@ -50,6 +52,7 @@ DESIGN_MOVE_EVENT_TYPES = frozenset(
         "move_item_to_group",
         "move_pulse_into_group",
         "move_pulse_to_group",
+        "item_moved_to_any_group",
     }
 )
 DESIGN_NAME_EVENT_TYPES = frozenset(
@@ -468,24 +471,34 @@ def _dispatch_auto_sync(
 ) -> None:
     policy = policy_from_settings()
     now = utc_now()
-    if settings.performance_specification_enabled and normalized.column_id not in DESIGN_OUTPUT_COLUMN_IDS:
+    ignored_specification_change = normalized.column_id in DESIGN_OUTPUT_COLUMN_IDS or (
+        normalized.board_id == str(settings.design_processing_board_id)
+        and normalized.column_id in SPECIFICATION_IGNORED_HOLDING_COLUMN_IDS
+    )
+    if specification_processing_enabled() and not ignored_specification_change:
         from ..services.performance_specification import (
             cancel_specification, enqueue_specification, enqueue_specification_dependents,
         )
+        notified_specifications = set()
         if normalized.board_id and normalized.item_id:
-            enqueue_specification_dependents(db, normalized.board_id, normalized.item_id)
+            enqueue_specification_dependents(db, normalized.board_id, normalized.item_id, seen=notified_specifications)
         # Newly created subitems have no dependency row yet; the parent project
         # is already indexed. Monday subitem events include its identity.
         event = db.get(MondayWebhookEvent, dispatch.webhook_event_id)
         body = _event_body(event.payload_json) if event is not None else {}
-        parent_id = _first_string(body, ("parent_item_id", "parentItemId"))
-        parent_board = _first_string(body, ("parent_item_board_id", "parentItemBoardId", "parentBoardId"))
+        parent_id = _first_string(body, ("parent_item_id", "parentItemId", "parentPulseId", "parent_pulse_id"))
+        parent_board = _first_string(body, ("parent_item_board_id", "parentItemBoardId", "parentBoardId", "parent_board_id"))
         if parent_id:
             enqueue_specification_dependents(
                 db, parent_board or str(settings.design_processing_project_board_id), parent_id,
+                seen=notified_specifications,
             )
         if normalized.board_id == str(settings.design_processing_board_id) and normalized.item_id and item:
-            if item.get("state") != "active":
+            from ..services.specification_policy import specification_scope_exclusion
+            if specification_scope_exclusion(
+                board_id=(item.get("board") or {}).get("id"),
+                group_id=(item.get("group") or {}).get("id"), item_state=item.get("state"),
+            ) is not None:
                 cancel_specification(db, normalized.board_id, normalized.item_id)
             else:
                 enqueue_specification(db, normalized.board_id, normalized.item_id,
@@ -575,7 +588,14 @@ def _dispatch_requires_snapshot(consumer: str, normalized: NormalizedWebhookEven
     if consumer == "auto_sync":
         # Linked-board handlers enqueue dependents locally, even when the board
         # also happens to be configured as a managed board.
-        return normalized.board_id == str(settings.auto_sync_board_id) and normalized.board_id not in LINKED_BOARD_IDS
+        return (
+            normalized.board_id == str(settings.auto_sync_board_id)
+            and normalized.board_id not in LINKED_BOARD_IDS
+        ) or (
+            specification_processing_allowed(normalized.item_id)
+            and normalized.board_id == str(settings.design_processing_board_id)
+            and normalized.column_id not in DESIGN_OUTPUT_COLUMN_IDS
+        )
     return (
         settings.design_processing_mode != "off"
         and normalized.board_id == str(settings.design_processing_board_id)

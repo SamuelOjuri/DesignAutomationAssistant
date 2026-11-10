@@ -1,4 +1,4 @@
-"""Read and resolve the current holding item and its explicitly linked drawing."""
+"""Read-only Monday source access and candidate preparation for specifications."""
 
 from __future__ import annotations
 
@@ -9,19 +9,16 @@ from typing import Any
 from ..config import settings
 from .. import monday_client
 from .design_processing_inputs import parse_design_processing_target
-from .legacy_enquiry.formatting import format_date_for_monday
-from .performance_specification_contract import FIELD_NAMES, missing
-from .performance_specification_evidence import (
-    PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, REVIEW_PREFIX_REFERENCE, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
-    resolve_baseline_drawing_identity, resolve_email_evidence, resolve_request_notes,
-)
-from .specification_semantics import (
-    drawing_reference_key, normalize_reference_dashes, review_prefix_reference, tp_reference_revision,
-)
+from .performance_specification_contract import missing
+from .specification_references import REFERENCE_PARSER_VERSION, recommend_drawing_candidates
 
 
 class SpecificationSourceError(ValueError):
     pass
+
+
+class SpecificationSourceWaiting(SpecificationSourceError):
+    """Current input/extraction is not ready; a prior PDF is no longer current."""
 
 
 class SpecificationIneligible(SpecificationSourceError):
@@ -39,8 +36,8 @@ UNASSIGNED_DRAWING = (
     "No requested TaperedPlus drawing reference identifies a single linked drawing. "
     "Confirm the drawing reference; drawing-specific CRM values have not been used"
 )
-UNMATCHED_REVIEW_PREFIX = (
-    "Drawing Reference prefix is not TP and matches no single linked drawing. "
+UNMATCHED_DRAWING = (
+    "Requested drawing matches no single linked active drawing. "
     "Confirm the drawing reference; drawing-specific CRM values have not been used"
 )
 
@@ -49,12 +46,6 @@ class SpecificationReviewRequired(SpecificationSourceError):
     def __init__(self, source, issues):
         self.source, self.issues = source, issues
         super().__init__("Specification needs review: " + "; ".join(f"{field}: {reason}" for field, reason in issues.items()))
-
-
-def active_specification_group_ids() -> frozenset[str]:
-    return frozenset(value.strip() for value in settings.auto_sync_active_group_ids.split(",") if value.strip()) - {
-        str(settings.design_processing_landing_group_id), str(settings.auto_sync_completed_group_id),
-    }
 
 
 COLUMN_FIELDS = """
@@ -189,13 +180,13 @@ def _relation(col, dependencies):
     linked, ids = col.get("linked_items"), col.get("linked_item_ids")
     if not isinstance(linked, list) or not isinstance(ids, list):
         raise SpecificationSourceError("Incomplete linked specification value")
-    if {str(value) for value in ids} != {str(entry.get("id")) for entry in linked}:
-        raise SpecificationSourceError("Some linked specification items are unreadable")
     for entry in linked:
         board_id = str((entry.get("board") or {}).get("id") or "")
         if not board_id or not isinstance(entry.get("name"), str):
             raise SpecificationSourceError("Unreadable linked specification identity")
         dependencies.add((board_id, str(entry["id"])))
+    if {str(value) for value in ids} != {str(entry.get("id")) for entry in linked}:
+        raise SpecificationSourceError("Some linked specification items are unreadable")
     return linked
 
 
@@ -249,6 +240,9 @@ def _read_column(col, dependencies, gateway=None):
             if not linked.get("id") or not (linked.get("board") or {}).get("id"):
                 raise SpecificationSourceError("Incomplete mirrored specification identity")
             dependencies.add((str(linked["board"]["id"]), str(linked["id"])))
+        # Preserve every known mirror origin even if an earlier value cannot be
+        # read. A later source correction must be able to wake this review.
+        for entry in entries:
             try:
                 values.add(_typed_value(entry.get("mirrored_value") or {}, dependencies, gateway))
             except SpecificationValueConflict as exc:
@@ -292,271 +286,115 @@ def _find_column(item, label, scope):
     return matches[0] if matches else None
 
 
-def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None = None):
-    """Return semantic inputs only; timestamps and unrelated CRM fields are excluded."""
-    for scope, mappings in settings.performance_specification_column_map.items():
-        if set(mappings) - set(FIELD_NAMES):
-            raise SpecificationSourceError(f"Unknown specification field in {scope} column mapping")
-    target = gateway.fetch_target(item.item_id)
-    if (target.board_id != str(settings.design_processing_board_id)
-            or target.item_state != "active" or target.group_id not in active_specification_group_ids()):
-        raise SpecificationIneligible("Specification item is outside the active groups")
-    extraction = item.extracted_parameters_json or {}
-    if extraction.get("pipelineVersion") != settings.design_processing_pipeline_version:
-        raise SpecificationSourceError("Waiting for extraction from the current configured pipeline")
-    if (not target.input_revision or extraction.get("inputRevision") != target.input_revision
-            or item.latest_analyzed_input_revision != item.latest_desired_input_revision
-            or item.latest_analyzed_pipeline_version != item.latest_desired_pipeline_version
-            or extraction.get("pipelineVersion") != item.latest_analyzed_pipeline_version):
-        raise SpecificationSourceError("Waiting for current email extraction")
-    extracted = extraction.get("performanceParameters")
-    if not isinstance(extracted, dict) or not extracted:
-        raise SpecificationSourceError("Waiting for evidence-aware email extraction (output-v9)")
-    try:
-        raw, provenance, issues = resolve_email_evidence(extraction)
-        request_notes = resolve_request_notes(extraction)
-    except ValueError as exc:
-        raise SpecificationSourceError(str(exc)) from exc
-    dependencies = set()
-    crm_reads = []
-    selected_drawing = None
-    drawing_selection = None
+def prepare_specification_candidates(gateway, match_contract, intent, *, project_board_id, scope=None):
+    """Read candidate context without selecting a project or merging PDF values.
 
-    def snapshot():
-        from .specification_request_context import request_context_summary, select_client_request
-        return {
-            "raw": raw, "sources": provenance, "crmReads": crm_reads,
-            "sourceManifest": extraction["sourceManifest"],
-            "requestContext": request_context_summary(select_client_request(extraction["sourceManifest"])),
-            "requestNotes": request_notes,
-            "evidenceRepairs": extraction.get("specificationEvidenceRepairs", []),
-            "evidenceVersion": extraction["specificationEvidenceVersion"], "issues": issues,
-            "dependencies": [list(value) for value in sorted(dependencies)],
-            "emailRevision": target.input_revision, "extractionPipeline": extraction["pipelineVersion"],
-            "drawingItemId": str(selected_drawing["id"]) if selected_drawing else None,
-            **({"drawingSelection": drawing_selection} if drawing_selection else {}),
-        }
+    This sidecar works before a holding TP Ref/Accounts/date exists. Reads are
+    bounded; a broad title search remains visible and asks for narrowing rather
+    than pretending a partial drawing inventory is complete.
+    """
+    from .specification_review_contract import CandidateLookup, DrawingCandidate, ProjectMatch
+    from .design_processing_target import DesignProcessingTargetMismatch
+    from .specification_references import parse_drawing_reference, parse_project_reference
 
-    def require_review(label, reason):
-        issues[label] = reason
-        raise SpecificationReviewRequired(snapshot(), issues)
-
-    def apply(label, value, source_item, column_id):
-        value = _clean(value)
-        source = {"source": "Monday CRM", "boardId": str(source_item["board"]["id"]),
-                  "itemId": str(source_item["id"]), "columnId": column_id}
-        crm_reads.append({**source, "field": label, "value": value, "status": "empty" if value is None else "provided"})
-        if value is not None:
-            raw[label] = value
-            provenance[label] = {**source, "status": "provided", "rationale": "Current populated CRM value takes precedence"}
-            issues.pop(label, None)
-
-    def apply_columns(source_item, scope, labels=FIELD_NAMES):
-        for label in labels:
-            if label == "Incoming Information":
-                continue
-            column = _find_column(source_item, label, scope)
-            if column is not None:
-                try:
-                    value = _read_column(column, dependencies, gateway)
-                except SpecificationValueConflict as exc:
-                    if exc.values is None or label not in {"Tapered Insulation", "Membrane", "VCL", "Decking"}:
-                        require_review(label, str(exc))
-                    source = {"source": "Monday CRM", "boardId": str(source_item["board"]["id"]),
-                              "itemId": str(source_item["id"]), "columnId": column["id"]}
-                    raw[label] = None
-                    issues[label] = MULTI_MATERIAL
-                    provenance[label] = {**source, "status": "conflict",
-                        "candidates": [{"value": value, "scope": None} for value in exc.values],
-                        "columnValue": {key: val for key, val in column.items() if key not in {"value", "display_value"}}}
-                    crm_reads.append({**source, "field": label, "values": exc.values, "status": "conflict"})
+    projects = []
+    for candidate in match_contract.get("candidates", []):
+        projects.append(ProjectMatch(
+            record={"board_id": str(project_board_id), "item_id": str(candidate["mondayItemId"])},
+            rationale=candidate.get("matchRationale") or "Project title similarity; supporting context only",
+            similarity_score=candidate.get("similarity"),
+        ))
+    lookup = CandidateLookup(status="available", projects=projects)
+    dependencies = {(str(project_board_id), project.record.item_id) for project in projects}
+    selections, accounts = [], []
+    reader = getattr(gateway, "fetch_specification_project", None)
+    if projects and reader is None:
+        lookup.status = "pending"
+        lookup.issues.append("Project/drawing details have not been read")
+    if len(projects) > 12:
+        lookup.status = "pending"
+        lookup.issues.append("Narrow the project candidates to read further drawing details")
+    references = (intent or {}).get("detected_references", [])
+    requested = [entry for entry in references if entry.get("kind") == "drawing"]
+    inactive_projects = [entry for entry in (match_contract.get("referenceLookup") or {}).get("candidates", [])
+                         if entry.get("state") in {"archived", "deleted"}]
+    if inactive_projects:
+        lookup.issues.append("A detected project reference is archived or deleted; select an active project or review the request")
+    for candidate in match_contract.get("candidates", [])[:12] if reader else []:
+        item_id = str(candidate["mondayItemId"])
+        try:
+            project = reader(item_id)
+            if (str(project.get("id")) != item_id
+                    or str((project.get("board") or {}).get("id")) != str(project_board_id)
+                    or project.get("state") != "active" or not isinstance(project.get("subitems"), list)):
+                raise SpecificationSourceError("Project details are incomplete or inactive")
+            project_reference = candidate.get("resolvedProjectReference") or project.get("name")
+            printed = parse_project_reference(project_reference)
+            relevant = [entry for entry in requested
+                        if (parsed := parse_drawing_reference(entry["literal"]))
+                        and printed and parsed.project_key == printed.key]
+            if relevant:
+                priority = {"current_request": 0, "document": 1, "forwarded_context": 2}
+                best_role = min(priority.get(entry.get("role", "current_request"), 2) for entry in relevant)
+                relevant = list(dict.fromkeys(entry["literal"] for entry in relevant
+                    if priority.get(entry.get("role", "current_request"), 2) == best_role))
+            ranked = recommend_drawing_candidates(
+                project["subitems"], project_reference=project_reference, scope=scope,
+                requested_reference=relevant[0] if len(relevant) == 1 else None,
+            )
+            if len(relevant) > 1:
+                ranked["selectedItemId"] = None
+                ranked["status"] = "ambiguous"
+                ranked["issues"].append("Several email drawing references need reviewer selection")
+            selections.append({"projectItemId": item_id, **ranked})
+            lookup.issues.extend(ranked["issues"])
+            recommended_ids = {entry["itemId"] for entry in ranked["recommendations"]}
+            for drawing in ranked["candidates"]:
+                if not drawing["boardId"] or not drawing["itemId"]:
                     continue
-                apply(label, value, source_item, column["id"])
-                if value is not None:
-                    provenance[label]["columnValue"] = {key: value for key, value in column.items()
-                                                        if key not in {"value", "display_value"}}
+                dependencies.add((drawing["boardId"], drawing["itemId"]))
+                lookup.drawings.append(DrawingCandidate.model_validate({
+                    "record": {"board_id": drawing["boardId"], "item_id": drawing["itemId"]},
+                    "project": {"board_id": str(project_board_id), "item_id": item_id},
+                    "literal_reference": drawing["reference"] or "Unreadable reference",
+                    "roof_scope": drawing["scope"],
+                    "lifecycle": drawing["state"] if drawing["state"] in {"active", "archived", "deleted"} else "unknown",
+                    "match_kind": "exact_email" if ranked["status"] == "exact" and drawing["itemId"] == ranked["selectedItemId"]
+                        else "latest_in_scope" if drawing["itemId"] in recommended_ids else "other",
+                    "rationale": "Exact relevant email drawing" if ranked["status"] == "exact" and drawing["itemId"] == ranked["selectedItemId"]
+                        else "Existing drawing candidate; confirm project and roof scope",
+                }))
+            account = _find_column(project, "Company", "project")
+            if account is None:
+                account_columns = [column for column in _columns(project)
+                    if _normal((column.get("column") or {}).get("title")) in {"account", "accounts"}]
+                if len(account_columns) > 1:
+                    raise SpecificationSourceError("Several project Account columns require an explicit mapping")
+                account = account_columns[0] if account_columns else None
+            if account is not None:
+                accounts.append({"projectItemId": item_id, "boardId": str(project_board_id),
+                    "columnId": account["id"], "value": _read_column(account, dependencies, gateway)})
+        except DesignProcessingTargetMismatch:
+            raise
+        except Exception:
+            # Optional CRM suggestions cannot destroy durable email extraction.
+            # Errors deliberately contain no upstream bodies, tokens or email text.
+            lookup.status = "unavailable"
+            lookup.issues.append(f"Project {item_id} recommendations are unavailable; retry the lookup")
+    if any((match_contract.get(key) or {}).get("status") == "unavailable"
+           for key in ("referenceLookup", "titleLookup")):
+        lookup.status = "unavailable"
+        lookup.issues.append("Some project candidates could not be read; retry before selecting")
+    # Validate after assembling: never persist a partially typed source snapshot.
+    lookup = CandidateLookup.model_validate(lookup.model_dump())
+    return {"schemaVersion": 1, "referenceParserVersion": REFERENCE_PARSER_VERSION,
+        "lookup": lookup.model_dump(), "drawingSelections": selections,
+        "inactiveProjectMatches": inactive_projects,
+        "accountRecommendations": accounts,
+        "dependencies": [list(value) for value in sorted(dependencies)]}
 
-    holding = gateway.fetch_holding(item.item_id)
-    if (str((holding.get("board") or {}).get("id")) != target.board_id
-            or str(holding.get("id")) != item.item_id or holding.get("state") != "active"
-            or (holding.get("group") or {}).get("id") not in active_specification_group_ids()):
-        raise SpecificationIneligible("Specification holding item changed scope")
-    columns = {col["id"]: col for col in _columns(holding)}
-    for required in ("board_relation_mkpbm5np", "board_relation_mm3c4g5x", "date_mkpb23av"):
-        if required not in columns:
-            raise SpecificationSourceError(f"Holding specification column {required} is missing")
-    projects = _relation(columns["board_relation_mkpbm5np"], dependencies)
-    if any(str(entry["board"]["id"]) != str(settings.design_processing_project_board_id) for entry in projects):
-        raise SpecificationSourceError("TP Ref points to an unexpected project board")
-    if len(projects) > 1:
-        require_review("Drawing Reference", "Select a single TP Ref project for this specification")
-    if projects:
-        project = gateway.fetch_project(str(projects[0]["id"]))
-        if (str(project.get("id")) != str(projects[0]["id"])
-                or str((project.get("board") or {}).get("id")) != str(settings.design_processing_project_board_id)
-                or project.get("state") != "active" or not isinstance(project.get("subitems"), list)):
-            raise SpecificationSourceError("Linked project is incomplete or inactive")
-        # Resolve identity before reading project rollups or drawing-specific
-        # fields. An unassigned request must not inherit another roof's specs.
-        apply_columns(project, "project", ("Drawing Reference",))
-        apply_columns(holding, "holding", ("Drawing Reference",))
-        drawings = []
-        for drawing in project["subitems"]:
-            board_id = (drawing.get("board") or {}).get("id")
-            if not board_id or not drawing.get("id") or drawing.get("state") not in {"active", "archived", "deleted"}:
-                raise SpecificationSourceError("Linked drawing lifecycle is incomplete")
-            dependencies.add((str(board_id), str(drawing["id"])))
-            if drawing["state"] == "active":
-                drawings.append(drawing)
-        def reference(value):
-            return drawing_reference_key(value)
-        requested_value = raw.get("Drawing Reference")
-        if not requested_value:
-            if "Drawing Reference" in issues:
-                require_review("Drawing Reference", issues["Drawing Reference"])
-            identity_candidates, identity_issue = resolve_baseline_drawing_identity(extraction)
-            # A review-prefix identity still selects its CRM drawing; it is flagged below.
-            if identity_issue and identity_issue != REVIEW_PREFIX_REFERENCE:
-                require_review("Drawing Reference", identity_issue)
-            if identity_candidates:
-                requested_value = identity_candidates[0]["value"]
-                drawing_selection = {
-                    "status": "baseline_reference", "reference": requested_value,
-                    "evidence": identity_candidates,
-                }
-        drawing_identities = [
-            {"boardId": str(drawing["board"]["id"]), "itemId": str(drawing["id"]),
-             "reference": str(drawing.get("name") or "")}
-            for drawing in sorted(drawings, key=lambda drawing: str(drawing["id"]))
-        ]
 
-        def unmatched_review_prefix():
-            # Another two-letter prefix publishes for review without a CRM drawing;
-            # an unmatched TP/AX, D.S or bare reference still blocks.
-            if not review_prefix_reference(requested_value):
-                require_review("Drawing Reference", "Requested drawing/roof is missing or ambiguous")
-            return {**(drawing_selection or {}), "status": "unmatched_review_prefix",
-                    "reason": UNMATCHED_REVIEW_PREFIX, "reference": requested_value,
-                    "candidates": drawing_identities}
-
-        requested = reference(requested_value)
-        matches = [drawing for drawing in drawings if requested and
-                   reference(drawing.get("name")) == requested]
-        if len(matches) == 1:
-            selected_drawing = matches[0]
-        elif len(drawings) == 1 and not requested:
-            selected_drawing = drawings[0]
-        elif drawings and not requested:
-            drawing_selection = {
-                "status": "unassigned", "reason": UNASSIGNED_DRAWING,
-                "candidates": drawing_identities,
-            }
-        elif drawings:
-            # A newer letter revision of the same drawing may replace an archived
-            # request. Never select a different numbered roof/drawing series.
-            def series(name):
-                match = re.fullmatch(r"((?:[a-z]{2}|d\.s-)?\d+_\d+\.\d+)-([a-z]+)", reference(name))
-                return (match[1].lower(), match[2].upper()) if match else None
-            wanted = series(requested_value)
-            same_series = []
-            for drawing in drawings:
-                candidate = series(drawing.get("name"))
-                if (wanted and candidate and candidate[0] == wanted[0]
-                        and (len(candidate[1]), candidate[1]) > (len(wanted[1]), wanted[1])):
-                    same_series.append(drawing)
-            if len(same_series) == 1:
-                selected_drawing = same_series[0]
-            else:
-                drawing_selection = unmatched_review_prefix()
-        elif drawing_selection and drawing_selection["status"] == "baseline_reference":
-            drawing_selection = unmatched_review_prefix()
-        if drawing_selection is None or drawing_selection["status"] not in {"unassigned", "unmatched_review_prefix"}:
-            apply_columns(project, "project", tuple(label for label in FIELD_NAMES if label != "Drawing Reference"))
-        title = next((col for col in _columns(project) if col["id"] == "text3__1"), None)
-        if title is not None:
-            apply("Drawing Title", _read_column(title, dependencies, gateway), project, title["id"])
-        if selected_drawing is not None:
-            name = str(selected_drawing.get("name") or "")
-            if tp_reference_revision(name, confirmed_crm=True, review_prefix=True):
-                apply("Drawing Reference", name, selected_drawing, "name")
-            apply_columns(selected_drawing, "drawing")
-
-    apply_columns(holding, "holding", tuple(label for label in FIELD_NAMES if label != "Drawing Reference")
-                  if projects else FIELD_NAMES)
-    accounts = _relation(columns["board_relation_mm3c4g5x"], dependencies)
-    if len(accounts) > 1:
-        require_review("Company", "Several Accounts exist; specification Company is ambiguous")
-    apply("Company", accounts[0]["name"] if accounts else None, holding, "board_relation_mm3c4g5x")
-    apply("Date Received", _read_column(columns["date_mkpb23av"], dependencies, gateway), holding, "date_mkpb23av")
-    # Re-evaluate attachment candidates with the now-confirmed CRM target. Only
-    # fallback fields change here; current non-empty CRM values keep precedence.
-    fallback, evidence_sources, scoped_issues = resolve_email_evidence(
-        extraction, (raw.get("Bauder Roof Num"), raw.get("Drawing Reference")),
-    )
-    for label in FIELD_NAMES:
-        if provenance[label].get("source") != "Monday CRM":
-            raw[label], provenance[label] = fallback[label], evidence_sources[label]
-            issues.pop(label, None)
-            if label in scoped_issues:
-                issues[label] = scoped_issues[label]
-    if drawing_selection and drawing_selection["status"] == "unassigned":
-        issues["Drawing Reference"] = UNASSIGNED_DRAWING
-        provenance["Drawing Reference"]["status"] = "conflict"
-    elif drawing_selection and drawing_selection["status"] == "unmatched_review_prefix":
-        if raw.get("Drawing Reference") is None:
-            # A baseline identity is not request evidence; it is published only for review.
-            raw["Drawing Reference"] = normalize_reference_dashes(drawing_selection["reference"])
-            provenance["Drawing Reference"] = {
-                "source": "Email/Attachment", "selected": None,
-                "candidates": drawing_selection.get("evidence", []),
-                "rationale": "Existing drawing identity; no single linked drawing matches",
-            }
-        if issues.get("Drawing Reference") in {None, REVIEW_PREFIX_REFERENCE}:
-            issues["Drawing Reference"] = UNMATCHED_REVIEW_PREFIX
-        provenance["Drawing Reference"]["status"] = "conflict"
-    confirmed_reference = provenance["Drawing Reference"].get("source") == "Monday CRM" or any(
-        e.get("issuer") == "TaperedPlus" for e in provenance["Drawing Reference"].get("candidates", [])
-    )
-    suffix = tp_reference_revision(raw.get("Drawing Reference"), confirmed_crm=confirmed_reference, review_prefix=True)
-    if raw.get("Drawing Reference") and suffix is None:
-        issues["Drawing Reference"] = "Reference is not a verified TaperedPlus drawing"
-    if review_prefix_reference(raw.get("Drawing Reference")):
-        # Accepted, including from CRM, but never published as a verified TP drawing.
-        issues.setdefault("Drawing Reference", REVIEW_PREFIX_REFERENCE)
-    if suffix:
-        rejected_revisions = provenance["Revision"].get("rejectedCandidates", [])
-        revision_value = raw.get("Revision")
-        if provenance["Revision"].get("source") != "Monday CRM" and raw.get("Drawing Reference") != fallback.get("Drawing Reference"):
-            revision_value = None  # An older requested drawing does not define the replacement's revision.
-        # A compatible letter mirror is retained as provenance but cannot replace
-        # the full TP reference suffix. A conflicting suffix/letter requires review.
-        if revision_value and revision_value.casefold() not in {suffix.casefold(), suffix.rsplit("-", 1)[-1].strip().casefold()}:
-            issues["Revision"] = "Revision conflicts with the selected TaperedPlus drawing reference"
-        elif not any(e["status"] == "unverified" for e in rejected_revisions):
-            issues.pop("Revision", None)
-        raw["Revision"] = suffix
-        provenance["Revision"] = {"source": "Derived", "status": "provided", "from": "Drawing Reference",
-                                  "referenceSource": provenance["Drawing Reference"], "observedRevision": revision_value,
-                                  **({"rejectedCandidates": rejected_revisions} if rejected_revisions else {})}
-    elif raw.get("Revision"):
-        issues["Revision"] = "Revision requires a verified TaperedPlus Drawing Reference"
-    if raw.get("Date Received"):
-        formatted = format_date_for_monday(raw["Date Received"])
-        if not formatted:
-            raise SpecificationSourceError("Date Received is not a supported date")
-        raw["Date Received"] = formatted
-    source = snapshot()
-    # Fully read, verified alternatives can be published as field review notes.
-    # Unverified evidence and incomplete/ambiguous CRM reads still fail the refresh.
-    publishable_conflicts = {
-        VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT, PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, MULTI_MATERIAL,
-        UNASSIGNED_DRAWING, REVIEW_PREFIX_REFERENCE, UNMATCHED_REVIEW_PREFIX,
-        "Revision conflicts with the selected TaperedPlus drawing reference",
-    }
-    if any(reason not in publishable_conflicts
-           or label not in extraction.get("specificationAssessedFields", [])
-           or any(candidate["status"] == "unverified"
-                  for candidate in provenance[label].get("rejectedCandidates", []))
-           for label, reason in issues.items()):
-        raise SpecificationReviewRequired(source, issues)
-    return source
+def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None = None, *, review_state=None):
+    """Resolve email-first recommendations and durable PDF-only decisions."""
+    from .specification_review_sources import resolve_review_sources
+    return resolve_review_sources(gateway, item, previous, review_state=review_state)

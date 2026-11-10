@@ -13,7 +13,7 @@ from dateutil.parser import isoparse, parse as parse_datetime
 from .specification_semantics import (
     COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, FIELD_DEFINITIONS, REFERENCE_FIELDS, REFERENCE_TEXT_PATTERN,
     U_VALUE_FIELDS, SpecificationEvidence, SpecificationRequestNote, drawing_reference_key, missing,
-    normalize_reference_dashes, normalize_unit_spacing, review_prefix_reference, scale_ratio, tp_reference_revision,
+    normalize_reference_dashes, normalize_unit_spacing, scale_ratio, tp_reference_revision,
 )
 from .specification_request_context import (
     CLIENT_FIELDS, attachment_message, client_evidence_applies,
@@ -31,9 +31,6 @@ PAGE_SIZE_UNCERTAIN = "Ambiguous title-block paper size requires confirmation"
 # Extraction cannot read Monday CRM. The publisher confirms such a literal D.S/bare
 # reference against a CRM drawing or replaces this with a review-required issue.
 UNCONFIRMED_REFERENCE = "Drawing Reference requires Monday CRM confirmation as a TaperedPlus drawing"
-# A literal reference with another two-letter prefix (e.g. FA18910_26.01 - A) is
-# accepted, but never as a verified TP drawing: it is always published for review.
-REVIEW_PREFIX_REFERENCE = "Drawing Reference prefix is not TP; confirm this drawing reference"
 
 
 def _parse_message_date(value):
@@ -160,7 +157,7 @@ def _title_block_reference_parts(snippet):
     revisions = re.findall(r"\brev(?:ision)?[\s:|=.-]*([A-Z]+)(?!\w)", text, re.IGNORECASE)
     if len(numbers) != 1 or len(revisions) != 1:
         return None
-    suffix = tp_reference_revision(numbers[0], confirmed_crm=True, review_prefix=True)
+    suffix = tp_reference_revision(numbers[0], confirmed_crm=True)
     if not suffix or not re.fullmatch(r"\d+\.\d+", suffix):
         return None  # An already combined reference cannot acquire another letter.
     return numbers[0], revisions[0]
@@ -187,7 +184,7 @@ def _value_supported(evidence):
         # Some responses redundantly split an already literal reference at '_'.
         # The full identifier must still occur contiguously in this same excerpt.
         literal = parts[0] + "_" + parts[1]
-        suffix = tp_reference_revision(literal, confirmed_crm=True, review_prefix=True)
+        suffix = tp_reference_revision(literal, confirmed_crm=True)
         if suffix and _contains_reference(literal, snippet):
             expected = literal if evidence["field"] == "Drawing Reference" else suffix
             if _reference_normal(value) == _reference_normal(expected):
@@ -198,23 +195,23 @@ def _value_supported(evidence):
         # Accept only that exact reference, with an unrevised number and letter;
         # never assemble pieces from unrelated passages.
         literal_reference = (
-            re.fullmatch(r"\d+\.\d+", tp_reference_revision(parts[0], confirmed_crm=True, review_prefix=True) or "")
+            re.fullmatch(r"\d+\.\d+", tp_reference_revision(parts[0], confirmed_crm=True) or "")
             and re.fullmatch(r"[A-Za-z]+", parts[1]) and _contains_reference(combined, snippet)
         )
         if not (separate_cells or literal_reference):
             return False
         expected = (combined if evidence["field"] == "Drawing Reference"
-                    else tp_reference_revision(combined, confirmed_crm=True, review_prefix=True))
+                    else tp_reference_revision(combined, confirmed_crm=True))
         return _reference_normal(value) == _reference_normal(expected)
     if evidence["field"] == "Revision":
         # A suffix follows '_' inside an identifier, where a word-boundary
         # substring check would otherwise reject a perfectly literal revision.
         for match in re.finditer(REFERENCE_TEXT_PATTERN, normalize_reference_dashes(snippet), re.IGNORECASE):
-            if _reference_normal(tp_reference_revision(match[0], confirmed_crm=True, review_prefix=True)) == _reference_normal(value):
+            if _reference_normal(tp_reference_revision(match[0], confirmed_crm=True)) == _reference_normal(value):
                 return True
         parts = _title_block_reference_parts(snippet)
         if parts:
-            suffix = tp_reference_revision(parts[0] + " - " + parts[1], confirmed_crm=True, review_prefix=True)
+            suffix = tp_reference_revision(parts[0] + " - " + parts[1], confirmed_crm=True)
             if _reference_normal(value) == _reference_normal(suffix):
                 return True
     if evidence["field"] in REFERENCE_FIELDS:
@@ -335,8 +332,7 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
 
         baseline_reference = (
             _include_baseline_references and label == "Drawing Reference" and evidence["role"] == "baseline"
-            and (tp_reference_revision(evidence["value"], confirmed_crm=evidence["issuer"] == "TaperedPlus")
-                 or review_prefix_reference(evidence["value"]))
+            and tp_reference_revision(evidence["value"], confirmed_crm=evidence["issuer"] == "TaperedPlus")
         )
         described_deck = label == "Decking" and evidence["role"] == "baseline"
         if evidence["role"] != "requested" and not baseline_reference and not described_deck:
@@ -354,10 +350,7 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
             reject("Evidence does not meet this field's required email/request scope")
             continue
         unconfirmed_reference = False
-        # A literal FA-style reference is accepted for review only, never as a
-        # verified TP drawing, so no issuer claim can confirm or reject it.
-        review_reference = label == "Drawing Reference" and review_prefix_reference(evidence["value"])
-        if label == "Drawing Reference" and not review_reference and not tp_reference_revision(evidence["value"]):
+        if label == "Drawing Reference" and not tp_reference_revision(evidence["value"]):
             # Unprefixed references require an explicit verified TP issuer claim
             # or, for a literal D.S/bare reference, Monday CRM confirmation.
             tp_issued = evidence["issuer"] == "TaperedPlus" and re.search(
@@ -369,7 +362,6 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
             # Another issuer cannot confirm the reference, so its quotation is moot.
             unconfirmed_reference = not tp_issued
         if (label == "Drawing Reference" and evidence["issuer"] and not unconfirmed_reference
-                and not review_reference
                 and not _contains_excerpt(evidence["issuer"], evidence["snippet"])
                 and not (evidence["issuer"] == "TaperedPlus" and (
                     re.match(r"TP\s*\d", evidence["value"], re.IGNORECASE)
@@ -490,8 +482,6 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         selected = current[0] if len(distinct) == 1 else None
         if selected is not None and all(e.get("crmConfirmation") == "required" for e in current):
             issues.setdefault(label, UNCONFIRMED_REFERENCE)
-        if label == "Drawing Reference" and selected is not None and review_prefix_reference(selected["value"]):
-            issues.setdefault(label, REVIEW_PREFIX_REFERENCE)
         scalar = extracted.get(label, extracted.get(label.replace("U Value", "U-Value")))
         if selected is None and not missing(scalar):
             issues.setdefault(label, "Populated extraction has no verified applicable evidence")

@@ -1,0 +1,58 @@
+# Run the audit first and create only missing subscriptions. Use the existing
+# authenticated webhook URL. Do not provision subscriptions on application start.
+# Apply CreateSpecificationSourceWebhooks to the configured project board and
+# each ordinary Account/Contact/mirror-source board read by the column map.
+# Apply CreateSpecificationDrawingWebhooks to the main/parent PROJECT board ID,
+# never the hidden drawing subitem board ID. Payloads identify the subitem board
+# and parent project; a new drawing wakes the indexed parent-project dependency.
+# Audit the parent project board before creating drawing subscriptions, including
+# those already described in create-webhook.txt. There is no subitem_restored
+# event; periodic source checks repair missed changes and restored drawings.
+# API reference: https://developer.monday.com/api-reference/reference/webhooks
+query AuditSpecificationSourceWebhooks($sourceBoardId: ID!) {
+  webhooks(board_id: $sourceBoardId, app_webhooks_only: false) {
+    id
+    board_id
+    event
+    config
+  }
+}
+
+mutation CreateSpecificationSourceWebhooks($sourceBoardId: ID!, $webhookUrl: String!) {
+  sourceFieldsChanged: create_webhook(
+    board_id: $sourceBoardId, url: $webhookUrl, event: change_column_value
+  ) { id board_id event config }
+  sourceRenamed: create_webhook(
+    board_id: $sourceBoardId, url: $webhookUrl, event: change_name
+  ) { id board_id event config }
+  sourceArchived: create_webhook(
+    board_id: $sourceBoardId, url: $webhookUrl, event: item_archived
+  ) { id board_id event config }
+  sourceDeleted: create_webhook(
+    board_id: $sourceBoardId, url: $webhookUrl, event: item_deleted
+  ) { id board_id event config }
+  sourceRestored: create_webhook(
+    board_id: $sourceBoardId, url: $webhookUrl, event: item_restored
+  ) { id board_id event config }
+}
+
+mutation CreateSpecificationDrawingWebhooks($projectBoardId: ID!, $webhookUrl: String!) {
+  drawingCreated: create_webhook(
+    board_id: $projectBoardId, url: $webhookUrl, event: create_subitem
+  ) { id board_id event config }
+  drawingFieldsChanged: create_webhook(
+    board_id: $projectBoardId, url: $webhookUrl, event: change_subitem_column_value
+  ) { id board_id event config }
+  drawingRenamed: create_webhook(
+    board_id: $projectBoardId, url: $webhookUrl, event: change_subitem_name
+  ) { id board_id event config }
+  drawingMoved: create_webhook(
+    board_id: $projectBoardId, url: $webhookUrl, event: move_subitem
+  ) { id board_id event config }
+  drawingArchived: create_webhook(
+    board_id: $projectBoardId, url: $webhookUrl, event: subitem_archived
+  ) { id board_id event config }
+  drawingDeleted: create_webhook(
+    board_id: $projectBoardId, url: $webhookUrl, event: subitem_deleted
+  ) { id board_id event config }
+}

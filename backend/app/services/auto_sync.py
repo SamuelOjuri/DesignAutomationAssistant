@@ -449,6 +449,17 @@ def apply_auto_sync_policy_for_item(
     now = now or utc_now()
     policy = policy or policy_from_settings()
     metadata = item_metadata_from_monday_item(item, fallback_account_id=fallback_account_id)
+    if settings.performance_specification_enabled and metadata.board_id == str(settings.design_processing_board_id):
+        from .performance_specification import cancel_specification
+        from .specification_policy import specification_scope_exclusion
+
+        # Cancellation follows the live specification scope, independently of
+        # whether active-project ingestion tracks or excludes this item.
+        # Do this before taking Task/metadata locks, as the webhook path does.
+        if specification_scope_exclusion(
+            board_id=metadata.board_id, group_id=metadata.group_id, item_state=metadata.source_state,
+        ) is not None:
+            cancel_specification(db, metadata.board_id, metadata.item_id)
     decision = policy.classify_item(metadata.board_id, metadata.group_id, metadata.source_state)
 
     if not decision.should_track_task:

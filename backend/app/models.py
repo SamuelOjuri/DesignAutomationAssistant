@@ -540,6 +540,141 @@ class PerformanceSpecificationArtifact(Base):
     last_error = Column(Text, nullable=True)
 
 
+class PerformanceSpecificationReview(Base):
+    """Durable human decisions, independent of worker-owned processing JSON."""
+
+    __tablename__ = "performance_specification_reviews"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["board_id", "item_id"],
+            ["performance_specifications.board_id", "performance_specifications.item_id"],
+            name="fk_spec_review_specification",
+        ),
+        UniqueConstraint("monday_account_id", "board_id", "item_id", name="uq_spec_review_tenant_item"),
+        ForeignKeyConstraint(
+            ["monday_account_id", "board_id", "item_id", "current_approval_id"],
+            ["performance_specification_approvals.monday_account_id",
+             "performance_specification_approvals.board_id",
+             "performance_specification_approvals.item_id",
+             "performance_specification_approvals.id"],
+            name="fk_spec_review_current_approval", use_alter=True,
+        ),
+        CheckConstraint("review_version >= 0 AND schema_version > 0", name="ck_spec_review_versions"),
+        CheckConstraint("selected_request_type IS NULL OR selected_request_type IN ('new_enquiry', 'amendment')",
+                        name="ck_spec_review_request_type"),
+        CheckConstraint("(selected_project_board_id IS NULL) = (selected_project_item_id IS NULL)",
+                        name="ck_spec_review_project_pair"),
+        CheckConstraint("(selected_drawing_board_id IS NULL) = (selected_drawing_item_id IS NULL)",
+                        name="ck_spec_review_drawing_pair"),
+        CheckConstraint("selected_drawing_item_id IS NULL OR selected_project_item_id IS NOT NULL",
+                        name="ck_spec_review_drawing_project"),
+    )
+
+    board_id = Column(String, primary_key=True)
+    item_id = Column(String, primary_key=True)
+    monday_account_id = Column(String, nullable=False)
+    review_version = Column(Integer, nullable=False, default=0, server_default="0")
+    schema_version = Column(Integer, nullable=False, default=1, server_default="1")
+    source_fingerprint = Column(String, nullable=False)
+    source_identity_json = Column(JSON, nullable=False)
+    decision_digest = Column(String(64), nullable=False)
+    selected_request_type = Column(String, nullable=True)
+    selected_project_board_id = Column(String, nullable=True)
+    selected_project_item_id = Column(String, nullable=True)
+    selected_drawing_board_id = Column(String, nullable=True)
+    selected_drawing_item_id = Column(String, nullable=True)
+    field_decisions_json = Column(JSON, nullable=False, default=dict, server_default="{}")
+    source_dispositions_json = Column(JSON, nullable=False, default=list, server_default="[]")
+    desired_publication_identity = Column(String, nullable=True)
+    current_approval_id = Column(UUID(as_uuid=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class PerformanceSpecificationReviewEvent(Base):
+    """Append-only command results and audit history; no credential material."""
+
+    __tablename__ = "performance_specification_review_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["monday_account_id", "board_id", "item_id"],
+            ["performance_specification_reviews.monday_account_id",
+             "performance_specification_reviews.board_id", "performance_specification_reviews.item_id"],
+            name="fk_spec_review_event_review",
+        ),
+        UniqueConstraint("monday_account_id", "board_id", "item_id", "actor_monday_user_id", "idempotency_key",
+                         name="uq_spec_review_event_idempotency"),
+        CheckConstraint("prior_review_version >= 0 AND resulting_review_version >= prior_review_version",
+                        name="ck_spec_review_event_versions"),
+        Index("ix_spec_review_events_item_created", "board_id", "item_id", "created_at"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=func.gen_random_uuid())
+    monday_account_id = Column(String, nullable=False)
+    board_id = Column(String, nullable=False)
+    item_id = Column(String, nullable=False)
+    actor_app_user_id = Column(String, nullable=False)
+    actor_monday_user_id = Column(String, nullable=True)  # Null for trusted source-refresh workers.
+    command_type = Column(String, nullable=False)
+    prior_review_version = Column(Integer, nullable=False)
+    resulting_review_version = Column(Integer, nullable=False)
+    original_decisions_json = Column(JSON, nullable=False)
+    replacement_decisions_json = Column(JSON, nullable=False)
+    source_snapshot_json = Column(JSON, nullable=True)
+    base_source_fingerprint = Column(String, nullable=False)
+    explanation = Column(Text, nullable=True)
+    idempotency_key = Column(String(128), nullable=True)  # System observations are not reviewer commands.
+    request_digest = Column(String(64), nullable=False)
+    result_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PerformanceSpecificationApproval(Base):
+    """Immutable approval of an exact artifact and decision/source identity."""
+
+    __tablename__ = "performance_specification_approvals"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["monday_account_id", "board_id", "item_id"],
+            ["performance_specification_reviews.monday_account_id",
+             "performance_specification_reviews.board_id", "performance_specification_reviews.item_id"],
+            name="fk_spec_approval_review",
+        ),
+        ForeignKeyConstraint(
+            ["board_id", "item_id", "artifact_revision"],
+            ["performance_specification_artifacts.board_id", "performance_specification_artifacts.item_id",
+             "performance_specification_artifacts.revision"],
+            name="fk_spec_approval_artifact",
+        ),
+        UniqueConstraint("monday_account_id", "board_id", "item_id", "id", name="uq_spec_approval_tenant_item_id"),
+        CheckConstraint("review_version >= 0", name="ck_spec_approval_review_version"),
+        CheckConstraint("(selected_project_board_id IS NULL) = (selected_project_item_id IS NULL)",
+                        name="ck_spec_approval_project_pair"),
+        CheckConstraint("(selected_drawing_board_id IS NULL) = (selected_drawing_item_id IS NULL)",
+                        name="ck_spec_approval_drawing_pair"),
+        CheckConstraint("selected_drawing_item_id IS NULL OR selected_project_item_id IS NOT NULL",
+                        name="ck_spec_approval_drawing_project"),
+        Index("ix_spec_approvals_item_approved", "board_id", "item_id", "approved_at"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=func.gen_random_uuid())
+    monday_account_id = Column(String, nullable=False)
+    board_id = Column(String, nullable=False)
+    item_id = Column(String, nullable=False)
+    artifact_revision = Column(String, nullable=False)
+    review_version = Column(Integer, nullable=False)
+    source_fingerprint = Column(String, nullable=False)
+    extraction_identity = Column(String, nullable=False)
+    decision_digest = Column(String(64), nullable=False)
+    selected_project_board_id = Column(String, nullable=True)
+    selected_project_item_id = Column(String, nullable=True)
+    selected_drawing_board_id = Column(String, nullable=True)
+    selected_drawing_item_id = Column(String, nullable=True)
+    actor_app_user_id = Column(String, nullable=False)
+    actor_monday_user_id = Column(String, nullable=False)
+    approved_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class DesignProcessingJob(Base):
     __tablename__ = "design_processing_jobs"
     __table_args__ = (

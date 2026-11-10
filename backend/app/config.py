@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from .gemini_models import ThinkingLevel, validate_thinking_level
 from .services.legacy_enquiry import LEGACY_MANIFEST_DIGEST
 
-DESIGN_PROCESSING_PIPELINE_REVISION = "output-v17"
+DESIGN_PROCESSING_PIPELINE_REVISION = "output-v18"
 
 class Settings(BaseSettings):
     # monday
@@ -78,8 +78,19 @@ class Settings(BaseSettings):
     monday_ingestion_access_token: Optional[str] = None
     monday_api_version: str = "2025-04"
 
-    # Independent, active-group-only CAD specification publication.
+    # Independent Landing Zone-only specification processing/publication.
     performance_specification_enabled: bool = False
+    # Roll out specifications independently from legacy design extraction/output.
+    # Both this explicit mode and the publisher master switch must permit work.
+    performance_specification_mode: Literal["off", "shadow", "allowlist", "enabled"] = "off"
+    performance_specification_allowlist_item_ids: Annotated[list[str], NoDecode] = Field(
+        default_factory=list
+    )
+    # V1 grants reviewer authority to every authenticated Monday user with item
+    # access. Assigned reviewer roles/user allowlists are a deployment V2 feature.
+    performance_specification_review_enabled: bool = False
+    performance_specification_review_session_ttl_seconds: int = Field(default=900, ge=60, le=3600)
+    performance_specification_review_monday_account_id: Optional[str] = Field(default=None, pattern=r"^[1-9][0-9]*$")
     performance_specification_recheck_seconds: int = Field(default=3600, ge=30)
     performance_specification_column_map: dict[str, dict[str, str]] = Field(default_factory=dict)
     # Optional holding-board source files in addition to embedded email attachments.
@@ -144,7 +155,7 @@ class Settings(BaseSettings):
             raise ValueError("app_session_cookie_samesite must be lax, strict, or none")
         return value
 
-    @field_validator("design_processing_mode", mode="before")
+    @field_validator("design_processing_mode", "performance_specification_mode", mode="before")
     @classmethod
     def _normalize_design_processing_mode(cls, v: str) -> str:
         return str(v).strip().lower()
@@ -237,6 +248,38 @@ class Settings(BaseSettings):
                 normalized.append(value)
         return normalized
 
+    @field_validator("performance_specification_allowlist_item_ids", mode="before")
+    @classmethod
+    def _normalize_specification_allowlist(cls, value: object) -> list[str]:
+        field_name = "performance_specification_allowlist_item_ids"
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            raw_value = value.strip()
+            if not raw_value:
+                return []
+            if raw_value.startswith("["):
+                try:
+                    values = json.loads(raw_value)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"{field_name} must be CSV or a JSON array") from exc
+            else:
+                values = raw_value.split(",")
+        elif isinstance(value, (list, tuple, set)):
+            values = value
+        else:
+            raise ValueError(f"{field_name} must be CSV or a JSON array")
+        if not isinstance(values, (list, tuple, set)):
+            raise ValueError(f"{field_name} must be CSV or a JSON array")
+        normalized: list[str] = []
+        for item_id in values:
+            text = str(item_id).strip()
+            if isinstance(item_id, bool) or not re.fullmatch(r"[1-9][0-9]*", text):
+                raise ValueError(f"{field_name} must contain positive decimal IDs")
+            if text not in normalized:
+                normalized.append(text)
+        return normalized
+
     @field_validator("design_processing_activation_timestamp")
     @classmethod
     def _normalize_design_processing_activation_timestamp(
@@ -260,6 +303,14 @@ class Settings(BaseSettings):
             raise ValueError(
                 "chat_retrieval_max_chunks_per_file must be less than or equal to "
                 "chat_retrieval_max_evidence_chunks"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_specification_rollout(self) -> "Settings":
+        if self.performance_specification_mode == "allowlist" and not self.performance_specification_allowlist_item_ids:
+            raise ValueError(
+                "performance_specification_allowlist_item_ids must not be empty in allowlist mode"
             )
         return self
 

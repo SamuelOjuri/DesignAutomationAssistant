@@ -29,8 +29,9 @@ from backend.app.services.performance_specification_contract import (
 )
 from backend.app.services.performance_specification_pdf import render_performance_specification_pdf
 from backend.app.services.performance_specification_sources import (
-    SpecificationSourceError, active_specification_group_ids, resolve_specification_sources,
+    SpecificationSourceError, resolve_specification_sources,
 )
+from backend.app.services.specification_policy import eligible_specification_group_ids
 from backend.app.services.specification_semantics import EVIDENCE_VERSION, canonical_label
 from backend.app.services.sync_pipeline import _is_ai_data_pdf_preview
 
@@ -54,7 +55,7 @@ def relation(column_id, values):
 
 
 def translation_payload(raw):
-    aliases = {"1 : 100": "1:100", "A1": "ISO A1", "TR27": "Tissue Faced PIR"}
+    aliases = {"1 : 100": "1:100", "1 : 50": "1:50", "A1": "ISO A1", "TR27": "Tissue Faced PIR"}
     values = {label: raw.get(label) for label in FIELD_NAMES}
     values["Incoming Information"] = ""
     for label in OPTIONS:
@@ -69,6 +70,14 @@ def with_evidence(extraction):
     facts = {canonical_label(label): value for label, value in extraction["performanceParameters"].items() if value is not None}
     text = "\n".join(f"{label}: {value}" for label, value in facts.items())
     return {**extraction, "specificationEvidenceVersion": EVIDENCE_VERSION,
+            "requestIntentSchemaVersion": 1,
+            "specificationRequestIntent": extraction.get("specificationRequestIntent") or {
+                "recommended_type": "amendment", "explanation": "The selected client requests an amendment.",
+                "evidence": [{"source_id": "email:body", "excerpt": text.splitlines()[0],
+                              "location": "email body"}],
+                "matched_projects": [{"record": {"board_id": PROJECT_BOARD, "item_id": "901"},
+                                      "rationale": "Relevant requested reference matches the project"}],
+            },
             "specificationAssessedFields": list(FIELD_NAMES),
             "sourceManifest": [{"sourceId": "email:body", "filename": "request.eml", "sourceType": "email_body",
                                 "contentSha256": "abc", "status": "read", "text": text, "observedAt": "2026-10-29T12:00:00+00:00"}],
@@ -100,10 +109,10 @@ class Storage:
 
 class Gateway:
     def __init__(self):
-        self.target = SimpleNamespace(board_id=BOARD, item_id=ITEM, group_id="topics",
+        self.target = SimpleNamespace(board_id=BOARD, item_id=ITEM, group_id=settings.design_processing_landing_group_id,
                                       item_state="active", input_revision="email-v1")
         self.holding = {
-            "id": ITEM, "board": {"id": BOARD}, "state": "active", "group": {"id": "topics"},
+            "id": ITEM, "board": {"id": BOARD}, "state": "active", "group": {"id": settings.design_processing_landing_group_id},
             "column_values": [
                 relation("board_relation_mkpbm5np", [{"id": "901", "name": "00901", "board": {"id": PROJECT_BOARD}}]),
                 relation("board_relation_mm3c4g5x", [{"id": "801", "name": "Acme, Limited", "board": {"id": "1654217230"}}]),
@@ -112,7 +121,10 @@ class Gateway:
         }
         self.project = {
             "id": "901", "board": {"id": PROJECT_BOARD}, "state": "active",
-            "column_values": [column("text3__1", "Project Name", "Warehouse South")],
+            "column_values": [column("text3__1", "Project Name", "Warehouse South"),
+                              {**relation("account", [{"id": "801", "name": "Acme, Limited",
+                                                        "board": {"id": "1654217230"}}]),
+                               "column": {"title": "Account"}}],
             "subitems": [{
                 "id": "9101", "name": "TP00901_26.01 - A", "state": "active", "board": {"id": "9000"},
                 "column_values": [column("mirror0__1", "U-Value", "0.2"),
@@ -152,6 +164,8 @@ class Gateway:
 @pytest.fixture()
 def case(monkeypatch):
     monkeypatch.setattr(settings, "performance_specification_enabled", True)
+    monkeypatch.setattr(settings, "performance_specification_mode", "enabled")
+    monkeypatch.setattr(settings, "performance_specification_allowlist_item_ids", [])
     monkeypatch.setattr(settings, "design_processing_mode", "enabled")
     monkeypatch.setattr(settings, "auto_sync_active_group_ids", "topics,group_mkpbd6vy,group_mkpbb3tx")
     monkeypatch.setattr(settings, "performance_specification_column_map", {})
@@ -159,7 +173,7 @@ def case(monkeypatch):
     Base.metadata.create_all(engine)
     with Session(engine, expire_on_commit=False) as db:
         raw = {"Scale": "1 : 100", "Page Size": "A1", "Drawing Reference": "TP00901_26.01 - A",
-               "Drawing Title": "Old title", "Date Received": "29 Oct 2026", "Company": "Email company",
+               "Drawing Title": "Old title", "Date Received": "29 Oct 2026", "Company": "Acme, Limited",
                "Contact": "Alex Example", "Target U-Value": "0.18", "Target Min U-Value": None,
                "Tapered Insulation": "TR27", "Decking": "Concrete", "Bauder Roof Num": "007"}
         item = DesignProcessingItem(
@@ -198,6 +212,19 @@ def current(case):
     return case.db.get(PerformanceSpecification, (BOARD, ITEM), populate_existing=True)
 
 
+def without_email(case, *labels):
+    """Exercise a CRM fallback only when the selected request omits that fact."""
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    for label in labels:
+        for key in list(extraction["performanceParameters"]):
+            if canonical_label(key) == label:
+                extraction["performanceParameters"][key] = None
+    extraction["specificationEvidence"] = [fact for fact in extraction["specificationEvidence"]
+                                           if canonical_label(fact["field"]) not in labels]
+    case.item.extracted_parameters_json = extraction
+    case.db.commit()
+
+
 @pytest.fixture()
 def contact_case(case):
     drawing = case.gateway.project["subitems"][0]
@@ -230,6 +257,7 @@ def contact_case(case):
 
 def test_selected_drawing_contact_publishes_despite_project_contact_rollup(contact_case):
     case = contact_case
+    without_email(case, "Contact")
     assert run(case) == ["published"]
     source = current(case).source_json
     assert source["drawingItemId"] == "9101"
@@ -254,13 +282,14 @@ def test_contact_fallback_uses_email_without_project_rollup(contact_case, contac
         case.gateway.project["subitems"] = []
     source = resolve_specification_sources(case.gateway, case.item)
     assert source["raw"]["Contact"] == "Alex Example"
-    assert source["sources"]["Contact"]["source"] == "Email/Attachment"
+    assert source["sources"]["Contact"]["source"] == "Email Context"
     assert not any(read["columnId"] == "lookup_mm0mm6ff" for read in source["crmReads"])
 
 
 @pytest.mark.parametrize("failure", ["unresolved", "conflicting"])
-def test_invalid_selected_contact_retains_previous_pdf(contact_case, failure):
+def test_invalid_selected_contact_publishes_visible_recommendation_problem(contact_case, failure):
     case = contact_case
+    without_email(case, "Contact")
     assert run(case) == ["published"]
     revision = current(case).current_revision
     if failure == "unresolved":
@@ -269,59 +298,62 @@ def test_invalid_selected_contact_retains_previous_pdf(contact_case, failure):
         value = case.drawing_contact["mirrored_items"][0]["mirrored_value"]
         value["linked_item_ids"].append("556")
         value["linked_items"].append({"id": "556", "name": "Another requester", "board": {"id": "666"}})
-    assert run(case) == ["failed"]
-    assert current(case).current_revision == revision
-    assert len(case.gateway.uploads) == 1 and not case.gateway.deletes
-    if failure == "unresolved":
-        assert current(case).review_json["status"] == "source_failure"
-    else:
-        assert current(case).review_json["status"] == "conflict"
-        assert "Contact" in current(case).review_json["issues"]
+    assert run(case) == ["published"]
+    assert current(case).current_revision != revision
+    assert current(case).review_json["status"] == "published_with_review"
+    assert "Contact" in current(case).review_json["issues"]
+    assert current(case).source_json["reviewSource"]["fields"]["Contact"]["proposal"]["source"] == "unavailable"
 
 
-def test_contact_selection_preserves_holding_override(contact_case):
+def test_contact_selection_ignores_holding_value_and_preserves_email_requester(contact_case):
     case = contact_case
     override = column("request_contact", "Contact", "Holding requester")
     case.gateway.holding["column_values"].append(override)
     source = resolve_specification_sources(case.gateway, case.item)
-    assert source["raw"]["Contact"] == "Holding requester"
-    assert source["sources"]["Contact"]["itemId"] == ITEM
+    assert source["raw"]["Contact"] == "Alex Example"
+    assert source["sources"]["Contact"]["source"] == "Email Context"
     override["text"] = None
-    assert resolve_specification_sources(case.gateway, case.item)["raw"]["Contact"] == "Example, Sam"
+    assert resolve_specification_sources(case.gateway, case.item)["raw"]["Contact"] == "Alex Example"
 
 
 def test_ambiguous_drawing_does_not_choose_contact_from_project_rollup(contact_case):
     case = contact_case
     case.gateway.project["subitems"][1]["name"] = "TP00901_26.03 - A"
-    assert run(case) == ["failed"]
-    assert "missing or ambiguous" in current(case).review_json["issues"]["Drawing Reference"]
-    assert not case.gateway.uploads
+    assert run(case) == ["published"]
+    assert current(case).source_json["drawingItemId"] is None
+    assert "matches no single" in current(case).review_json["issues"]["Drawing Reference"]
+    assert current(case).source_json["raw"]["Contact"] == "Alex Example"
+    assert all(read["itemId"] in {"901", ITEM} for read in current(case).source_json["crmReads"])
 
 
 def test_project_contact_requires_explicit_mapping(case, monkeypatch):
     case.gateway.project["column_values"].append(column("request_contact", "Contact", "Project requester"))
     assert resolve_specification_sources(case.gateway, case.item)["raw"]["Contact"] == "Alex Example"
     monkeypatch.setattr(settings, "performance_specification_column_map", {"project": {"Contact": "request_contact"}})
+    without_email(case, "Contact")
     source = resolve_specification_sources(case.gateway, case.item)
     assert source["raw"]["Contact"] == "Project requester"
     assert source["sources"]["Contact"]["columnId"] == "request_contact"
     case.gateway.project["column_values"].pop()
-    with pytest.raises(SpecificationSourceError, match="Configured project column for Contact is missing"):
-        resolve_specification_sources(case.gateway, case.item)
+    source = resolve_specification_sources(case.gateway, case.item)
+    assert "Configured project column for Contact is missing" in source["issues"]["Contact"]
 
 
 def test_explicit_project_contact_mapping_still_validates_source(contact_case, monkeypatch):
     case = contact_case
+    without_email(case, "Contact")
     monkeypatch.setattr(settings, "performance_specification_column_map", {"project": {"Contact": "lookup_mm0mm6ff"}})
-    with pytest.raises(SpecificationSourceError, match="Unsupported or unreadable mirrored"):
-        resolve_specification_sources(case.gateway, case.item)
-
-
-def test_resolves_current_crm_and_keeps_optional_roof_number_and_raw_insulation(case):
     source = resolve_specification_sources(case.gateway, case.item)
-    assert source["raw"]["Drawing Title"] == "Warehouse South"
+    assert any(read["field"] == "Contact" and read["status"] == "unavailable"
+               and "Unsupported or unreadable mirrored" in read["reason"] for read in source["crmReads"])
+    assert source["raw"]["Contact"] == "Example, Sam"
+
+
+def test_email_values_win_and_amendment_project_account_is_recommended(case):
+    source = resolve_specification_sources(case.gateway, case.item)
+    assert source["raw"]["Drawing Title"] == "Old title"
     assert source["raw"]["Company"] == "Acme, Limited"
-    assert source["raw"]["Target U Value"] == "0.2"
+    assert source["raw"]["Target U Value"] == "0.18"
     assert source["raw"]["Bauder Roof Num"] == "007"
     assert source["raw"]["Tapered Insulation"] == "TR27"
     assert source["raw"]["Incoming Information"] == ""
@@ -347,6 +379,7 @@ def test_conflicting_crm_revision_publishes_both_values_for_review(case):
 
 
 def test_known_unmapped_product_publishes_review_details_and_reuses_cached_pdf(case):
+    without_email(case, "Tapered Insulation")
     assert run(case) == ["published"]
     previous_revision = current(case).current_revision
     case.gateway.project["subitems"][0]["column_values"][1]["text"] = "BauderROCK"
@@ -365,7 +398,7 @@ def test_known_unmapped_product_publishes_review_details_and_reuses_cached_pdf(c
     assert run(case) == ["published"]
     assert len(calls) == 2  # One bounded evidence-aware recovery pass.
     assert "Shared field meanings" in calls[0]
-    assert "sourceManifest" in calls[0]
+    assert '"fields"' in calls[0]
     assert current(case).current_revision != previous_revision
     assert current(case).review_json["status"] == "published_with_review"
     assert current(case).review_json["source"]["raw"]["Tapered Insulation"] == "BauderROCK"
@@ -464,7 +497,16 @@ def test_different_roof_values_are_not_flattened_and_confirmed_scope_resolves(ca
     assert "Decking: Review required" in text
     assert "Timber (18mm) (Roof 1)" in text and "Concrete (Roof 5)" in text
     assert "Decking: Not Provided" not in text
-    case.gateway.holding["column_values"].append(column("roof", "Bauder Roof Num", "5"))
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    extraction["performanceParameters"]["Bauder Roof Num"] = "5"
+    extraction["sourceManifest"][0]["text"] += "\nBauder Roof Num: 5"
+    extraction["specificationEvidence"] = [fact for fact in extraction["specificationEvidence"]
+                                           if fact["field"] != "Bauder Roof Num"]
+    extraction["specificationEvidence"].append({"field": "Bauder Roof Num", "value": "5",
+        "source_id": "email:body", "location": "email body", "snippet": "Bauder Roof Num: 5",
+        "scope": None, "issuer": None, "role": "requested", "request_role": "direct_request", "rationale": "Selected roof"})
+    case.item.extracted_parameters_json = extraction
+    case.db.commit()
     assert run(case) == ["published"]
     assert current(case).source_json["raw"]["Decking"] == "Concrete"
     assert current(case).review_json is None
@@ -472,6 +514,7 @@ def test_different_roof_values_are_not_flattened_and_confirmed_scope_resolves(ca
 
 
 def test_roof_conflict_and_unmapped_material_publish_together(case):
+    without_email(case, "Tapered Insulation")
     roof_evidence(case, [("Roof 1", "Timber (18mm)"), ("Roof 5", "Concrete")])
     case.gateway.project["subitems"][0]["column_values"][1]["text"] = "BauderROCK"
     calls = []
@@ -514,10 +557,10 @@ def test_model_cannot_choose_one_conflicting_deck_or_inject_review_notes(case):
 
 def test_shadow_review_and_lost_upload_reuse_review_notes(case, monkeypatch):
     roof_evidence(case, [("Roof 1", "Timber (18mm)"), ("Roof 5", "Concrete")])
-    monkeypatch.setattr(settings, "design_processing_mode", "shadow")
+    monkeypatch.setattr(settings, "performance_specification_mode", "shadow")
     assert run(case) == ["rendered"] and not case.gateway.uploads
     assert current(case).review_json["status"] == "rendered_with_review"
-    monkeypatch.setattr(settings, "design_processing_mode", "enabled")
+    monkeypatch.setattr(settings, "performance_specification_mode", "enabled")
     def timeout():
         case.gateway.on_upload = None
         raise TimeoutError("lost upload response")
@@ -530,7 +573,7 @@ def test_shadow_review_and_lost_upload_reuse_review_notes(case, monkeypatch):
 
 def test_source_changes_during_review_translation_remain_fenced(case):
     roof_evidence(case, [("Roof 1", "Timber (18mm)"), ("Roof 5", "Concrete")])
-    case.on_translate.append(lambda: case.gateway.holding["column_values"].append(column("roof", "Bauder Roof Num", "5")))
+    case.on_translate.append(lambda: case.gateway.project["column_values"][1]["linked_items"][0].update(name="Changed Account"))
     assert run(case) == ["superseded"] and not case.gateway.uploads
 
 
@@ -602,22 +645,23 @@ def test_people_mirror_preserves_name_with_comma_and_entity_identity(case):
     assert saved == [{"id": "55", "kind": "person", "name": "Example, Alex"}]
 
 
-def test_unreadable_people_is_not_a_missing_surveyor(case):
+def test_unreadable_people_is_a_visible_surveyor_recommendation_problem(case):
     case.gateway.project["subitems"][0]["column_values"].append({
         "id": "mirror92__1", "type": "people", "text": "Alex", "column": {"title": "Surveyor"}})
-    with pytest.raises(SpecificationSourceError, match="People"):
-        resolve_specification_sources(case.gateway, case.item)
+    source = resolve_specification_sources(case.gateway, case.item)
+    assert "People" in source["issues"]["Surveyor"]
+    assert source["reviewSource"]["fields"]["Surveyor"]["proposal"]["source"] == "unavailable"
 
 
 def test_artifact_keeps_immutable_input_snapshot_after_subsequent_refresh(case):
     assert run(case) == ["published"]
     original = case.db.get(PerformanceSpecificationArtifact, (BOARD, ITEM, current(case).current_revision))
     saved = deepcopy(original.source_json)
-    case.gateway.project["column_values"][0]["text"] = "Changed title"
+    case.gateway.project["column_values"][1]["linked_items"][0]["name"] = "Changed Account"
     assert run(case) == ["published"]
     case.db.refresh(original)
     assert original.source_json == saved
-    assert original.source_json["raw"]["Drawing Title"] == "Warehouse South"
+    assert original.source_json["raw"]["Drawing Title"] == "Old title"
     assert original.source_json["sources"]["Contact"]["selected"]["snippet"] == "Contact: Alex Example"
 
 
@@ -626,7 +670,7 @@ def test_llm_translation_is_structured_and_strict(case):
     translation = translate_specification(source["raw"], case.client)
     values = pdf_values(translation)
     assert values["Page Size"] == "ISO A1"
-    assert values["Target U Value"] == "0.20"
+    assert values["Target U Value"] == "0.18"
     assert values["Target Min U Value"] == "Not Provided"
     assert values["Incoming Information"] == ""
     assert values["Bauder Roof Num"] == "007"
@@ -648,7 +692,7 @@ def test_rejects_values_outside_cad_contract(label, value):
 
 def test_model_cannot_invent_missing_values_change_identifiers_or_numbers(case):
     raw = resolve_specification_sources(case.gateway, case.item)["raw"]
-    for label, invented in [("Bauder Roof Num", "7"), ("Target U Value", "0.18"), ("Surveyor", "Invented")]:
+    for label, invented in [("Bauder Roof Num", "7"), ("Target U Value", "0.19"), ("Surveyor", "Invented")]:
         payload = translation_payload(raw)
         payload["values"][label] = invented
         client = LegacyGeminiClient("gemini-3.8-flash", generate_content=lambda *args: SimpleNamespace(parsed=payload))
@@ -701,24 +745,25 @@ def test_translation_cannot_change_a_canonical_option_or_invent_an_unspecified_r
 def test_u_value_validation_distinguishes_units_from_additional_numbers(case, unit):
     raw = resolve_specification_sources(case.gateway, case.item)["raw"]
     payload = translation_payload(raw)
+    payload["values"]["Target U Value"] = "0.20"
     raw["Target U Value"] = f"0.20 {unit}"
     client = LegacyGeminiClient("gemini-3.8-flash", generate_content=lambda *args: SimpleNamespace(parsed=payload))
     assert pdf_values(translate_specification(raw, client))["Target U Value"] == "0.20"
 
 
-@pytest.mark.parametrize("group", ["group_mkpbd6vy", "group_mkpbb3tx", "other"])
+@pytest.mark.parametrize("group", ["topics", "group_mkpbs35c", "group_mkpbb3tx", "other"])
 def test_excluded_groups_never_translate_or_upload_even_if_configured_active(case, group):
     case.gateway.target.group_id = group
     assert run(case) == []
     assert not case.calls and not case.gateway.uploads
-    assert group not in active_specification_group_ids()
+    assert group not in eligible_specification_group_ids()
 
 
 def test_move_to_excluded_group_cancels_running_claim(case):
-    worker.enqueue_specification(case.db, BOARD, ITEM, group_id="topics", immediate=True)
+    worker.enqueue_specification(case.db, BOARD, ITEM, group_id=settings.design_processing_landing_group_id, immediate=True)
     case.db.commit()
     claim = worker.claim_specification(case.db)
-    case.gateway.target.group_id = "group_mkpbd6vy"
+    case.gateway.target.group_id = "topics"
     assert worker.execute_specification(case.db, claim, gateway=case.gateway,
                                        client=case.client, storage=case.storage) == "excluded"
     assert not case.calls and not case.gateway.uploads
@@ -736,6 +781,7 @@ def test_publishes_pdf_once_reuses_translation_and_preserves_other_files(case):
 
 
 def test_crm_change_refreshes_without_extraction_and_replaces_only_prior_specification(case):
+    without_email(case, "Target U Value")
     assert run(case) == ["published"]
     original = current(case).current_revision
     first_asset = case.gateway.uploads[0][0].asset_id
@@ -748,14 +794,14 @@ def test_crm_change_refreshes_without_extraction_and_replaces_only_prior_specifi
     assert len(case.gateway.files) == 3
 
 
-def test_confirmed_clear_uses_available_email_value_on_subsequent_refreshes(case):
+def test_ignored_crm_clear_keeps_current_email_value_and_artifact(case):
     assert run(case) == ["published"]
     case.gateway.project["subitems"][0]["column_values"][0]["text"] = None
-    assert run(case) == ["published"]
+    assert run(case) == ["unchanged"]
     record = current(case)
     assert record.source_json["raw"]["Target U Value"] == "0.18"
-    assert record.source_json["sources"]["Target U Value"]["source"] == "Email/Attachment"
-    assert any(read["field"] == "Target U Value" and read["status"] == "empty" for read in record.source_json["crmReads"])
+    assert record.source_json["sources"]["Target U Value"]["source"] == "Email Context"
+    assert not any(read["field"] == "Target U Value" for read in record.source_json["crmReads"])
     artifact = case.db.get(PerformanceSpecificationArtifact, (BOARD, ITEM, record.current_revision))
     assert artifact.translation_json["values"]["Target U Value"] == "0.18"
     assert run(case) == ["unchanged"]
@@ -764,7 +810,9 @@ def test_confirmed_clear_uses_available_email_value_on_subsequent_refreshes(case
 def test_read_failure_preserves_last_successful_pdf_and_retries(case):
     assert run(case) == ["published"]
     revision = current(case).current_revision
-    case.gateway.holding["column_values"].pop()
+    def unreadable(*args):
+        raise SpecificationSourceError("Holding item is unavailable")
+    case.gateway.fetch_holding = unreadable
     assert run(case) == ["failed"]
     assert current(case).current_revision == revision
     assert current(case).last_error
@@ -780,13 +828,13 @@ def test_request_without_drawing_reference_does_not_merge_linked_drawings(case):
     case.item.extracted_parameters_json = with_evidence(case.item.extracted_parameters_json)
     source = resolve_specification_sources(case.gateway, case.item)
     assert source["drawingItemId"] is None
-    assert source["drawingSelection"]["status"] == "unassigned"
+    assert source["drawingSelection"]["status"] == "ambiguous"
     assert "Drawing Reference" in source["issues"]
     assert source["raw"]["Target U Value"] == "0.18"
 
 
 def test_schema_valid_translation_cannot_publish_after_sources_change(case):
-    case.on_translate.append(lambda: case.gateway.project["column_values"][0].update(text="Changed title"))
+    case.on_translate.append(lambda: case.gateway.project["column_values"][1]["linked_items"][0].update(name="Changed Account"))
     assert run(case) == ["superseded"]
     assert not case.gateway.uploads
     assert current(case).current_revision is None
@@ -800,7 +848,7 @@ def test_group_move_during_translation_prevents_publication(case):
 
 
 def test_notification_during_translation_supersedes_generation(case):
-    case.on_translate.append(lambda: worker.enqueue_specification(case.db, BOARD, ITEM, group_id="topics"))
+    case.on_translate.append(lambda: worker.enqueue_specification(case.db, BOARD, ITEM, group_id=settings.design_processing_landing_group_id))
     assert run(case) == ["superseded"]
     assert not case.gateway.uploads
 
@@ -818,7 +866,7 @@ def test_upload_timeout_recovers_by_adoption_without_duplicate_upload(case):
 def test_change_during_upload_never_promotes_stale_result_and_cleans_it_after_replacement(case):
     def change():
         case.gateway.on_upload = None
-        case.gateway.project["column_values"][0]["text"] = "New project title"
+        case.gateway.project["column_values"][1]["linked_items"][0]["name"] = "Changed Account"
     case.gateway.on_upload = change
     assert run(case) == ["superseded"]
     assert current(case).current_revision is None
@@ -828,11 +876,11 @@ def test_change_during_upload_never_promotes_stale_result_and_cleans_it_after_re
 
 
 def test_shadow_mode_renders_without_monday_mutations_then_publishes_cached_result(case, monkeypatch):
-    monkeypatch.setattr(settings, "design_processing_mode", "shadow")
+    monkeypatch.setattr(settings, "performance_specification_mode", "shadow")
     assert run(case) == ["rendered"]
     assert not case.gateway.uploads
     assert current(case).current_revision is None
-    monkeypatch.setattr(settings, "design_processing_mode", "enabled")
+    monkeypatch.setattr(settings, "performance_specification_mode", "enabled")
     assert run(case) == ["published"]
     assert len(case.calls) == 1
 
@@ -843,8 +891,8 @@ def test_allowlist_holds_older_unlisted_specification_without_model_or_crm_calls
     case.db.commit()
     pending = current(case)
     due, generation = pending.scheduled_for, pending.requested_generation
-    monkeypatch.setattr(settings, "design_processing_mode", "allowlist")
-    monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", ["3320074395"])
+    monkeypatch.setattr(settings, "performance_specification_mode", "allowlist")
+    monkeypatch.setattr(settings, "performance_specification_allowlist_item_ids", ["3320074395"])
     case.gateway.fetch_target = lambda *args: pytest.fail("Unlisted item read Monday")
     assert worker.claim_specification(case.db) is None
     assert worker.run_specifications_once(case.db, gateway=case.gateway, client=case.client, storage=case.storage) == []
@@ -854,8 +902,8 @@ def test_allowlist_holds_older_unlisted_specification_without_model_or_crm_calls
 
 
 def test_allowlisted_item_can_translate_and_publish(case, monkeypatch):
-    monkeypatch.setattr(settings, "design_processing_mode", "allowlist")
-    monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", [ITEM])
+    monkeypatch.setattr(settings, "performance_specification_mode", "allowlist")
+    monkeypatch.setattr(settings, "performance_specification_allowlist_item_ids", [ITEM])
     assert run(case) == ["published"]
     assert len(case.calls) == len(case.gateway.uploads) == 1
 
@@ -867,8 +915,8 @@ def test_specification_claim_filters_before_older_unlisted_work(case, monkeypatc
     other.scheduled_for = worker.utc_now() - timedelta(hours=1)
     worker.enqueue_specification(case.db, BOARD, ITEM, immediate=True)
     case.db.commit()
-    monkeypatch.setattr(settings, "design_processing_mode", "allowlist")
-    monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", [ITEM])
+    monkeypatch.setattr(settings, "performance_specification_mode", "allowlist")
+    monkeypatch.setattr(settings, "performance_specification_allowlist_item_ids", [ITEM])
     assert worker.claim_specification(case.db)[1] == ITEM
     case.db.refresh(other)
     assert other.lease_token is None and other.completed_generation == 0
@@ -880,9 +928,9 @@ def test_specification_discovery_filters_before_limit(case, monkeypatch):
         case.db.add(Task(external_task_key=f"acct:{BOARD}:{item_id}", account_id="acct", board_id=BOARD,
             item_id=item_id, auto_sync_state="active", auto_sync_enabled=True, source_group_id="topics", sync_status="completed"))
     case.db.commit()
-    monkeypatch.setattr(settings, "design_processing_mode", "allowlist")
-    monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", [ITEM])
-    assert worker.discover_specifications(case.db, limit=1) == 1
+    monkeypatch.setattr(settings, "performance_specification_mode", "allowlist")
+    monkeypatch.setattr(settings, "performance_specification_allowlist_item_ids", [ITEM])
+    assert worker.discover_specifications(case.db, limit=1, gateway=case.gateway) == 1
     assert current(case) is not None
     assert case.db.get(PerformanceSpecification, (BOARD, "100")) is None
 
@@ -891,8 +939,8 @@ def test_allowlist_change_after_claim_fences_translation(case, monkeypatch):
     worker.enqueue_specification(case.db, BOARD, ITEM, immediate=True)
     case.db.commit()
     claim = worker.claim_specification(case.db)
-    monkeypatch.setattr(settings, "design_processing_mode", "allowlist")
-    monkeypatch.setattr(settings, "design_processing_allowlist_item_ids", ["3320074395"])
+    monkeypatch.setattr(settings, "performance_specification_mode", "allowlist")
+    monkeypatch.setattr(settings, "performance_specification_allowlist_item_ids", ["3320074395"])
     case.gateway.fetch_target = lambda *args: pytest.fail("Unlisted claimed item read Monday")
     assert worker.execute_specification(case.db, claim, gateway=case.gateway, client=case.client, storage=case.storage) == "superseded"
     assert not case.calls and not case.gateway.uploads and current(case).scheduled_for is not None
@@ -936,17 +984,17 @@ def test_linked_changes_enqueue_dependents(case):
 
 
 def test_reconciliation_preserves_specification_retry_deadline_and_attempts(case):
-    record = worker.enqueue_specification(case.db, BOARD, ITEM, group_id="topics", immediate=True)
+    record = worker.enqueue_specification(case.db, BOARD, ITEM, group_id=settings.design_processing_landing_group_id, immediate=True)
     record.attempt_count = 5
     record.last_error = "Waiting for current extraction"
     record.scheduled_for = worker.utc_now() + timedelta(minutes=30)
     case.db.commit()
     due, generation = record.scheduled_for, record.requested_generation
-    worker.enqueue_specification(case.db, BOARD, ITEM, group_id="topics", reconcile=True)
+    worker.enqueue_specification(case.db, BOARD, ITEM, group_id=settings.design_processing_landing_group_id, reconcile=True)
     case.db.commit()
     assert worker._aware(current(case).scheduled_for) == worker._aware(due)
     assert current(case).attempt_count == 5 and current(case).requested_generation == generation
-    worker.enqueue_specification(case.db, BOARD, ITEM, group_id="topics")
+    worker.enqueue_specification(case.db, BOARD, ITEM, group_id=settings.design_processing_landing_group_id)
     case.db.commit()
     assert worker._aware(current(case).scheduled_for) == worker._aware(due) and current(case).attempt_count == 5
     assert current(case).requested_generation == generation + 1
@@ -987,13 +1035,14 @@ def test_pdf_text_contains_exact_ordered_contract_and_handles_long_unicode_value
     positions = [text.index(label + ":") for label in FIELD_NAMES]
     assert positions == sorted(positions)
     assert "Zoë Müller" in text
-    assert "Target U Value: 0.20" in text
+    assert "Target U Value: 0.18" in text
     assert "Target Min U Value: Not Provided" in text
     assert "Incoming Information: Not Provided" not in text
     assert page_count >= 2
 
 
 def test_typed_mirror_numbers_preserve_underlying_source_identity(case):
+    without_email(case, "Target U Value")
     case.gateway.project["subitems"][0]["column_values"][0] = {
         "id": "mirror0__1", "type": "mirror", "column": {"title": "U-Value"},
         "display_value": "0.175", "mirrored_items": [{
@@ -1008,28 +1057,38 @@ def test_typed_mirror_numbers_preserve_underlying_source_identity(case):
 
 
 def test_unresolved_mirror_is_a_failed_read_and_not_a_clear(case):
+    without_email(case, "Target U Value")
     case.gateway.project["subitems"][0]["column_values"][0] = {
         "id": "mirror0__1", "type": "mirror", "column": {"title": "U-Value"},
         "display_value": "0.20", "mirrored_items": [],
     }
-    with pytest.raises(SpecificationSourceError, match="not resolved"):
-        resolve_specification_sources(case.gateway, case.item)
+    source = resolve_specification_sources(case.gateway, case.item)
+    assert "not resolved" in source["issues"]["Target U Value"]
+    assert source["reviewSource"]["fields"]["Target U Value"]["proposal"]["source"] == "unavailable"
 
 
-def test_explicit_mapping_missing_column_stops_refresh(case, monkeypatch):
+def test_explicit_mapping_missing_column_publishes_visible_review_problem(case, monkeypatch):
     monkeypatch.setattr(settings, "performance_specification_column_map", {"drawing": {"VCL": "missing"}})
-    assert run(case) == ["failed"]
-    assert "Configured drawing column" in current(case).last_error
-    assert not case.gateway.uploads
+    assert run(case) == ["published"]
+    assert "Configured drawing column" in current(case).review_json["issues"]["VCL"]
+    assert current(case).source_json["reviewSource"]["fields"]["VCL"]["proposal"]["source"] == "unavailable"
 
 
-def test_unique_newer_letter_is_selected_without_switching_roof(case):
+def test_latest_scoped_fallback_keeps_reference_revision_and_email_discrepancy_together(case):
     case.gateway.project["subitems"][0]["name"] = "TP00901_26.01 - B"
     source = resolve_specification_sources(case.gateway, case.item)
     assert source["raw"]["Drawing Reference"] == "TP00901_26.01 - B"
+    assert source["raw"]["Revision"] == "26.01 - B"
+    assert source["drawingItemId"] == "9101"
+    field = source["reviewSource"]["fields"]["Drawing Reference"]
+    assert field["crm_recommendations"][0]["value"] == "TP00901_26.01 - B"
+    assert field["email_facts"][0]["value"] == "TP00901_26.01 - A"
+    assert field["issues"][0]["code"] == "drawing_reference_disagreement"
     case.gateway.project["subitems"][0]["name"] = "TP00901_26.02 - A"
-    with pytest.raises(SpecificationSourceError, match="missing or ambiguous"):
-        resolve_specification_sources(case.gateway, case.item)
+    source = resolve_specification_sources(case.gateway, case.item)
+    assert source["drawingItemId"] is None
+    assert source["drawingSelection"]["status"] == "unmatched"
+    assert "matches no single" in source["issues"]["Drawing Reference"]
 
 
 def test_old_extraction_waits_for_new_roof_aware_schema(case):
@@ -1038,15 +1097,17 @@ def test_old_extraction_waits_for_new_roof_aware_schema(case):
     case.item.extracted_parameters_json = old
     case.db.commit()
     assert run(case) == ["failed"]
-    assert "output-v9" in current(case).last_error
+    assert "evidence-aware email extraction" in current(case).last_error
     assert not case.calls
 
 
-def test_monday_metadata_refresh_and_cancellation_drive_specification_queue(case):
+def test_monday_metadata_cancellation_keeps_landing_zone_specification_queued(case):
     from backend.app.services import monday_metadata
+    worker.enqueue_specification(case.db, BOARD, ITEM,
+        group_id=settings.design_processing_landing_group_id, immediate=True)
     task = Task(external_task_key=f"acct:{BOARD}:{ITEM}", account_id="acct", board_id=BOARD,
                 item_id=ITEM, auto_sync_state="active", auto_sync_enabled=True,
-                source_group_id="topics", sync_status="completed")
+                source_group_id=settings.design_processing_landing_group_id, sync_status="completed")
     case.db.add(task)
     case.db.commit()
     monday_metadata.enqueue_metadata(case.db, task, immediate=True)
@@ -1054,18 +1115,18 @@ def test_monday_metadata_refresh_and_cancellation_drive_specification_queue(case
     assert current(case).requested_generation == 1
     monday_metadata.cancel_metadata(case.db, task)
     case.db.commit()
-    assert current(case).scheduled_for is None
-    assert current(case).completed_generation == current(case).requested_generation
+    assert current(case).scheduled_for is not None
+    assert current(case).completed_generation < current(case).requested_generation
 
 
-def test_existing_active_projects_bootstrap_without_duplicate_queue_records(case):
+def test_registered_landing_items_bootstrap_without_duplicate_queue_records(case):
     task = Task(external_task_key=f"acct:{BOARD}:{ITEM}", account_id="acct", board_id=BOARD,
                 item_id=ITEM, auto_sync_state="active", auto_sync_enabled=True,
                 source_group_id="topics", sync_status="completed")
     case.db.add(task)
     case.db.commit()
-    assert worker.discover_specifications(case.db) == 1
-    assert worker.discover_specifications(case.db) == 0
+    assert worker.discover_specifications(case.db, gateway=case.gateway) == 1
+    assert worker.discover_specifications(case.db, gateway=case.gateway) == 0
     assert current(case).requested_generation == 1
 
 
@@ -1122,12 +1183,12 @@ def test_design_reconciliation_recovers_specification_without_repeating_analysis
     case.item.latest_analyzed_pipeline_version = case.item.latest_desired_pipeline_version = version
     case.item.latest_published_input_revision = "email-v1"
     case.item.latest_published_pipeline_version = version
-    worker.enqueue_specification(case.db, BOARD, ITEM, group_id="topics", immediate=True)
+    worker.enqueue_specification(case.db, BOARD, ITEM, group_id=settings.design_processing_landing_group_id, immediate=True)
     worker.cancel_specification(case.db, BOARD, ITEM)
     case.db.commit()
     generation = current(case).requested_generation
     snapshot = DesignProcessingTargetSnapshot(
-        board_id=BOARD, item_id=ITEM, group_id="topics", item_state="active", name="Project",
+        board_id=BOARD, item_id=ITEM, group_id=settings.design_processing_landing_group_id, item_state="active", name="Project",
         input_revision="email-v1", email_assets=(DesignEmailAsset(
             asset_id="1", filename="request.eml", file_extension="eml", size=1,
             created_at="2026-10-30T12:00:00Z", download_url="unused", download_requires_auth=False,
@@ -1153,11 +1214,11 @@ def test_cleanup_failure_retries_without_retranslating_or_reuploading(case):
         raise TimeoutError("delete failed")
 
     case.gateway.delete = fail_once
-    case.gateway.project["column_values"][0]["text"] = "Changed title"
+    case.gateway.project["column_values"][1]["linked_items"][0]["name"] = "Changed Account"
     assert run(case) == ["published"]
     assert current(case).last_error.startswith("Specification cleanup:")
     assert len(case.gateway.files) == 4
     assert run(case) == ["unchanged"]
     assert current(case).last_error is None
     assert len(case.gateway.files) == 3
-    assert len(case.calls) == len(case.gateway.uploads) == 2
+    assert len(case.calls) == 1 and len(case.gateway.uploads) == 2

@@ -61,7 +61,12 @@ retain the last successful values with a visible refresh error.
 
 Mirror changes are handled through their source board; no assumption is made that a
 mirror update emits a holding-board webhook or changes its `updated_at` timestamp.
-The dependency index selects only active holding tasks and is replaced atomically when
+Specification review additionally subscribes to drawing subitem events on the
+main/parent project board, while ordinary Account/Contact/mirror-source item events
+use each source board. Audit existing subscriptions before using the
+[specification templates](scripts/specification_source_webhooks.graphql); follow
+[Monday's board-ID rule for subitem webhooks](https://developer.monday.com/api-reference/reference/webhooks).
+The metadata dependency index selects only active holding tasks and is replaced atomically when
 links change. Every refresh uses current Monday values, including a successful source
 read shared by reconciliation. Leases, generation checks,
 and retry backoff prevent an expired or superseded worker from publishing old data.
@@ -76,6 +81,40 @@ Completed/excluded tasks stop automatic metadata work. Existing metadata remains
 as last checked; it is deleted with project data on retention expiry. Reopening an active
 task refreshes from its source response or schedules a fresh read. Archived/unreadable linked items that cannot be resolved
 produce a retry and preserve last known values rather than an invented empty value.
+
+## Independent Specification Review lifecycle
+
+Specification Review Phase 5 publishes only to live active items in the configured
+design board's Landing Zone. Completed Folder always wins a configuration conflict.
+Landing Zone remains excluded from auto-sync and metadata refresh; cancelling
+metadata no longer cancels specification work. A Landing Zone webhook can therefore
+leave specification work queued after the independent auto-sync exclusion runs.
+Explicit live out-of-scope/archive/delete checks and confirmed-deletion retirement
+still cancel specification leases/work, retaining the attached PDF and audit history.
+Human group moves are not reversed.
+
+The specification queue/discovery uses registered design items and durable scope
+observations with fresh live checks; it does not require an active Task or a chat
+snapshot. Periodic bounded checks and design reconciliation recover missing or
+eligible cancelled records without postponing pending work. Design activation
+boundaries and explicit item-scoped backfill still govern admission. Specification
+work uses its own `PERFORMANCE_SPECIFICATION_MODE` (default `off`) and
+`PERFORMANCE_SPECIFICATION_ALLOWLIST_ITEM_IDS`, independently of design outputs
+and `AUTO_SYNC_*` ingestion. Returning to Landing Zone triggers a fresh
+eligibility/source check.
+
+Specification dependencies are separate from the metadata dependency index above.
+They can come from email-detected/candidate/selected projects and drawings before
+TP Ref is populated, plus relevant Accounts, Contacts and mirror-source records.
+Subscribe those boards' name/field and archive/delete/restore events and project
+subitem creation through its parent. Obsolete dependencies are replaced when
+selection changes; periodic source checks repair missed notifications. Generated
+AI Data and Matched Projects changes do not feed back into specification work.
+Holding Accounts/Date Received remain metadata/business values and do not override
+the specification's email-first policy or reviewer decisions.
+
+See [PerformanceSpecification.md](PerformanceSpecification.md) for worker modes,
+backfill and rollback. Phase 5 does not add review API/auth or the embedded Item View.
 
 ## Holding-item archival and restoration
 

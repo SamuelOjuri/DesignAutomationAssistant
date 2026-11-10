@@ -1,4 +1,4 @@
-"""Durable, fenced refresh and publication of the active project's CAD PDF.
+"""Durable, fenced refresh and publication of Landing Zone specification PDFs.
 
 Run separately from ingestion with:
     python -m backend.app.services.performance_specification --once
@@ -20,20 +20,33 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from ..config import settings
 from ..db import SessionLocal
 from ..models import (
-    DesignProcessingItem, Task, PerformanceSpecification,
+    DesignProcessingItem, DesignProcessingReconciliationCheck, PerformanceSpecification,
     PerformanceSpecificationArtifact, PerformanceSpecificationLink,
+    PerformanceSpecificationReview,
 )
 from .design_processing_artifacts import SupabaseDesignArtifactStorage
-from .design_processing_queue import execution_allowed_for_item
 from .legacy_enquiry.llm import LegacyGeminiClient
 from .performance_specification_contract import (
-    SPECIFICATION_VERSION, SpecificationPublication, digest, prepare_specification_publication,
+    SPECIFICATION_VERSION, CADTranslation, SpecificationPublication, digest,
+    prepare_specification_publication, specification_translation_inputs,
 )
+from .specification_review import (
+    ReviewConflict, invalidate_publication_approval, observe_publication_source, review_state,
+)
+from .specification_review_contract import SOURCE_POLICY_VERSION, ReviewDecisionState, ReviewSourceSnapshot
+from .specification_references import REFERENCE_PARSER_VERSION
+from .specification_policy import (
+    SPECIFICATION_SCOPE_POLICY_VERSION, specification_scope_exclusion,
+    specification_processing_enabled, specification_processing_allowed,
+    specification_publication_allowed,
+)
+from .auto_sync_policy import RETIRED_SOURCE_OUTCOME
+from .specification_review_artifacts import build_review_artifact_metadata
 from .performance_specification_pdf import render_performance_specification_pdf
 from .performance_specification_sources import (
     MondaySpecificationGateway, SpecificationIneligible, SpecificationSourceError,
-    SpecificationReviewRequired,
-    active_specification_group_ids, resolve_specification_sources,
+    SpecificationReviewRequired, SpecificationSourceWaiting,
+    resolve_specification_sources,
 )
 
 
@@ -56,26 +69,57 @@ def _record(db, board_id, item_id):
     return query.with_for_update() if db.get_bind().dialect.name == "postgresql" else query
 
 
-def enqueue_specification(db, board_id, item_id, *, group_id=None, immediate=False, reconcile=False):
-    if not settings.performance_specification_enabled:
-        return None
-    board_id, item_id = str(board_id), str(item_id)
-    if board_id != str(settings.design_processing_board_id):
-        return None
-    if group_id is not None and group_id not in active_specification_group_ids():
-        cancel_specification(db, board_id, item_id)
-        return None
-    db.flush()
-    if db.query(DesignProcessingItem.id).filter_by(board_id=board_id, item_id=item_id).first() is None:
-        return None  # Extraction will enqueue when its first durable result exists.
+def _ensure_record(db, board_id, item_id):
     insert = pg_insert if db.get_bind().dialect.name == "postgresql" else sqlite_insert
     db.execute(insert(PerformanceSpecification).values(
         board_id=board_id, item_id=item_id, requested_generation=0, completed_generation=0,
         attempt_count=0,
     ).on_conflict_do_nothing(index_elements=["board_id", "item_id"]))
-    record = _record(db, board_id, item_id).one()
-    if reconcile and record.scheduled_for is not None:
-        return record  # Periodic discovery is not a new source-change notification.
+    return _record(db, board_id, item_id).one()
+
+
+def _obsolete_policy(record):
+    source = record.source_json or {}
+    return (
+        source.get("scopePolicy") != SPECIFICATION_SCOPE_POLICY_VERSION
+        or source.get("sourcePolicyVersion") != SOURCE_POLICY_VERSION
+        or source.get("referenceParserVersion") != REFERENCE_PARSER_VERSION
+        or source.get("extractionPipeline") != settings.design_processing_pipeline_version
+        or source.get("publicationVersion") != SPECIFICATION_VERSION
+    )
+
+
+def specification_needs_reconciliation(record):
+    """Recover missing/cancelled or obsolete settled work without waking retries."""
+    if record is None:
+        return True
+    if (record.lease_token is not None and record.lease_until is not None
+            and _aware(record.lease_until) > utc_now()):
+        return False
+    if record.scheduled_for is None:
+        return True  # Also repair legacy rows with an outstanding, unscheduled generation.
+    if record.requested_generation > record.completed_generation:
+        return False
+    return not record.attempt_count and _obsolete_policy(record)
+
+
+def enqueue_specification(db, board_id, item_id, *, group_id=None, immediate=False, reconcile=False):
+    board_id, item_id = str(board_id), str(item_id)
+    if board_id != str(settings.design_processing_board_id):
+        return None
+    if group_id is not None:
+        reason = specification_scope_exclusion(board_id=board_id, group_id=group_id, item_state="active")
+        if reason is not None:
+            cancel_specification(db, board_id, item_id, reason=reason)
+            return None
+    if not specification_processing_allowed(item_id):
+        return None
+    db.flush()
+    if db.query(DesignProcessingItem.id).filter_by(board_id=board_id, item_id=item_id).first() is None:
+        return None  # Registered admission/extraction, never a Task, is the prerequisite.
+    record = _ensure_record(db, board_id, item_id)
+    if reconcile and not specification_needs_reconciliation(record):
+        return record
     record.requested_generation += 1
     due = utc_now() + timedelta(seconds=0 if immediate else settings.auto_sync_debounce_seconds)
     # Immediate work must not be postponed by a later duplicate notification.
@@ -88,63 +132,164 @@ def enqueue_specification(db, board_id, item_id, *, group_id=None, immediate=Fal
     return record
 
 
-def cancel_specification(db, board_id, item_id):
-    if not settings.performance_specification_enabled:
-        return
+def cancel_specification(db, board_id, item_id, *, reason="outside_landing_zone"):
     record = _record(db, str(board_id), str(item_id)).one_or_none()
     if record is not None:
         record.completed_generation = record.requested_generation
         record.scheduled_for = None
         record.lease_token = record.lease_until = None
+        record.checked_at = utc_now()
+        review = db.query(PerformanceSpecificationReview).filter_by(
+            board_id=str(board_id), item_id=str(item_id),
+        ).populate_existing().with_for_update().one_or_none()
+        # A human move retains the exact PDF's completion/history. Live scope
+        # denies further edits/publication; a relevant source change on re-entry
+        # invalidates completion through observe_publication_source instead.
+        record.review_json = {
+            "status": "read_only", "reason": reason, "source": record.source_json,
+            "left_before_completion": review is None or review.current_approval_id is None,
+        }
 
 
-def enqueue_specification_dependents(db, board_id, item_id):
-    if not settings.performance_specification_enabled:
+def enqueue_specification_dependents(db, board_id, item_id, *, seen=None):
+    if not specification_processing_enabled():
         return 0
-    dependents = db.query(PerformanceSpecificationLink).filter_by(
-        linked_board_id=str(board_id), linked_item_id=str(item_id),
-    ).order_by(PerformanceSpecificationLink.board_id, PerformanceSpecificationLink.item_id).all()
+    query = db.query(PerformanceSpecification).join(PerformanceSpecificationLink, and_(
+        PerformanceSpecification.board_id == PerformanceSpecificationLink.board_id,
+        PerformanceSpecification.item_id == PerformanceSpecificationLink.item_id,
+    )).filter(
+        PerformanceSpecification.board_id == str(settings.design_processing_board_id),
+        PerformanceSpecificationLink.linked_board_id == str(board_id),
+        PerformanceSpecificationLink.linked_item_id == str(item_id),
+    ).filter(PerformanceSpecification.item_id.in_(settings.performance_specification_allowlist_item_ids)
+             if settings.performance_specification_mode == "allowlist" else True
+    ).order_by(PerformanceSpecification.board_id, PerformanceSpecification.item_id).populate_existing()
+    if db.get_bind().dialect.name == "postgresql":
+        query = query.with_for_update(of=PerformanceSpecification)
+    dependents = query.all()
+    queued = 0
     for link in dependents:
+        if (link.review_json or {}).get("status") == "read_only":
+            # Keep historical dependencies, but scope observations/re-entry own
+            # recovery. CRM edits must not continually refresh excluded items.
+            continue
+        identity = (link.board_id, link.item_id)
+        if seen is not None:
+            if identity in seen:
+                continue
+            seen.add(identity)
         enqueue_specification(db, link.board_id, link.item_id)
-    return len(dependents)
+        queued += 1
+    return queued
 
 
-def discover_specifications(db, limit=100):
-    """Bootstrap existing active projects, without forcing email re-extraction."""
-    if not settings.performance_specification_enabled:
+def discover_specifications(db, limit=100, *, gateway=None):
+    """Fair, bounded recovery of registered work with a fresh live scope read.
+
+    Design registration owns activation-bounded admission and explicit backfill.
+    Its durable group observations exclude known historical non-Landing items.
+    No Task/auto-sync state or document publication is required here.
+    """
+    if not specification_processing_enabled():
         return 0
-    candidates = db.query(DesignProcessingItem.board_id, DesignProcessingItem.item_id).join(
-        Task, and_(Task.board_id == DesignProcessingItem.board_id, Task.item_id == DesignProcessingItem.item_id),
-    ).outerjoin(PerformanceSpecification, and_(
+    if limit < 1:
+        raise ValueError("Specification discovery limit must be positive")
+    now = utc_now()
+    stale_before = now - timedelta(seconds=settings.performance_specification_recheck_seconds)
+    check = DesignProcessingReconciliationCheck
+    spec = PerformanceSpecification
+    candidates = db.query(DesignProcessingItem.board_id, DesignProcessingItem.item_id).outerjoin(spec, and_(
         PerformanceSpecification.board_id == DesignProcessingItem.board_id,
         PerformanceSpecification.item_id == DesignProcessingItem.item_id,
+    )).outerjoin(check, and_(
+        check.board_id == DesignProcessingItem.board_id, check.item_id == DesignProcessingItem.item_id,
     )).filter(
         DesignProcessingItem.board_id == str(settings.design_processing_board_id),
-        Task.auto_sync_state == "active", Task.source_group_id.in_(active_specification_group_ids()),
-        PerformanceSpecification.item_id.is_(None),
-    ).filter(DesignProcessingItem.item_id.in_(settings.design_processing_allowlist_item_ids)
-             if settings.design_processing_mode == "allowlist" else True
-    ).order_by(DesignProcessingItem.item_id).limit(limit).all()
+        or_(check.last_outcome.is_(None), check.last_outcome != RETIRED_SOURCE_OUTCOME),
+        or_(check.last_group_id.is_(None), check.last_group_id == str(settings.design_processing_landing_group_id)),
+        # Scheduled rows already have periodic worker checks; cancelled/missing
+        # rows need discovery. A newer Landing observation bypasses the delay.
+        or_(spec.item_id.is_(None), and_(
+            spec.scheduled_for.is_(None),
+            or_(spec.checked_at.is_(None), spec.checked_at <= stale_before,
+                check.last_checked_at > spec.checked_at),
+        ), and_(
+            spec.requested_generation == spec.completed_generation,
+            spec.attempt_count == 0,
+            or_(spec.source_json["scopePolicy"].as_string().is_(None),
+                spec.source_json["scopePolicy"].as_string() != SPECIFICATION_SCOPE_POLICY_VERSION,
+                spec.source_json["sourcePolicyVersion"].as_string().is_(None),
+                spec.source_json["sourcePolicyVersion"].as_string() != SOURCE_POLICY_VERSION,
+                spec.source_json["referenceParserVersion"].as_string().is_(None),
+                spec.source_json["referenceParserVersion"].as_string() != REFERENCE_PARSER_VERSION,
+                spec.source_json["extractionPipeline"].as_string().is_(None),
+                spec.source_json["extractionPipeline"].as_string() != settings.design_processing_pipeline_version,
+                spec.source_json["publicationVersion"].as_string().is_(None),
+                spec.source_json["publicationVersion"].as_string() != SPECIFICATION_VERSION),
+            spec.scheduled_for.is_not(None), spec.lease_token.is_(None),
+            # A failed live observation must not make an obsolete settled row
+            # consume the bounded discovery set on every worker poll. Its normal
+            # scheduled claim remains available; newer observations can wake it.
+            or_(spec.last_error.is_(None), ~spec.last_error.like("Discovery: %"),
+                spec.checked_at.is_(None), spec.checked_at <= stale_before,
+                check.last_checked_at > spec.checked_at),
+        )),
+    ).filter(DesignProcessingItem.item_id.in_(settings.performance_specification_allowlist_item_ids)
+             if settings.performance_specification_mode == "allowlist" else True
+    ).order_by(spec.checked_at.asc().nulls_first(), DesignProcessingItem.item_id).limit(limit).all()
+    db.commit()  # Never hold a database transaction across the live read.
+    if not candidates:
+        return 0
+    if gateway is None:
+        from .auto_sync import get_monday_ingestion_access_token
+        gateway = MondaySpecificationGateway(get_monday_ingestion_access_token())
+    recovered = 0
     for board_id, item_id in candidates:
-        enqueue_specification(db, board_id, item_id, immediate=True)
-    db.commit()
-    return len(candidates)
+        if not specification_processing_allowed(item_id):
+            continue
+        try:
+            target = gateway.fetch_target(item_id)
+            if not specification_processing_allowed(item_id):
+                continue
+            reason = specification_scope_exclusion(target)
+            if str(target.item_id) != item_id:
+                raise SpecificationSourceError("Specification discovery returned a different item")
+            record = _ensure_record(db, board_id, item_id)
+            record.checked_at = now  # Discovery visit, including excluded/error rows, rotates fairly.
+            if reason is not None:
+                cancel_specification(db, board_id, item_id, reason=reason)
+            elif specification_needs_reconciliation(record):
+                enqueue_specification(db, board_id, item_id, group_id=target.group_id,
+                                      immediate=True, reconcile=True)
+                recovered += 1
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            # Unavailable is not evidence of archive/delete. Retain the PDF and
+            # decisions, record the failed observation, and let later checks retry.
+            record = _ensure_record(db, board_id, item_id)
+            record.checked_at = now
+            record.last_error = f"Discovery: {type(exc).__name__}"
+            db.commit()
+            logger.warning("Specification discovery failed item=%s error_type=%s", item_id, type(exc).__name__)
+    return recovered
 
 
 def claim_specification(db):
-    if not settings.performance_specification_enabled or settings.design_processing_mode == "off":
+    if not specification_processing_enabled():
         return None
     now = utc_now()
     query = db.query(PerformanceSpecification).filter(
+        PerformanceSpecification.board_id == str(settings.design_processing_board_id),
         PerformanceSpecification.scheduled_for <= now,
         or_(PerformanceSpecification.lease_until.is_(None), PerformanceSpecification.lease_until <= now),
-    ).filter(PerformanceSpecification.item_id.in_(settings.design_processing_allowlist_item_ids)
-             if settings.design_processing_mode == "allowlist" else True
+    ).filter(PerformanceSpecification.item_id.in_(settings.performance_specification_allowlist_item_ids)
+             if settings.performance_specification_mode == "allowlist" else True
     ).order_by(PerformanceSpecification.scheduled_for, PerformanceSpecification.item_id)
     if db.get_bind().dialect.name == "postgresql":
         query = query.with_for_update(skip_locked=True)
     record = query.first()
-    if record is None:
+    if record is None or not specification_processing_allowed(record.item_id):
         db.rollback()
         return None
     token = uuid.uuid4().hex
@@ -165,10 +310,7 @@ def _check_claim(db, claim):
             or record.lease_until is None or _aware(record.lease_until) <= utc_now()):
         db.rollback()
         raise SupersededSpecification("Specification refresh lease/generation changed")
-    if not settings.performance_specification_enabled or not execution_allowed_for_item(
-        mode=settings.design_processing_mode, execution_kind="analysis", item_id=item_id,
-        allowlist_item_ids=settings.design_processing_allowlist_item_ids,
-    ):
+    if not specification_processing_allowed(item_id):
         db.rollback()
         raise SupersededSpecification("Specification processing disabled")
     record.lease_until = utc_now() + timedelta(seconds=LEASE_SECONDS)
@@ -177,20 +319,92 @@ def _check_claim(db, claim):
 
 
 def _publication_allowed(item_id):
-    return settings.performance_specification_enabled and execution_allowed_for_item(
-        mode=settings.design_processing_mode, execution_kind="publication", item_id=item_id,
-        allowlist_item_ids=settings.design_processing_allowlist_item_ids,
-    )
+    return specification_publication_allowed(item_id)
 
 
 def _source(db, claim, gateway):
     record = _check_claim(db, claim)
     item = db.query(DesignProcessingItem).filter_by(board_id=claim[0], item_id=claim[1]).populate_existing().one()
     previous = record.source_json
+    review = db.query(PerformanceSpecificationReview).filter_by(
+        board_id=claim[0], item_id=claim[1],
+    ).populate_existing().one_or_none()
+    state = review_state(review) if review is not None else ReviewDecisionState()
     db.commit()  # No database locks/transaction across Monday or model calls.
-    source = resolve_specification_sources(gateway, item, previous)
+    source_failure = None
+    try:
+        source = resolve_specification_sources(gateway, item, previous, review_state=state)
+    except SpecificationSourceWaiting:
+        _check_claim(db, claim)
+        record = _record(db, claim[0], claim[1]).one()
+        if record.lease_token != claim[2] or record.requested_generation != claim[3]:
+            db.rollback()
+            raise SupersededSpecification("Specification changed while waiting for extraction")
+        review = db.query(PerformanceSpecificationReview).filter_by(
+            board_id=claim[0], item_id=claim[1],
+        ).populate_existing().with_for_update().one_or_none()
+        invalidate_publication_approval(db, review, reason="Current input requires fresh extraction")
+        db.commit()
+        raise
+    except SpecificationReviewRequired as exc:
+        if not exc.source.get("reviewSource"):
+            raise
+        # A changed source requiring correction still invalidates completion,
+        # even though its provisional artifact cannot yet be rendered.
+        source, source_failure = exc.source, exc
+    snapshot = ReviewSourceSnapshot.model_validate(source["reviewSource"])
+    source["review"] = build_review_artifact_metadata(state, snapshot)
+    source["publicationVersion"] = SPECIFICATION_VERSION
+    source["translationIdentity"] = digest(specification_translation_inputs(source))
     record = _check_claim(db, claim)
+    # Lock in the same order as a reviewer save. A save after the remote reads
+    # cannot be overwritten or published by an older worker.
+    record = _record(db, claim[0], claim[1]).one()
+    if record.lease_token != claim[2] or record.requested_generation != claim[3]:
+        db.rollback()
+        raise SupersededSpecification("Specification decisions changed during source resolution")
+    review = db.query(PerformanceSpecificationReview).filter_by(
+        board_id=claim[0], item_id=claim[1],
+    ).populate_existing().with_for_update().one_or_none()
+    try:
+        observe_publication_source(db, review, expected_state=state, source=snapshot)
+    except ReviewConflict as exc:
+        db.rollback()
+        raise SupersededSpecification(str(exc)) from exc
+    db.commit()
+    if source_failure is not None:
+        raise source_failure
     return record, source
+
+
+def _cached_translation(db, board_id, item_id, source, model_version):
+    """Reuse validated CAD work across reviewer/provenance-only revisions."""
+    artifact = db.query(PerformanceSpecificationArtifact).filter_by(
+        board_id=board_id, item_id=item_id, model_version=model_version,
+    ).filter(
+        PerformanceSpecificationArtifact.source_json["translationIdentity"].as_string()
+        == source["translationIdentity"],
+    ).first()
+    if artifact is not None:
+        publication = SpecificationPublication.model_validate(artifact.translation_json)
+        return CADTranslation(values=publication.values, warnings=publication.warnings)
+    # A reviewer may replace one previously automatic field. Reuse the remaining
+    # unchanged CAD results rather than translating them again. The publication
+    # builder clears removed inputs and reapplies the current authoritative fields.
+    record = db.get(PerformanceSpecification, (board_id, item_id))
+    prior = (db.get(PerformanceSpecificationArtifact, (board_id, item_id, record.current_revision))
+             if record and record.current_revision else None)
+    if prior is not None and prior.model_version == model_version and (prior.source_json or {}).get("review"):
+        current_inputs = specification_translation_inputs(source)
+        prior_inputs = specification_translation_inputs(prior.source_json)
+        required = [label for label, value in current_inputs["raw"].items()
+                    if label != "Incoming Information" and value is not None and str(value).strip()]
+        if all(current_inputs["raw"][label] == prior_inputs["raw"].get(label)
+               and current_inputs["evidence"].get("fields", {}).get(label)
+               == prior_inputs["evidence"].get("fields", {}).get(label) for label in required):
+            publication = SpecificationPublication.model_validate(prior.translation_json)
+            return CADTranslation(values=publication.values, warnings=publication.warnings)
+    return None
 
 
 def _replace_dependencies(db, record, source):
@@ -229,8 +443,10 @@ def _finish(db, claim, source, publication, *, revision=None):
         "status": "published_with_review" if revision is not None else "rendered_with_review",
         "source": source, "issues": publication.field_reviews,
         "sourceReviews": publication.source_reviews,
+        "mappingIssues": publication.mapping_issues,
         "translation": publication.model_dump(by_alias=True),
-    } if publication.field_reviews or publication.request_notes or publication.source_reviews else None
+    } if (publication.field_reviews or publication.request_notes or publication.source_reviews
+          or publication.mapping_issues) else None
     if revision is not None:
         record.current_revision = revision
     _replace_dependencies(db, record, source)
@@ -243,10 +459,12 @@ def execute_specification(db, claim, *, gateway, client, storage):
     try:
         record, source = _source(db, claim, gateway)
         model_version = f"{SPECIFICATION_VERSION}:{client.model}:thinking-{client.thinking_level}"
-        revision = digest({"source": source, "modelVersion": model_version})
+        revision = digest({"review": source["review"], "modelVersion": model_version})
         artifact = db.get(PerformanceSpecificationArtifact, (board_id, item_id, revision))
         if artifact is None:
-            translation = prepare_specification_publication(source, client)
+            cached = _cached_translation(db, board_id, item_id, source, model_version)
+            db.commit()
+            translation = prepare_specification_publication(source, client, cached_translation=cached)
             _check_claim(db, claim)
             # Re-read source and group after translation; a late model response
             # cannot publish facts that were superseded during its request.
@@ -278,7 +496,7 @@ def execute_specification(db, claim, *, gateway, client, storage):
 
         if not _publication_allowed(item_id):
             _finish(db, claim, source, translation)
-            return "rendered"  # Existing shadow/allowlist policy also governs this publisher.
+            return "rendered"  # Specification rollout is independent of design exports.
 
         _, current = _source(db, claim, gateway)
         if current != source:
@@ -315,8 +533,7 @@ def execute_specification(db, claim, *, gateway, client, storage):
             return "superseded"
         record.lease_token = record.lease_until = None
         if isinstance(exc, SpecificationIneligible):
-            record.completed_generation = record.requested_generation
-            record.scheduled_for = None
+            cancel_specification(db, board_id, item_id, reason=str(exc))
             record.last_error = None
             outcome = "excluded"
         elif isinstance(exc, SupersededSpecification):
@@ -367,6 +584,8 @@ def _cleanup_specifications(db, board_id, item_id, revision, gateway, source):
                 raise SpecificationSourceError("Replacement specification is missing; cleanup stopped")
             owned = _adoptable(artifact, assets)
             _check_claim(db, claim)
+            if not _publication_allowed(item_id):
+                raise SupersededSpecification("Specification publication disabled before cleanup")
             if owned:
                 gateway.delete(board_id, item_id, owned.asset_id)
             artifact.status, artifact.last_error = "deleted", None
@@ -386,7 +605,7 @@ def _cleanup_specifications(db, board_id, item_id, revision, gateway, source):
 
 
 def run_specifications_once(db, *, gateway=None, client=None, storage=None, limit=1):
-    if not settings.performance_specification_enabled or settings.design_processing_mode == "off":
+    if not specification_processing_enabled():
         return []
     if limit < 1:
         raise ValueError("Specification claim limit must be positive")
@@ -411,8 +630,8 @@ def main():
     parser.add_argument("--item-id", help="Enqueue an existing design item for a fresh scope/source check")
     parser.add_argument("--poll-interval-seconds", type=float, default=5)
     args = parser.parse_args()
-    if not settings.performance_specification_enabled:
-        logger.info("Performance specification publication is disabled")
+    if not specification_processing_enabled():
+        logger.info("Performance specification processing is disabled")
         return 0
     while True:
         with SessionLocal() as db:

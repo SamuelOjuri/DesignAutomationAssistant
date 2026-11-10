@@ -4,6 +4,8 @@ from difflib import SequenceMatcher
 import re
 from typing import Any, Protocol, Sequence
 
+from fastapi import HTTPException
+
 from ...monday_client import MondayProjectBoardItem
 
 
@@ -13,6 +15,10 @@ PROJECT_MATCH_LIMIT = 500
 
 
 class ProjectMatchingGateway(Protocol):
+    def fetch_project_items_matching_references(
+        self, references: Sequence[str],
+    ) -> tuple[MondayProjectBoardItem, ...]: ...
+
     def fetch_project_word_hit_counts(
         self,
         words: Sequence[str],
@@ -115,6 +121,7 @@ def _legacy_match(
         "similarity": _similarity(project_name, item),
         "state": item.state,
         "created_date": item.created_date,
+        **({"reference_confirmations": list(item.reference_confirmations)} if item.reference_confirmations else {}),
     }
 
 
@@ -159,7 +166,7 @@ def _result_with_matches(matches: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def match_projects(
+def _match_projects_by_title(
     project_name: str,
     gateway: ProjectMatchingGateway,
     *,
@@ -215,6 +222,87 @@ def match_projects(
     )
 
 
+def match_projects(
+    project_name: str,
+    gateway: ProjectMatchingGateway,
+    *,
+    similarity_threshold: float = 0.55,
+    detected_references: Sequence[str | dict[str, Any]] = (),
+) -> dict[str, Any]:
+    """Combine cited printed identities and title matches without classifying intent.
+
+    Title similarity remains a search score. A match does not establish that the
+    client's request is an amendment, nor select a project on the reviewer's behalf.
+    Optional reference reads have an explicit unavailable result on failure.
+    """
+    from ..specification_references import parse_drawing_reference, parse_project_reference
+
+    references = {}
+    for detected in detected_references:
+        literal = (detected.get("project_reference") or detected.get("full_drawing_reference")
+                   or detected.get("literal")) if isinstance(detected, dict) else detected
+        reference = parse_project_reference(literal) or parse_drawing_reference(literal)
+        if reference is not None:
+            references.setdefault(reference.project_key, literal)
+    if not references:
+        return _match_projects_by_title(project_name, gateway, similarity_threshold=similarity_threshold)
+
+    lookup: dict[str, Any] = {"status": "available", "references": list(references), "candidates": []}
+    exact_items = ()
+    fetch = getattr(gateway, "fetch_project_items_matching_references", None)
+    if fetch is None:
+        lookup.update(status="unavailable", detail="Direct project reference lookup is unavailable")
+    elif len(references) > 32:
+        lookup.update(status="unavailable", detail="Too many project references; select a narrower request")
+    else:
+        try:
+            exact_items = fetch(tuple(references))
+        except (HTTPException, ValueError):
+            lookup.update(status="unavailable", detail="Project reference lookup could not be completed; retry or review candidates")
+    # Defend the exact identity boundary even for an alternative gateway.
+    exact_matches = []
+    for item in exact_items:
+        parsed = parse_project_reference(item.project_reference)
+        resolved = ([parsed.project_key] if parsed is not None and parsed.project_key in references else [])
+        confirmations = []
+        if parsed is None:
+            for literal in item.reference_confirmations:
+                drawing = parse_drawing_reference(literal)
+                if (drawing is not None and drawing.project_key in references
+                        and item.project_reference.strip() == drawing.project_number):
+                    resolved.append(drawing.project_key)
+                    confirmations.append(literal)
+        if resolved:
+            exact_matches.append({**_legacy_match(item, project_name), "match_kind": "exact_reference",
+                "match_rationale": ("Project membership is confirmed by an exact-prefix child drawing"
+                    if confirmations else "Printed project reference matches the current request"),
+                "resolved_project_references": sorted(set(resolved)),
+                **({"reference_confirmations": confirmations} if confirmations else {})})
+    lookup["candidates"] = [
+        match for match in exact_matches
+    ]
+    if not project_name.strip():
+        title_result = _result_with_matches([])
+        title_lookup = {"status": "not_requested"}
+    else:
+        try:
+            title_result = _match_projects_by_title(project_name, gateway, similarity_threshold=similarity_threshold)
+            title_lookup = {"status": "available"}
+        except HTTPException:
+            title_result = _result_with_matches([])
+            title_lookup = {"status": "unavailable", "detail": "Project title lookup could not be completed; retry or review references"}
+    matches_by_id = {
+        str(match["id"]): match
+        for match in lookup["candidates"] if match["state"] == "active"
+    }
+    for match in title_result["matches"]:
+        matches_by_id.setdefault(str(match["id"]), {**match, "match_kind": "title_similarity",
+            "match_rationale": "Project title resembles the request; similarity is not request intent"})
+    result = _result_with_matches(list(matches_by_id.values()))
+    result.update(referenceLookup=lookup, titleLookup=title_lookup)
+    return result
+
+
 def build_matching_contract(
     project_name: str,
     legacy_result: dict[str, Any],
@@ -228,11 +316,19 @@ def build_matching_contract(
             "similarity": float(match["similarity"]),
             "matchPercentage": f"{float(match['similarity']):.1%}",
             "createdDate": match.get("created_date"),
+            **({"matchKind": match["match_kind"], "matchRationale": match["match_rationale"]}
+               if "match_kind" in match else {}),
+            **({"referenceConfirmations": match["reference_confirmations"]}
+               if match.get("reference_confirmations") else {}),
+            **({"resolvedProjectReferences": match["resolved_project_references"],
+                "resolvedProjectReference": (match["resolved_project_references"][0]
+                    if len(match["resolved_project_references"]) == 1 else None)}
+               if match.get("resolved_project_references") else {}),
         }
         for rank, match in enumerate(legacy_result.get("matches", []), start=1)
     ]
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2 if "referenceLookup" in legacy_result else 1,
         "extractedProjectTitle": project_name,
         "candidateCount": len(candidates),
         "candidates": candidates,
@@ -240,4 +336,6 @@ def build_matching_contract(
             "exists": bool(legacy_result.get("exists")),
             "bestMatch": legacy_result.get("best_match"),
         },
+        **({"referenceLookup": legacy_result["referenceLookup"],
+            "titleLookup": legacy_result["titleLookup"]} if "referenceLookup" in legacy_result else {}),
     }

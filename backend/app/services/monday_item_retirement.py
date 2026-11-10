@@ -72,7 +72,8 @@ def _retire_item(db, item_id, *, fetch_item, dry_run):
     policy = policy_from_settings()
     design_board_id = str(settings.design_processing_board_id)
     tasks = db.query(Task).filter_by(board_id=policy.board_id, item_id=item_id).order_by(Task.external_task_key).all()
-    if not tasks:
+    design_item = db.query(DesignProcessingItem).filter_by(board_id=design_board_id, item_id=item_id).one_or_none()
+    if not tasks and design_item is None:
         return ItemRetirementResult(item_id, "not_tracked", "no_task")
     try:
         visible = fetch_item(item_id)
@@ -81,7 +82,6 @@ def _retire_item(db, item_id, *, fetch_item, dry_run):
     if visible is not None:
         return ItemRetirementResult(item_id, "visible_on_monday", "reconciliation_owns_visible_items",
                                     tasks=len(tasks), monday_state=visible.get("state"))
-    design_item = db.query(DesignProcessingItem).filter_by(board_id=design_board_id, item_id=item_id).one_or_none()
     design_state = design_item.state if design_item is not None else None
     if dry_run:
         return ItemRetirementResult(item_id, "would_retire", RETIRED_SOURCE_REASON,
@@ -98,7 +98,7 @@ def _retire_item(db, item_id, *, fetch_item, dry_run):
         )
         if result.task is None or result.task.auto_sync_state != "deleted":
             raise RuntimeError(f"task {task.external_task_key} was not marked deleted")
-    cancel_specification(db, design_board_id, item_id)
+    cancel_specification(db, design_board_id, item_id, reason=RETIRED_SOURCE_REASON)
     if design_item is not None:
         jobs = db.query(DesignProcessingJob).filter(
             DesignProcessingJob.board_id == design_board_id, DesignProcessingJob.item_id == item_id,
@@ -107,15 +107,16 @@ def _retire_item(db, item_id, *, fetch_item, dry_run):
         for job in jobs:
             cancel_job(design_item, job, reason="item_deleted", now=now, item_state="ineligible")
         design_item.state, design_item.updated_at = "ineligible", now
-    record_lifecycle_check(db, board_id=policy.board_id, item_id=item_id, scope="completed_transition",
-                           outcome=RETIRED_SOURCE_OUTCOME, reason=RETIRED_SOURCE_REASON)
+    if tasks:
+        record_lifecycle_check(db, board_id=policy.board_id, item_id=item_id, scope="completed_transition",
+                               outcome=RETIRED_SOURCE_OUTCOME, reason=RETIRED_SOURCE_REASON)
     if design_item is not None or db.get(DesignProcessingReconciliationCheck, (design_board_id, item_id)) is not None:
         record_design_check(db, board_id=design_board_id, item_id=item_id,
                             outcome=RETIRED_SOURCE_OUTCOME, reason=RETIRED_SOURCE_REASON, now=now)
     db.commit()
     logger.info(
         "Retired confirmed-deleted Monday item=%s tasks=%s design_state=%s", item_id, len(tasks), design_state,
-        extra={"event": "monday_item_retired", "board_id": policy.board_id, "item_id": item_id},
+        extra={"event": "monday_item_retired", "board_id": policy.board_id if tasks else design_board_id, "item_id": item_id},
     )
     return ItemRetirementResult(item_id, "retired", RETIRED_SOURCE_REASON, tasks=len(tasks),
                                 design_state="ineligible" if design_item is not None else None)

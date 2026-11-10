@@ -199,12 +199,9 @@ def test_parameter_extraction_uses_schema_and_keeps_overlapping_fields_separate(
         schema_properties
     ).index("drawing_reference")
     assert schema_properties["drawing_reference"]["description"] == FIELD_DEFINITIONS["Drawing Reference"]
-    assert "AX 16670_26.12 - B" in schema_properties["drawing_reference"]["description"]
-    assert schema_properties["revision"]["description"] == (
-        "The suffix of the selected TaperedPlus Drawing Reference. This is the "
-        "suffix after the underscore in the drawing reference "
-        "[e.g. **.** - * from TP*****_**.** - *]."
-    )
+    assert "AB12345_26.01 - A" in schema_properties["drawing_reference"]["description"]
+    assert schema_properties["revision"]["description"] == FIELD_DEFINITIONS["Revision"]
+    assert "future" in schema_properties["revision"]["description"]
     assert CANONICAL_PARAMETER_ORDER.index("Drawing Title") < (
         CANONICAL_PARAMETER_ORDER.index("Drawing Reference")
     )
@@ -505,7 +502,7 @@ def test_attachment_read_failure_retains_manifest_and_schedules_extraction_retry
     failure_log = next(record.getMessage() for record in caplog.records if "failed runtime=" in record.getMessage())
     runtime = json.loads(failure_log.split("runtime=", 1)[1])
     assert runtime["worker_id"] == "phase5-worker"
-    assert runtime["pipeline_revision"] == "output-v17"
+    assert runtime["pipeline_revision"] == "output-v18"
     assert runtime["commit"] == "a" * 12 and runtime["pid"] > 0
     assert "test-token" not in failure_log
 
@@ -586,7 +583,7 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
     assert item.extracted_parameters_json["parameters"] == expected_parameters
     assert item.extracted_parameters_json["performanceParameters"]["Tapered Insulation"] == "TR27"
     assert item.extracted_parameters_json["performanceParameters"]["Bauder Roof Num"] is None
-    assert item.extracted_parameters_json["sources"]["Reason for Change"] == "Business Rule"
+    assert item.extracted_parameters_json["sources"]["Reason for Change"] == "AI recommendation from Email Context"
     assert item.match_result_json["legacyDiagnostics"] == golden_expected["matching"]
     assert job.status == "completed"
     assert job.attempt_count == 1
@@ -617,7 +614,7 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
     expected_sources = {
         parameter: "Email Content" for parameter in expected_parameters
     }
-    expected_sources["Reason for Change"] = "Business Rule"
+    expected_sources["Reason for Change"] = "AI recommendation from Email Context"
     expected_csv_content = build_ai_data_csv_bytes(
         expected_parameters,
         expected_sources,
@@ -632,8 +629,8 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
     assert b"Example Roofing Limited" in match_pdf_content
     assert b"Candidate TP Ref: 16771" in match_pdf_content
     assert b"Candidate TP Ref: 20442" in match_pdf_content
-    assert b"Match: 81.8%" in match_pdf_content
-    assert b"Match: 62.7%" in match_pdf_content
+    assert b"Title similarity: 81.8%" in match_pdf_content
+    assert b"Title similarity: 62.7%" in match_pdf_content
     assert b"Accounts" in match_pdf_content
     assert b"New Enq / Amend" in match_pdf_content
     assert b"candidate TP Ref" in match_pdf_content

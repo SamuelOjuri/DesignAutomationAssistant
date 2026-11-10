@@ -1,0 +1,8 @@
+.specification-review { overflow-wrap: anywhere; }
+.specification-review :is(button, a, input, select, textarea):focus-visible { outline: 3px solid hsl(var(--ring)); outline-offset: 3px; }
+.specification-review :is(input, select, textarea) { max-width: 100%; }
+.specification-review textarea { resize: vertical; }
+.review-skip { position: fixed; top: -100px; left: 1rem; z-index: 50; background: white; padding: .75rem; }
+.review-skip:focus { top: 1rem; }
+.review-button { min-height: 44px; }
+@media (max-width: 480px) { .specification-review { padding: .75rem; } .specification-review .review-button { white-space: normal; } }

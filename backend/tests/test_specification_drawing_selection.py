@@ -5,9 +5,8 @@ from copy import deepcopy
 import pytest
 
 from backend.app.models import PerformanceSpecificationArtifact
-from backend.app.services.performance_specification_evidence import REVIEW_PREFIX_REFERENCE
 from backend.app.services.performance_specification_sources import (
-    UNMATCHED_REVIEW_PREFIX, resolve_specification_sources,
+    UNMATCHED_DRAWING, resolve_specification_sources,
 )
 from backend.tests.test_performance_specification import (
     BOARD, ITEM, case, column, current, pdf_text, relation, run,
@@ -102,7 +101,7 @@ def test_several_baseline_drawing_identities_are_not_resolved_by_date(case):
 
 
 @pytest.mark.parametrize("drawings", ["different_series", "duplicate", "none"])
-def test_known_baseline_without_unique_crm_match_does_not_use_unassigned_fallback(case, drawings):
+def test_known_baseline_without_unique_crm_match_preserves_review_candidates(case, drawings):
     add_baseline(without_requested_reference(case))
     if drawings == "different_series":
         case.gateway.project["subitems"][0]["name"] = "TP00901_26.02 - A"
@@ -110,8 +109,13 @@ def test_known_baseline_without_unique_crm_match_does_not_use_unassigned_fallbac
         add_drawing(case, "TP00901_26.01 - A")
     else:
         case.gateway.project["subitems"] = []
-    assert run(case) == ["failed"]
-    assert not case.gateway.uploads
+    assert run(case) == ["published"]
+    assert current(case).source_json["drawingItemId"] is None
+    assert current(case).source_json["drawingSelection"]["status"] == {
+        "different_series": "unmatched", "duplicate": "ambiguous", "none": "empty",
+    }[drawings]
+    assert current(case).source_json["issues"]["Drawing Reference"] == UNMATCHED_DRAWING
+    assert all(read["itemId"] in {"901", ITEM} for read in current(case).source_json["crmReads"])
 
 
 def test_requested_reference_takes_precedence_over_baseline(case):
@@ -151,17 +155,17 @@ def test_missing_reference_publishes_email_values_and_review_without_reading_rol
     assert len(case.calls) == calls and len(case.gateway.uploads) == 1
 
 
-def test_holding_reference_resolves_unassigned_publication_on_next_refresh(case):
+def test_holding_reference_does_not_override_reviewer_drawing_context(case):
     without_requested_reference(case)
     add_drawing(case)
     assert run(case) == ["published"]
     previous_revision = current(case).current_revision
     case.gateway.holding["column_values"].append(column("drawing_reference", "Drawing Reference", "TP00901_26.02 - A"))
-    assert run(case) == ["published"]
-    assert current(case).current_revision != previous_revision
-    assert current(case).source_json["drawingItemId"] == "9102"
-    assert current(case).review_json is None
-    assert len(case.gateway.uploads) == 2 and len(case.gateway.deletes) == 1
+    assert run(case) == ["unchanged"]
+    assert current(case).current_revision == previous_revision
+    assert current(case).source_json["drawingItemId"] is None
+    assert current(case).review_json["status"] == "published_with_review"
+    assert len(case.gateway.uploads) == 1 and not case.gateway.deletes
 
 
 def test_conflicting_requested_references_still_block(case):
@@ -178,7 +182,7 @@ def test_conflicting_requested_references_still_block(case):
 FA_REFERENCE = "FA18910_26.01 - A"
 
 
-def requested_review_prefix_reference(case):
+def requested_general_prefix_reference(case):
     data = deepcopy(case.item.extracted_parameters_json)
     data["performanceParameters"]["Drawing Reference"] = FA_REFERENCE
     for evidence in data["specificationEvidence"]:
@@ -189,35 +193,32 @@ def requested_review_prefix_reference(case):
 
 
 @pytest.mark.parametrize("role", ["baseline", "requested"])
-def test_review_prefix_reference_selects_its_crm_drawing_and_publishes_for_review(case, role):
-    # Render job 246c1170: FA-prefixed references are accepted, never as verified TP drawings.
+def test_general_prefix_reference_selects_its_crm_drawing_without_prefix_warning(case, role):
     if role == "baseline":
         add_baseline(without_requested_reference(case), FA_REFERENCE, issuer=None)
     else:
-        requested_review_prefix_reference(case)
+        requested_general_prefix_reference(case)
     case.gateway.project["subitems"][0]["name"] = FA_REFERENCE
     assert run(case) == ["published"]
     record, published = current(case), artifact(case)
-    assert record.review_json["status"] == "published_with_review"
+    assert record.review_json is None
     assert record.source_json["drawingItemId"] == "9101"
     assert record.source_json["raw"]["Drawing Reference"] == FA_REFERENCE
     assert record.source_json["raw"]["Revision"] == "26.01 - A"
-    assert record.source_json["issues"] == {"Drawing Reference": REVIEW_PREFIX_REFERENCE}
-    assert published.translation_json["values"]["Drawing Reference"] is None
+    assert record.source_json["issues"] == {}
+    assert published.translation_json["values"]["Drawing Reference"] == FA_REFERENCE
     text = pdf_text(case.gateway.uploads[0][1])
-    assert "confirm this drawing reference" in text and FA_REFERENCE in text
+    assert "confirm this drawing reference" not in text and FA_REFERENCE in text
 
 
 @pytest.mark.parametrize("role,drawings", [
     ("baseline", "unmatched"), ("requested", "unmatched"), ("baseline", "none"),
 ])
-def test_review_prefix_reference_without_unique_crm_drawing_publishes_for_review(case, role, drawings):
-    # Items 3320450547 (requested GA13167_24.02 - F), 3295510085 and 3324209177
-    # (baseline GA/FA references) matched no single CRM drawing and published nothing.
+def test_general_prefix_reference_without_unique_crm_drawing_publishes_for_review(case, role, drawings):
     if role == "baseline":
         add_baseline(without_requested_reference(case), FA_REFERENCE, issuer=None)
     else:
-        requested_review_prefix_reference(case)
+        requested_general_prefix_reference(case)
     if drawings == "unmatched":
         case.gateway.project["subitems"][0]["name"] = "18910_26.01 - A - Roof 2"
         add_drawing(case, "18910_26.01 - A - Roof 2A")
@@ -230,22 +231,24 @@ def test_review_prefix_reference_without_unique_crm_drawing_publishes_for_review
     assert record.review_json["status"] == "published_with_review"
     source = record.source_json
     assert source["drawingItemId"] is None
-    assert source["drawingSelection"]["status"] == "unmatched_review_prefix"
+    assert source["drawingSelection"]["status"] == ("no_active" if drawings == "unmatched" else "empty")
     assert [c["itemId"] for c in source["drawingSelection"]["candidates"]] == (
         ["9101", "9102"] if drawings == "unmatched" else [])
     assert source["raw"]["Drawing Reference"] == FA_REFERENCE
     assert source["raw"]["Revision"] == "26.01 - A"
-    assert source["issues"] == {"Drawing Reference": UNMATCHED_REVIEW_PREFIX}
+    assert source["issues"] == {"Drawing Reference": UNMATCHED_DRAWING}
     assert all(read["itemId"] in {"901", ITEM} for read in source["crmReads"])
     assert published.translation_json["values"]["Drawing Reference"] is None
     text = pdf_text(case.gateway.uploads[0][1])
-    assert FA_REFERENCE in text and "matches no single linked drawing" in text
+    assert FA_REFERENCE in text and "drawing-specific CRM values have not been used" in text
     assert run(case) == ["unchanged"] and len(case.gateway.uploads) == 1
 
 
-def test_review_prefix_reference_without_linked_project_publishes_for_review(case):
+def test_general_prefix_reference_with_detected_project_does_not_need_holding_relation(case):
     case.gateway.holding["column_values"][0] = relation("board_relation_mkpbm5np", [])
-    requested_review_prefix_reference(case)
+    requested_general_prefix_reference(case)
     source = resolve_specification_sources(case.gateway, case.item)
     assert source["raw"]["Drawing Reference"] == FA_REFERENCE and source["raw"]["Revision"] == "26.01 - A"
-    assert source["issues"]["Drawing Reference"] == REVIEW_PREFIX_REFERENCE
+    assert source["reviewSource"]["selected_project"]["item_id"] == "901"
+    assert source["issues"]["Drawing Reference"] == UNMATCHED_DRAWING
+    assert "prefix" not in source["issues"]["Drawing Reference"].lower()

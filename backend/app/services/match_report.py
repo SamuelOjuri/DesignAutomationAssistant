@@ -20,6 +20,7 @@ class MatchReportCandidate:
     similarity: float
     match_percentage: str
     created_date: Optional[str] = None
+    match_rationale: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +29,8 @@ class MatchReport:
     extracted_project_title: str
     extracted_company: str
     candidates: tuple[MatchReportCandidate, ...]
+    request_recommendation: str = "Reviewer decision required"
+    intent_explanation: str = ""
 
     @classmethod
     def from_contract(
@@ -50,9 +53,12 @@ class MatchReport:
                     if candidate.get("createdDate")
                     else None
                 ),
+                match_rationale=str(candidate.get("matchRationale") or ""),
             )
             for candidate in match_contract.get("candidates", ())
         )
+        intent = match_contract.get("specificationRequestIntent")
+        from .specification_intent import reason_for_change
         return cls(
             source_item_id=str(source_item_id),
             extracted_project_title=str(
@@ -62,6 +68,8 @@ class MatchReport:
                 clean_extracted_value(extracted_company) or "Not found"
             ),
             candidates=candidates,
+            request_recommendation=reason_for_change(intent) if intent else "Reviewer decision required",
+            intent_explanation=str(intent.get("explanation") or "") if intent else "",
         )
 
 
@@ -123,14 +131,20 @@ def render_match_report_pdf(report: MatchReport) -> bytes:
             font_size=font_size,
             max_width=right - left,
         )
-        required_height = len(lines) * leading + gap_after
-        if y - required_height < bottom:
-            new_page()
-        document.setFont(font_name, font_size)
         for line in lines:
+            if y - leading < bottom:
+                new_page()
+            document.setFont(font_name, font_size)
             document.drawString(left, y, line)
             y -= leading
         y -= gap_after
+
+    def reserve(lines: list[tuple[str, str]]) -> None:
+        """Keep an ordinary candidate or action block on one page when it fits."""
+        height = 8 + sum(14 * len(_wrapped_lines(text, font_name=font,
+            font_size=10, max_width=right - left)) for text, font in lines)
+        if y - min(height, top - bottom) < bottom:
+            new_page()
 
     write(
         "Matched Projects Review",
@@ -146,6 +160,10 @@ def render_match_report_pdf(report: MatchReport) -> bytes:
         f"not a resolved Monday account): {report.extracted_company}",
         gap_after=8,
     )
+    write(f"Request type: {report.request_recommendation}", font_name="Helvetica-Bold")
+    if report.intent_explanation:
+        write(report.intent_explanation)
+    write("Project matches support review. Title similarity is not a probability of an amendment.", gap_after=8)
     write(
         f"Total potential matches: {len(report.candidates)}",
         font_name="Helvetica-Bold",
@@ -156,21 +174,31 @@ def render_match_report_pdf(report: MatchReport) -> bytes:
         write("No matches found.", font_name="Helvetica-Bold", gap_after=8)
     else:
         for candidate in report.candidates:
+            reserve([(f"{candidate.rank}. {candidate.project_title}", "Helvetica-Bold"),
+                (f"Candidate TP Ref: {candidate.project_reference}", "Helvetica"),
+                (f"Title similarity: {candidate.match_percentage}", "Helvetica"),
+                *([(candidate.match_rationale, "Helvetica")] if candidate.match_rationale else []),
+                *([(f"Created date: {candidate.created_date}", "Helvetica")] if candidate.created_date else []),
+                (f"Monday item ID: {candidate.monday_item_id}", "Helvetica")])
             write(
                 f"{candidate.rank}. {candidate.project_title}",
                 font_name="Helvetica-Bold",
             )
             write(f"Candidate TP Ref: {candidate.project_reference}")
-            write(f"Match: {candidate.match_percentage}")
+            write(f"Title similarity: {candidate.match_percentage}")
+            if candidate.match_rationale:
+                write(candidate.match_rationale)
             if candidate.created_date:
                 write(f"Created date: {candidate.created_date}")
             write(f"Monday item ID: {candidate.monday_item_id}", gap_after=8)
 
-    write("Reviewer action", font_name="Helvetica-Bold", gap_after=2)
-    write(
-        "Choose Accounts using the extracted Company Name as context, decide New Enq / "
-        "Amend, and, for an amendment, select the appropriate candidate TP Ref "
-        "before moving the item to an active group."
+    action = (
+        "Review the AI recommendation and matching evidence. Choose Accounts using the extracted Company Name "
+        "as context, decide New Enq / Amend and, for an amendment, select the appropriate candidate TP Ref "
+        "before manually moving the item to an active group."
     )
+    reserve([("Reviewer action", "Helvetica-Bold"), (action, "Helvetica")])
+    write("Reviewer action", font_name="Helvetica-Bold", gap_after=2)
+    write(action)
     document.save()
     return buffer.getvalue()

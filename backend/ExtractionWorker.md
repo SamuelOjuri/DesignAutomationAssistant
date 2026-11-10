@@ -1,5 +1,49 @@
 **Revised Functional Contract**
 
+Specification Review Phase 3 adds the versioned intent/reference/candidate
+sidecars described in [references and intent](SpecificationReviewReferencesAndIntent.md).
+The runtime is `output-v18`. The pinned legacy producer provenance below remains
+the historical baseline; the new recommendation behavior is versioned separately.
+
+Specification Review Phase 5 gives the separate performance-specification publisher
+its own Landing Zone lifecycle. It uses the configured design board/Landing group,
+requires a live active item and always excludes Completed Folder. The design worker
+can continue its existing outputs in eligible active groups; the specification
+publisher stops when the item leaves Landing Zone and retains its PDF/history.
+Landing Zone stays excluded from chat/document auto-sync. Metadata cancellation
+therefore does not cancel specification work; explicit scope/lifecycle and retirement
+checks own that cancellation.
+
+After durable extraction, specification work is queued directly, including in
+shadow, without waiting for the CSV/preview/matched-report uploads. Periodic
+specification discovery and design reconciliation repair missing/cancelled work for
+registered eligible items without requiring a Task or active auto-sync. Checks are
+bounded and rotate fairly; repeated reconciliation preserves pending generations,
+queue positions and retry delays. Design admission remains activation-bounded, with
+explicit item-scoped backfill for older Landing Zone items. Specification work now
+uses independent `PERFORMANCE_SPECIFICATION_MODE` (default `off`) and
+`PERFORMANCE_SPECIFICATION_ALLOWLIST_ITEM_IDS` controls, plus its existing master
+processing flag. These never inherit the design mode/allowlist. Existing design
+CSV, preview and matched-report work can remain `DESIGN_PROCESSING_MODE=enabled`
+while specifications are off, private shadow or restricted to their own allowlist.
+Review enablement alone starts no worker. See the
+[deployed specification setup](SpecificationReviewFrontend.md#deployed-setup-and-rollout).
+
+Source dependency webhooks cover detected/selected projects, drawings, relevant
+Accounts/Contacts and mirror sources even when holding TP Ref is empty. Register
+drawing creation, name/field changes, moves, archive and deletion subscriptions on
+the main/parent project board, using the corresponding subitem event types.
+Ordinary project/Account/Contact/mirror records use their own board's item events.
+See [the subscription templates](scripts/specification_source_webhooks.graphql) and
+[Monday's webhook reference](https://developer.monday.com/api-reference/reference/webhooks).
+Periodic checks cover restored drawings; Monday has no `subitem_restored` event.
+Generated AI Data/Matched Projects changes are ignored. Holding Accounts/Date Received
+edits do not alter the email-first specification identity; a live relevant CRM source
+change may require another review. The specification worker writes only its own PDF,
+and the following design scalar ownership rules do not apply to reviewer saves.
+Review API/auth and the embedded reviewer interface remain later phases. See
+[specification deployment and lifecycle](PerformanceSpecification.md).
+
 An existing Monday item becomes eligible when:
 
 - Monday item state is exactly `active`; archived, deleted, missing, malformed, and unknown states are ineligible.
@@ -266,7 +310,13 @@ For a publication execution:
 13. Run the gate again immediately before uploading or adopting Matched Projects, which remains the final Monday side effect.
 14. Lock the item and job for a final desired-versus-execution comparison. In one transaction, verify all three current artifacts have Monday asset IDs, mark the CSV, preview PDF, and match report `published`, advance the published identity, mark the job `completed`, and set the item to `ready_for_review` only when the readiness predicate above is true. Mark prior automation-owned artifacts `delete_pending`; delete them from Monday after commit as best-effort cleanup.
 
-The AI Data CSV should retain all 21 parameter rows for schema compatibility, and the preview PDF should display the same ordered rows without changing their values. The worker must not infer New Enquiry or Amendment: `Reason for Change` is always `Reviewer decision required` with source `Business Rule`, and only the reviewer may record that decision in the human-owned New Enq / Amend column. Since no project is selected, every other parameter contains email-derived values only. Any default inserted by a business rule should have source `Business Rule`; it must not be represented as a human CRM decision.
+The AI Data CSV retains all 21 parameter rows, and the preview PDF displays those
+same ordered rows. `Reason for Change` now states `New Enquiry (AI recommendation)`
+or `Amendment (AI recommendation)` when cited current-request evidence supports
+it; uncertain requests retain `Reviewer decision required`. Its source is
+`AI recommendation from Email Context`. Only a human may record the Monday
+New Enq / Amend decision. Candidate project/drawing reads are a separate sidecar
+and do not merge CRM technical values into the email-derived CSV parameters.
 
 Use a shared validation gate in readiness and execution modes. Readiness refreshes current Monday state, board, group, name and Email assets, recomputes the desired identity and removes stale readiness. Execution additionally verifies the immutable execution identity, pipeline version, lease ownership and operational mode. Both modes allow Landing Zone or a configured active group for registered items, with Completed Folder taking precedence. Read the current scalar values in the same target query. No other remote work may occur between a successful execution gate and its guarded side effect.
 

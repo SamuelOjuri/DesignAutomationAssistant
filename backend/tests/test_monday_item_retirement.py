@@ -9,7 +9,8 @@ from fastapi import HTTPException
 from backend.app.config import settings
 from backend.app.models import (
     AutoSyncJob, AutoSyncReconciliationCheck, DesignProcessingItem, DesignProcessingJob,
-    DesignProcessingReconciliationCheck, PerformanceSpecification, Task,
+    DesignProcessingReconciliationCheck, PerformanceSpecification, PerformanceSpecificationArtifact,
+    PerformanceSpecificationReview, PerformanceSpecificationReviewEvent, Task,
 )
 from backend.app.monday_client import MondayItemUnavailable
 from backend.app.services import auto_sync_reconciliation as reconciliation
@@ -43,6 +44,7 @@ def design_sweep(case, **kwargs):
 @pytest.fixture()
 def tracked(case, monkeypatch):
     monkeypatch.setattr(settings, "performance_specification_enabled", True)
+    monkeypatch.setattr(settings, "performance_specification_mode", "enabled")
     monkeypatch.setattr(settings, "design_processing_board_id", BOARD)
     monkeypatch.setattr(settings, "auto_sync_reconciliation_unavailable_interval_seconds", 3600)
     apply_auto_sync_policy_for_item(case.db, case.item, trigger_type="webhook", desired_source_revision="rev-1")
@@ -130,3 +132,53 @@ def test_dry_run_untracked_and_invalid_ids_change_nothing(case, tracked):
     assert case.db.get(Task, case.task.external_task_key, populate_existing=True).auto_sync_state == "active"
     assert case.db.get(AutoSyncReconciliationCheck, (BOARD, "123", "completed_transition")) is None
     assert case.db.query(DesignProcessingJob).filter_by(item_id="123").one().status == "scheduled"
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_registered_review_without_task_can_be_retired_while_retaining_pdf_and_history(case, monkeypatch, dry_run):
+    monkeypatch.setattr(settings, "performance_specification_enabled", True)
+    monkeypatch.setattr(settings, "performance_specification_mode", "enabled")
+    monkeypatch.setattr(settings, "design_processing_board_id", BOARD)
+    item_id = "456"
+    item = DesignProcessingItem(id=uuid.uuid4(), board_id=BOARD, item_id=item_id,
+        state="ready_for_review", extracted_parameters_json={"retained": "email evidence"}, warnings_json=[])
+    case.db.add(item)
+    case.db.flush()
+    spec = PerformanceSpecification(board_id=BOARD, item_id=item_id, requested_generation=2,
+        completed_generation=1, scheduled_for=NOW, lease_token="running", lease_until=NOW + timedelta(hours=1),
+        current_revision="retained-revision")
+    case.db.add(spec)
+    case.db.flush()
+    artifact = PerformanceSpecificationArtifact(board_id=BOARD, item_id=item_id, revision="retained-revision",
+        translation_json={"values": {"Decking": "Reviewer value"}}, model_version="test", filename="retained.pdf",
+        storage_bucket="private", storage_object_key="retained.pdf", content_sha256="digest", size_bytes=100,
+        monday_asset_id="attached-pdf", status="published")
+    review = PerformanceSpecificationReview(board_id=BOARD, item_id=item_id, monday_account_id="acct",
+        source_fingerprint="reviewed-source", source_identity_json={}, decision_digest="decision",
+        field_decisions_json={"Decking": {"operation": "specify_value", "display_value": "Reviewer value"}})
+    case.db.add_all([artifact, review])
+    case.db.flush()
+    event_id = uuid.uuid4()
+    case.db.add(PerformanceSpecificationReviewEvent(id=event_id, monday_account_id="acct", board_id=BOARD,
+        item_id=item_id, actor_app_user_id="reviewer", actor_monday_user_id="100", command_type="save",
+        prior_review_version=0, resulting_review_version=0, original_decisions_json={},
+        replacement_decisions_json=review.field_decisions_json, base_source_fingerprint="reviewed-source",
+        request_digest="decision", result_json={}))
+    case.db.commit()
+    assert case.db.query(Task).filter_by(board_id=BOARD, item_id=item_id).count() == 0
+
+    [result] = retire_deleted_items(case.db, [item_id], fetch_item=purged, dry_run=dry_run)
+    assert (result.action, result.tasks) == ("would_retire" if dry_run else "retired", 0)
+    case.db.expire_all()
+    assert case.db.get(DesignProcessingItem, item.id).state == ("ready_for_review" if dry_run else "ineligible")
+    spec = case.db.get(PerformanceSpecification, (BOARD, item_id))
+    assert (spec.scheduled_for is None) is not dry_run
+    if not dry_run:
+        assert spec.completed_generation == spec.requested_generation and spec.lease_token is None
+        check = case.db.get(DesignProcessingReconciliationCheck, (BOARD, item_id))
+        assert check.last_outcome == "retired" and check.last_reason == "confirmed_deleted"
+    assert spec.current_revision == "retained-revision"
+    assert case.db.get(PerformanceSpecificationArtifact, (BOARD, item_id, "retained-revision")).monday_asset_id == "attached-pdf"
+    assert case.db.get(PerformanceSpecificationReview, (BOARD, item_id)).field_decisions_json == review.field_decisions_json
+    assert case.db.get(PerformanceSpecificationReviewEvent, event_id).request_digest == "decision"
+    assert case.db.get(AutoSyncReconciliationCheck, (BOARD, item_id, "completed_transition")) is None

@@ -22,6 +22,7 @@ from .auto_sync_policy import RETIRED_SOURCE_OUTCOME
 from .design_processing_observability import log_design_processing_event
 from .design_processing_queue import publication_allowed_for_item, queue_design_processing_snapshot
 from .design_processing_policy import design_scope_exclusion, eligible_design_group_ids
+from .specification_policy import specification_processing_enabled, specification_processing_allowed
 from .design_processing_state import next_obligation
 from .design_processing_target import (
     DesignProcessingReadGateway,
@@ -213,12 +214,30 @@ def reconcile_landing_zone_once(
                 board_id=board_id,
             ).all()
         }
+        specifications = {}
+        specification_group_ids = frozenset()
+        if specification_processing_enabled():
+            from ..models import PerformanceSpecification
+            from .performance_specification import specification_needs_reconciliation
+            from .specification_policy import eligible_specification_group_ids
+
+            specifications = {
+                record.item_id: record
+                for record in db.query(PerformanceSpecification).filter_by(board_id=board_id).all()
+            }
+            specification_group_ids = eligible_specification_group_ids()
         candidates_by_id = {candidate.item_id: candidate for candidate in candidates}
         for item in tracked:
             check = checks.get(item.item_id)
             if check is not None and check.last_outcome == RETIRED_SOURCE_OUTCOME:
                 continue  # Confirmed deleted on Monday; nothing remains to observe.
-            if item.state != "ready_for_review" or (
+            specification_recovery = False
+            if specification_processing_allowed(item.item_id) and check is not None:
+                specification_recovery = (
+                    check.last_group_id in specification_group_ids
+                    and specification_needs_reconciliation(specifications.get(item.item_id))
+                )
+            if item.state != "ready_for_review" or specification_recovery or (
                 check is not None and check.last_outcome == "unavailable"
             ):
                 candidates_by_id.setdefault(item.item_id, MondayGroupItem(item.item_id, None))
@@ -256,6 +275,13 @@ def reconcile_landing_zone_once(
             # Only successful, settled observations use this fast bypass. Keep
             # unavailable/excluded backoffs intact. Policy changes and local
             # work must be actionable even before the settled deadline.
+            specification_changed = False
+            if specification_processing_allowed(candidate.item_id) and stored is not None:
+                observed_group = candidate_groups.get(candidate.item_id, check.last_group_id if check else None)
+                if observed_group in specification_group_ids:
+                    specification_changed = specification_needs_reconciliation(
+                        specifications.get(candidate.item_id),
+                    )
             settled_changed = (
                 check is not None and check.last_outcome == "ignored" and check.last_reason == "ready"
                 and stored is not None and (
@@ -267,6 +293,7 @@ def reconcile_landing_zone_once(
                     or check.last_checked_at is None
                     or _stored_utc(stored.updated_at) > _stored_utc(check.last_checked_at)
                     or candidate_groups.get(candidate.item_id, check.last_group_id) != check.last_group_id
+                    or specification_changed
                 )
             )
             if check is not None and check.next_check_at is not None and (

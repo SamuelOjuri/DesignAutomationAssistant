@@ -23,6 +23,7 @@ from ..specification_image_text import IMAGE_TRANSCRIPTION_PROMPT
 from ..specification_request_context import request_context_summary, select_client_request
 from ..source_text import require_json_safe_text
 from ..specification_failures import SpecificationEvidenceError
+from ..specification_intent import build_request_intent
 
 
 GenerateContent = Callable[[str, Any, types.GenerateContentConfig], Any]
@@ -78,7 +79,7 @@ class LegacyGeminiClient:
             repair_template_markers,
         )
         from ..performance_specification_evidence import (
-            PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, REVIEW_PREFIX_REFERENCE, UNCONFIRMED_REFERENCE,
+            PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNCONFIRMED_REFERENCE,
             UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT, request_note_diagnostics, resolve_request_notes,
         )
         prompt = f"""
@@ -163,7 +164,7 @@ class LegacyGeminiClient:
                 "source text, without changing the fact, verified scope or request time. "
                 "A reformatted date must be corrected to the literal Date/Sent header of "
                 "the message containing the fact, without adding a timezone. An unquoted "
-                "issuer on an explicit TP/AX reference may be null; do not infer an issuer. "
+                "issuer on an explicit two-letter-prefix reference may be null; do not infer an issuer. "
                 "Keep described existing Decking as applicable baseline evidence, even "
                 "when no new deck was requested. Do not clear that field solely because "
                 "its role is baseline. A known image-message date must match the "
@@ -183,6 +184,8 @@ class LegacyGeminiClient:
             for name, value in recovery.model_dump().items():
                 if not name.startswith("specification_") and missing(getattr(result, name)):
                     setattr(result, name, value)
+            if recovery.specification_request_intent is not None:
+                result.specification_request_intent = recovery.specification_request_intent
             if source_manifest is not None:
                 repair_message_dates(recovery, source_manifest)
                 repair_image_company_citations(recovery, source_manifest)
@@ -211,7 +214,7 @@ class LegacyGeminiClient:
             provenance, diagnostics = evidence_diagnostics(result, source_manifest)
             unresolved = {label: reason for label, reason in diagnostics.items()
                           if (reason not in {VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT, PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN,
-                                             UNCONFIRMED_REFERENCE, REVIEW_PREFIX_REFERENCE}
+                                             UNCONFIRMED_REFERENCE}
                               and not (label in {"Date Received", "Revision"}
                                        and reason == "Populated extraction has no verified applicable evidence"))
                           or any(e["status"] == "unverified" for e in provenance[label].get("rejectedCandidates", []))}
@@ -249,6 +252,9 @@ class LegacyGeminiClient:
             if source_manifest is not None:
                 raise evidence_failure(message) from None
             raise ValueError(message) from None
+        if source_manifest is not None:
+            result.specification_request_intent = build_request_intent(
+                source_manifest, result.specification_request_intent)
         return result
 
     def query_llm(self, context: str, query: str) -> str:

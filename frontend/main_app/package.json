@@ -9,6 +9,8 @@
     "start": "next start",
     "test:task-polling": "node --test tests/task-polling.test.mjs",
     "test:chat": "node --test tests/chat-stream.test.mjs tests/chat-relay.test.mjs",
+    "test:specification-review": "node --test tests/specification-review-api.test.mjs tests/specification-review-state.test.mjs tests/specification-review-monday.test.mjs",
+    "test:specification-review:browser": "node tests/specification-review-harness.mjs",
     "lint": "next lint"
   },
   "dependencies": {

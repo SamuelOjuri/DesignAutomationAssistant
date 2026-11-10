@@ -6,14 +6,14 @@ import pytest
 
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.performance_specification_evidence import (
-    REVIEW_PREFIX_REFERENCE, UNCONFIRMED_REFERENCE, VALUE_CONFLICT, resolve_baseline_drawing_identity,
+    UNCONFIRMED_REFERENCE, VALUE_CONFLICT, resolve_baseline_drawing_identity,
     resolve_email_evidence, resolve_request_notes,
 )
 from backend.app.services.specification_recovery import (
     extraction_payload, repair_note_list_formatting, repair_template_markers,
 )
 from backend.app.services.specification_semantics import (
-    SpecificationEvidence, drawing_reference_key, review_prefix_reference, scale_ratio, tp_reference_revision,
+    SpecificationEvidence, drawing_reference_key, scale_ratio, tp_reference_revision,
 )
 from backend.tests.test_specification_evidence import SENT, candidate, extraction, source
 from backend.tests.test_specification_publication_hardening import extract_twice, parameters
@@ -734,7 +734,7 @@ def test_scalar_cited_only_as_existing_drawing_is_withdrawn_even_if_recovery_res
     payload = extraction_payload(result, manifest)
     assert resolve_email_evidence(payload)[0]["Drawing Reference"] is None
     candidates, reason = resolve_baseline_drawing_identity(payload)
-    assert [c["value"] for c in candidates] == [FA_REFERENCE] and reason == REVIEW_PREFIX_REFERENCE
+    assert [c["value"] for c in candidates] == [FA_REFERENCE] and reason is None
 
 
 def test_scalar_with_a_different_baseline_value_is_not_withdrawn():
@@ -744,42 +744,46 @@ def test_scalar_with_a_different_baseline_value_is_not_withdrawn():
         extract_twice(initial, initial, [source("asset:1:attachment:0", FA_TEXT)])
 
 
-@pytest.mark.parametrize("reference,review,suffix", [
-    (FA_REFERENCE, True, "26.01 - A"),
-    ("FA 18910_26.01 \u2013 A", True, "26.01 - A"),
-    ("fa18910_26.01", True, "26.01"),
-    ("TP18910_26.01 - A", False, None),  # Verified TP family, not review-only.
-    ("AX 16670_26.12 - B", False, None),  # Accepted legacy AX family.
-    ("D.S - 00121_26.01 - D", False, None),
-    ("18910_26.01 - A", False, None),
-    ("FAB18910_26.01 - A", False, None),  # Only a two-letter prefix.
+@pytest.mark.parametrize("reference,suffix", [
+    (FA_REFERENCE, "26.01 - A"),
+    ("FA 18910_26.01 \u2013 A", "26.01 - A"),
+    ("fa18910_26.01", "26.01"),
+    ("TP18910_26.01 - A", "26.01 - A"),
+    ("AX 16670_26.12 - B", "26.12 - B"),
+    ("D.S - 00121_26.01 - D", None),
+    ("18910_26.01 - A", None),
+    ("FAB18910_26.01 - A", None),
 ])
-def test_review_prefix_family_is_only_another_two_letter_prefix(reference, review, suffix):
-    assert review_prefix_reference(reference) is review
-    if review:
-        assert tp_reference_revision(reference, confirmed_crm=True) is None  # Never a verified family.
-        assert tp_reference_revision(reference, review_prefix=True) == suffix
+def test_general_reference_family_accepts_all_two_letter_prefixes(reference, suffix):
+    assert tp_reference_revision(reference) == suffix
 
 
 @pytest.mark.parametrize("issuer", [None, "AXTER LTD", "TaperedPlus"])
-def test_requested_review_prefix_reference_is_accepted_for_review(issuer):
-    data = extraction([source("asset:1:attachment:0", FA_TEXT)], [
-        candidate("Drawing Reference", FA_REFERENCE, FA_TEXT, issuer=issuer),
-        candidate("Revision", "26.01 - A", FA_TEXT),
+def test_general_reference_keeps_issuer_evidence_checks(issuer):
+    text = FA_TEXT + ("\n" + issuer if issuer else "")
+    data = extraction([source("asset:1:attachment:0", text)], [
+        candidate("Drawing Reference", FA_REFERENCE, text, issuer=issuer),
+        candidate("Revision", "26.01 - A", text),
     ])
     raw, provenance, issues = resolve_email_evidence(data)
     assert raw["Drawing Reference"] == FA_REFERENCE and raw["Revision"] == "26.01 - A"
-    assert issues == {"Drawing Reference": REVIEW_PREFIX_REFERENCE}
+    assert not issues
     assert "rejectedCandidates" not in provenance["Drawing Reference"]
 
 
-def test_review_prefix_reference_does_not_fail_extraction():
+def test_general_reference_does_not_need_prefix_only_review():
     evidence = candidate("Drawing Reference", FA_REFERENCE, FA_TEXT)
     manifest = [source("asset:1:attachment:0", FA_TEXT)]
     initial = parameters(drawing_reference=FA_REFERENCE, specification_evidence=[evidence])
     result = extract_twice(initial, initial, manifest)
-    assert resolve_email_evidence(extraction_payload(result, manifest))[2] == {
-        "Drawing Reference": REVIEW_PREFIX_REFERENCE}
+    assert resolve_email_evidence(extraction_payload(result, manifest))[2] == {}
+
+
+def test_general_reference_cannot_claim_an_unquoted_issuer():
+    data = extraction([source("asset:1:attachment:0", FA_TEXT)], [
+        candidate("Drawing Reference", FA_REFERENCE, FA_TEXT, issuer="TaperedPlus"),
+    ])
+    assert resolve_email_evidence(data)[2]["Drawing Reference"] == "Drawing issuer is absent from the supporting excerpt"
 
 
 @pytest.mark.parametrize("value", ["FA18910_26.02 - A", "FA18910_26.01 - B"])

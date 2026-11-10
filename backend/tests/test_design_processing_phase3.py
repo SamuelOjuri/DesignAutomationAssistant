@@ -357,7 +357,7 @@ def test_project_full_text_fallback_preserves_legacy_query_shape(monkeypatch):
 
     def request(access_token, query, variables=None, *, timeout=10, **kwargs):
         queries.append(query)
-        return {"data": {"boards": [{"items_page": {"items": []}}]}}
+        return {"data": {"boards": [{"items_page": {"items": [], "cursor": None}}]}}
 
     monkeypatch.setattr(monday_client, "monday_graphql_request", request)
 

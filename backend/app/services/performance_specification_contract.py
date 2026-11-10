@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from datetime import date, datetime
 import hashlib
 import json
 import re
@@ -15,11 +16,12 @@ from .legacy_enquiry.llm import LegacyGeminiClient
 from .gemini_schema import gemini_response_schema
 from .gemini_requests import GeminiJSONRequester
 from .specification_semantics import (
-    FIELD_DEFINITIONS, PROVIDER_RECITATION_REVIEW_STATUS, SpecificationField, missing,
+    FIELD_DEFINITIONS, PDF_FIELD_NAMES as FIELD_NAMES,
+    PROVIDER_RECITATION_REVIEW_STATUS, SpecificationField, missing,
 )
 
 
-SPECIFICATION_VERSION = "performance-specification-v4"
+SPECIFICATION_VERSION = "performance-specification-v5"
 NOT_PROVIDED = "Not Provided"
 SOURCE_REVIEW_DETAILS = {
     PROVIDER_RECITATION_REVIEW_STATUS: (
@@ -27,13 +29,6 @@ SOURCE_REVIEW_DETAILS = {
         "contents were not used. Review this source before relying on this specification."
     ),
 }
-FIELD_NAMES = (
-    "Scale", "Page Size", "Drawing Reference", "Drawing Title",
-    "Bauder Contract Number", "Bauder Roof Num", "Incoming Information",
-    "Revision", "Date Received", "Company", "Contact", "Surveyor",
-    "Target U Value", "Target Min U Value", "Membrane", "Tapered Insulation",
-    "VCL", "Decking",
-)
 OPTIONS = {
     "Scale": (
         "1:2500", "1:1250", "1:500", "1:250", "1:150", "1:100", "1:50",
@@ -119,6 +114,11 @@ class SpecificationPublication(CADTranslation):
     request_notes: list[str] = Field(default_factory=list, alias="requestNotes", max_length=64)
     # Item-level: an unread source cannot be attributed to any one field.
     source_reviews: list[str] = Field(default_factory=list, alias="sourceReviews")
+    # Literal human decisions are PDF values, not additions to the CAD schema.
+    display_values: dict[SpecificationField, str] = Field(default_factory=dict, alias="displayValues")
+    field_sources: dict[SpecificationField, str] = Field(default_factory=dict, alias="fieldSources")
+    mapping_issues: dict[SpecificationField, str] = Field(default_factory=dict, alias="mappingIssues")
+    review_version: int | None = Field(default=None, alias="reviewVersion", ge=0)
 
     @model_validator(mode="after")
     def validate_reviews(self):
@@ -128,7 +128,61 @@ class SpecificationPublication(CADTranslation):
                 raise ValueError("A field review requires a null CAD value and nonempty details")
         if any(not detail.strip() for detail in self.source_reviews):
             raise ValueError("A source review requires nonempty details")
+        if any(len(value) > 8192 for value in self.display_values.values()):
+            raise ValueError("PDF display values must not exceed the reviewer field limit")
         return self
+
+
+def reviewer_cad_mapping(label: str, display_value: str):
+    """Validate a literal reviewer choice without a model or an invented TRICS ID.
+
+    The existing CAD contract supplies technical choices and free-text fields.
+    It does not establish directory/drawing identities in a TRICS catalogue.
+    Unknown/custom values remain printable with an explicit unmapped status.
+    """
+    from .specification_review_contract import CADMapping
+
+    if label not in FIELD_NAMES:
+        raise ValueError("Unknown specification field")
+    value = cad_source_values({label: display_value})[label]
+    if label in {"Company", "Contact", "Surveyor", "Drawing Reference", "Revision", "Incoming Information"}:
+        return CADMapping()
+    if label in OPTIONS and value not in OPTIONS[label]:
+        return CADMapping()
+    if label in NUMERIC_FIELDS:
+        if not re.fullmatch(r"(?:0|[1-9]\d*)(?:[.,]\d+)?", value):
+            return CADMapping()
+        try:
+            number = Decimal(value.replace(",", ".")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if number <= 0:
+                return CADMapping()
+            value = str(number)
+        except InvalidOperation:
+            return CADMapping()
+    if label == "Date Received":
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            for pattern in ("%d %b %Y", "%d %B %Y", "%d/%m/%Y"):
+                try:
+                    datetime.strptime(value, pattern)
+                    break
+                except ValueError:
+                    continue
+            else:
+                return CADMapping()
+    try:
+        _cad_values_with({label: value})
+    except ValueError:
+        return CADMapping()
+    return CADMapping(status="mapped", value=value, catalogue_version=SPECIFICATION_VERSION)
+
+
+def _cad_values_with(changes):
+    return CADSpecificationValues.model_validate({
+        **{label: "" if label == "Incoming Information" else None for label in FIELD_NAMES},
+        **changes,
+    })
 
 
 class UnresolvedSpecificationTranslation(ValueError):
@@ -285,31 +339,124 @@ def _conflict_detail(label, source, reason):
     )
 
 
-def prepare_specification_publication(source, client) -> SpecificationPublication:
-    """Publish explicit review details while leaving unresolved CAD values null."""
+def _review_translation_plan(source):
+    raw = cad_source_values({label: source["raw"].get(label) for label in FIELD_NAMES})
+    raw["Incoming Information"] = ""
+    direct, display, sources, mapping_issues = {}, {}, {}, {}
+    provenance = source.get("review", {}).get("field_provenance", {})
+    for label, field in provenance.items():
+        if label not in FIELD_NAMES:
+            continue
+        sources[label] = field["source_label"]
+        source_kind = field["source"]
+        value = field["display_value"]
+        mapping = field.get("cad_mapping", {})
+        authoritative = source_kind == "reviewer_specified" or field.get("reviewer_accepted", False)
+        if source_kind in {"default_blank", "unassigned"}:
+            display[label] = "" if source_kind == "default_blank" else "Not yet assigned"
+        elif authoritative:
+            display[label] = value if value is not None else NOT_PROVIDED
+        if authoritative or mapping.get("status") == "mapped":
+            # Human text cannot be rewritten by an automated CAD translator.
+            # A saved validated mapping can populate CAD independently.
+            raw[label] = "" if label == "Incoming Information" else None
+            mapped = mapping.get("value") if mapping.get("status") == "mapped" else None
+            if mapped is not None:
+                _cad_values_with({label: mapped})
+            direct[label] = "" if label == "Incoming Information" else mapped
+            if authoritative and value and mapping.get("status", "unmapped") == "unmapped":
+                mapping_issues[label] = "PDF display value has no verified CAD mapping."
+        elif label in {"Drawing Reference", "Revision"} and not source.get("issues", {}).get(label):
+            # These identifiers are copied, never inferred or translated. Changing
+            # a reference/provenance must not trigger another model request.
+            direct[label] = raw[label]
+            raw[label] = None
+    for label in source.get("issues", {}):
+        if label not in display:
+            raw[label] = "" if label == "Incoming Information" else None
+            direct.pop(label, None)
+    return raw, direct, display, sources, mapping_issues
+
+
+def specification_translation_inputs(source) -> dict[str, Any]:
+    """Only facts sent to the CAD model, suitable for a stable translation cache.
+
+    Publication/review identities, actors, timestamps and PDF provenance are not
+    model inputs. Evidence is limited to fields still requiring translation;
+    human decisions and copied drawing identities therefore reuse prior work.
+    """
+    if not source.get("review"):
+        # Historic source contracts retain their evidence behaviour.
+        raw = cad_source_values({**source["raw"], **{label: None for label in source.get("issues", {})}})
+        return {"raw": raw, "evidence": source}
+    raw, _, _, _, _ = _review_translation_plan(source)
+    evidence_keys = {"value", "snippet", "location", "scope", "role", "request_role", "rationale", "issuer"}
+
+    def facts(value):
+        if isinstance(value, list):
+            return [facts(entry) for entry in value]
+        if isinstance(value, dict):
+            return {key: facts(entry) for key, entry in value.items() if key in evidence_keys}
+        return value
+
+    evidence = {}
+    for label, value in raw.items():
+        if label == "Incoming Information" or missing(value):
+            continue
+        field = source.get("sources", {}).get(label, {})
+        evidence[label] = {
+            key: facts(field[key]) for key in ("selected", "candidates") if key in field
+        }
+    return {"raw": raw, "evidence": {"fields": evidence}}
+
+
+def prepare_specification_publication(source, client, *, cached_translation=None) -> SpecificationPublication:
+    """Build PDF display/provenance separately from strict automated CAD values."""
+    raw, direct, display, sources, mapping_issues = _review_translation_plan(source)
     reviews = {label: _conflict_detail(label, source, reason)
-               for label, reason in source.get("issues", {}).items()}
-    # Match unresolved-field warnings against the same single-line text the model saw.
-    raw = cad_source_values({**source["raw"], **{label: None for label in reviews}})
-    try:
-        translated = translate_specification(raw, client, evidence=source)
-    except UnresolvedSpecificationTranslation as exc:
-        translated = exc.translation
-        for label in exc.fields:
-            value = str(raw[label])
-            warnings = list(dict.fromkeys(warning for warning in translated.warnings
-                if (label.casefold() in warning.casefold() or value.casefold() in warning.casefold())
-                and warning != f"{label}: translation unresolved"))
-            reason = " ".join(warnings) or "No verified CAD translation could be selected."
-            reviews[label] = f"Translation unresolved for source value '{value}'. {reason}"
+               for label, reason in source.get("issues", {}).items() if label not in display}
+    inputs = specification_translation_inputs(source)
+    raw = inputs["raw"]
+    if cached_translation is not None:
+        cached = CADTranslation.model_validate(cached_translation)
+        # Artifacts also contain deterministic/authoritative CAD overlays. They
+        # are recomputed from current decisions and are never cache inputs.
+        translated = CADTranslation(values=_cad_values_with({
+            **cached.values.model_dump(by_alias=True),
+            **{label: "" if label == "Incoming Information" else None
+               for label, value in raw.items() if label in direct or missing(value)},
+        }), warnings=list(cached.warnings))
+        translated = validate_translation(translated.model_copy(deep=True), raw, allow_unresolved=True)
+    elif not any(not missing(value) for label, value in raw.items() if label != "Incoming Information"):
+        translated = CADTranslation(values=_cad_values_with({}), warnings=[])
+    else:
+        try:
+            translated = translate_specification(raw, client, evidence=inputs["evidence"])
+        except UnresolvedSpecificationTranslation as exc:
+            translated = exc.translation
+    for label, value in translated.values.model_dump(by_alias=True).items():
+        if label == "Incoming Information" or value is not None or missing(raw.get(label)):
+            continue
+        original = str(raw[label])
+        warnings = list(dict.fromkeys(warning for warning in translated.warnings
+            if (label.casefold() in warning.casefold() or original.casefold() in warning.casefold())
+            and warning != f"{label}: translation unresolved"))
+        reason = " ".join(warnings) or "No verified CAD translation could be selected."
+        reviews[label] = f"Translation unresolved for source value '{original}'. {reason}"
+    values = {**translated.values.model_dump(by_alias=True), **direct}
     return SpecificationPublication.model_validate({
-        **translated.model_dump(by_alias=True), "fieldReviews": reviews,
+        "values": values, "warnings": translated.warnings, "fieldReviews": reviews,
+        "displayValues": display, "fieldSources": sources, "mappingIssues": mapping_issues,
+        "reviewVersion": source.get("review", {}).get("review_version"),
         "requestNotes": [
             (f"{note['scope']}: " if note.get("scope") else "") + note["snippet"]
             + f" (Source: {note['filename']}" + (f"; {note['observedAt']}" if note.get("observedAt") else "") + ")"
             for note in source.get("requestNotes", [])
         ],
-        "sourceReviews": source_review_notes(source.get("sourceManifest", [])),
+        "sourceReviews": list(dict.fromkeys([
+            *source_review_notes(source.get("sourceManifest", [])),
+            *[issue["detail"] for issue in source.get("reviewSource", {}).get("source_issues", [])],
+        ])),
     })
 
 
@@ -321,8 +468,11 @@ def source_review_notes(manifest) -> list[str]:
 def pdf_values(translation: CADTranslation) -> dict[str, str]:
     values = translation.values.model_dump(by_alias=True)
     reviews = translation.field_reviews if isinstance(translation, SpecificationPublication) else {}
-    return {
+    result = {
         label: "" if label == "Incoming Information" else
         "Review required - " + reviews[label] if label in reviews else values[label] or NOT_PROVIDED
         for label in FIELD_NAMES
     }
+    if isinstance(translation, SpecificationPublication):
+        result.update(translation.display_values)
+    return result

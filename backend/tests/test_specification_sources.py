@@ -23,7 +23,7 @@ from backend.app.services.legacy_enquiry.source_documents import (
 from backend.app.services.performance_specification_contract import FIELD_NAMES
 from backend.app.services.performance_specification_evidence import resolve_email_evidence
 from backend.app.services.spreadsheet_extraction import extract_spreadsheet_documents
-from backend.app.services.specification_semantics import PROVIDER_RECITATION_REVIEW_STATUS, SpecificationEvidence
+from backend.app.services.specification_semantics import EVIDENCE_VERSION, PROVIDER_RECITATION_REVIEW_STATUS, SpecificationEvidence
 from backend.tests.pdf_helpers import pdf_bytes
 
 
@@ -78,7 +78,7 @@ def test_skipped_animation_is_audited_without_blocking_other_email_evidence(inli
     skipped = next(source for source in manifest if source["filename"] == "signature.gif")
     assert skipped["status"] == "skipped:animated_image" and skipped["text"] == ""
     assert skipped["contentSha256"] == hashlib.sha256(animation["content"]).hexdigest()
-    extraction = {"specificationEvidenceVersion": 2, "specificationAssessedFields": list(FIELD_NAMES),
+    extraction = {"specificationEvidenceVersion": EVIDENCE_VERSION, "specificationAssessedFields": list(FIELD_NAMES),
                   "performanceParameters": {}, "sourceManifest": manifest, "specificationEvidence": [
                       {"field": "Scale", "value": "1:100", "source_id": "mail:attachment:0", "snippet": "Scale: 1:100",
                        "location": "page 1", "scope": None, "issuer": None, "role": "requested", "rationale": "Drawing scale"}]}
@@ -184,7 +184,7 @@ def test_recitation_blocked_plans_do_not_block_readable_email_evidence():
     assert "Scale: 1:100" in context and "Outlet" not in context
     blocked = [source for source in manifest if source["status"] == PROVIDER_RECITATION_REVIEW_STATUS]
     assert [source["filename"] for source in blocked] == [plan["filename"] for plan in plans]
-    extraction = {"specificationEvidenceVersion": 2, "specificationAssessedFields": list(FIELD_NAMES),
+    extraction = {"specificationEvidenceVersion": EVIDENCE_VERSION, "specificationAssessedFields": list(FIELD_NAMES),
                   "performanceParameters": {}, "sourceManifest": manifest, "specificationEvidence": [
                       {"field": "Scale", "value": "1:100", "source_id": "mail:attachment:0", "snippet": "Scale: 1:100",
                        "location": "page 1", "scope": None, "issuer": None, "role": "requested", "rationale": "Drawing scale"}]}
@@ -380,7 +380,7 @@ def test_multi_email_recency_uses_sent_dates_not_numeric_ids_and_never_first_old
 
 
 def test_achieved_values_and_unselected_options_are_not_requested_targets():
-    extraction = {"specificationEvidenceVersion": 2, "specificationAssessedFields": list(FIELD_NAMES),
+    extraction = {"specificationEvidenceVersion": EVIDENCE_VERSION, "specificationAssessedFields": list(FIELD_NAMES),
                   "performanceParameters": {}, "sourceManifest": [{"sourceId": "pdf:1", "sourceType": "attachment",
                     "filename": "drawing.pdf", "contentSha256": "abc", "status": "read", "text": "Achieved U-value: 0.19\nOptions: Concrete"}],
                   "specificationEvidence": []}
@@ -404,7 +404,7 @@ def test_forwarded_message_timestamp_resolves_latest_field_and_retains_direct_re
         evidence.append({"field": label, "value": value, "source_id": "mail", "location": "forwarded chain",
                          "snippet": text, "scope": None, "issuer": None, "role": "requested", "rationale": "Dated message",
                          "message_date": message_date, "request_role": request_role})
-    extraction = {"specificationEvidenceVersion": 2, "specificationAssessedFields": list(FIELD_NAMES),
+    extraction = {"specificationEvidenceVersion": EVIDENCE_VERSION, "specificationAssessedFields": list(FIELD_NAMES),
                   "performanceParameters": {}, "sourceManifest": [{"sourceId": "mail", "sourceType": "email_body",
                     "filename": "request.eml", "contentSha256": "abc", "status": "read", "text": text,
                     "observedAt": "2026-10-30T12:00:00+00:00"}], "specificationEvidence": evidence}
@@ -414,7 +414,7 @@ def test_forwarded_message_timestamp_resolves_latest_field_and_retains_direct_re
 
 def test_bauder_reference_cannot_become_tp_reference_from_unverified_issuer_claim():
     text = "Bauder Ref: 18930_26.01"
-    extraction = {"specificationEvidenceVersion": 2, "specificationAssessedFields": list(FIELD_NAMES),
+    extraction = {"specificationEvidenceVersion": EVIDENCE_VERSION, "specificationAssessedFields": list(FIELD_NAMES),
                   "performanceParameters": {"Drawing Reference": "18930_26.01"},
                   "sourceManifest": [{"sourceId": "pdf", "sourceType": "attachment", "filename": "bauder.pdf",
                                       "contentSha256": "abc", "status": "read", "text": text}],
@@ -433,7 +433,7 @@ def test_selected_roof_overrides_older_common_value_but_respects_later_project_c
         evidence.append({"field": "Decking", "value": value, "source_id": "mail", "location": "dated requests",
                          "snippet": text, "scope": scope, "issuer": None, "role": "requested", "rationale": "Explicit scope",
                          "message_date": message_date, "request_role": "direct_request"})
-    extraction = {"specificationEvidenceVersion": 2, "specificationAssessedFields": list(FIELD_NAMES),
+    extraction = {"specificationEvidenceVersion": EVIDENCE_VERSION, "specificationAssessedFields": list(FIELD_NAMES),
                   "performanceParameters": {}, "sourceManifest": [{"sourceId": "mail", "sourceType": "email_body",
                     "filename": "request.eml", "contentSha256": "abc", "status": "read", "text": text,
                     "observedAt": "2026-10-30T12:00:00+00:00"}], "specificationEvidence": evidence}

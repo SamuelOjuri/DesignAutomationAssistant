@@ -161,12 +161,20 @@ def _extraction_payload(
     identity: ProcessingIdentity,
 ) -> dict[str, Any]:
     from .specification_request_context import request_context_summary, select_client_request
+    from .specification_semantics import EVIDENCE_VERSION
+    from .specification_references import REFERENCE_PARSER_VERSION
+    from .specification_review_contract import REQUEST_INTENT_SCHEMA_VERSION
+    from .specification_intent import build_request_intent
     return {
         "schemaVersion": 1,
         **_identity_payload(identity),
         "parameters": result.parameters,
         "performanceParameters": result.performance_parameters,
-        "specificationEvidenceVersion": 2,
+        "specificationEvidenceVersion": EVIDENCE_VERSION,
+        "requestIntentSchemaVersion": REQUEST_INTENT_SCHEMA_VERSION,
+        "referenceParserVersion": REFERENCE_PARSER_VERSION,
+        "specificationRequestIntent": (result.specification_request_intent
+            or build_request_intent(result.source_manifest).model_dump(mode="json")),
         "specificationEvidence": list(result.specification_evidence),
         "specificationRequestNotes": list(result.specification_request_notes),
         "specificationEvidenceRepairs": list(result.specification_evidence_repairs),
@@ -357,8 +365,12 @@ def run_analysis_pipeline(
     if not _has_identity(matching, identity):
         project_name = str(extraction.get("projectName") or "")
         db.commit()
-        if project_name:
-            legacy_result = match_projects(project_name, _CheckedMatchingGateway(gateway, check_current))
+        intent = extraction.get("specificationRequestIntent") or {}
+        detected_references = intent.get("detected_references", [])
+        checked_gateway = _CheckedMatchingGateway(gateway, check_current)
+        if project_name or detected_references:
+            legacy_result = match_projects(project_name, checked_gateway,
+                detected_references=detected_references)
         else:
             legacy_result = {
                 "exists": False,
@@ -369,6 +381,18 @@ def run_analysis_pipeline(
                 "error": "",
             }
         match_contract = build_matching_contract(project_name, legacy_result)
+        from .performance_specification_sources import prepare_specification_candidates
+        from .specification_intent import enrich_request_intent
+        candidate_context = prepare_specification_candidates(
+            checked_gateway, match_contract, intent,
+            project_board_id=str(getattr(gateway, "project_board_id", None)
+                                 or settings.design_processing_project_board_id),
+            scope=(extraction.get("performanceParameters") or {}).get("Bauder Roof Num"),
+        )
+        intent = enrich_request_intent(intent, candidate_context["lookup"]["projects"],
+            lookup_issues=candidate_context["lookup"]["issues"]).model_dump(mode="json")
+        match_contract["specificationRequestIntent"] = intent
+        match_contract["specificationCandidates"] = candidate_context
         check_current()
 
         item, job, identity = _lock_current_analysis(
@@ -382,6 +406,7 @@ def run_analysis_pipeline(
             match_contract=match_contract,
             legacy_diagnostics=legacy_result,
         )
+        item.extracted_parameters_json = {**extraction, "specificationRequestIntent": intent}
         _update_job_progress(job, identity, completed_stage="matching")
         advance_stage(job, "rendering", worker_id=worker_id, now=clock())
         db.commit()

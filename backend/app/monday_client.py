@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
 from functools import lru_cache
@@ -1231,6 +1231,9 @@ class MondayProjectBoardItem:
     project_title: str
     state: str
     created_date: Optional[str]
+    # Explicit child-drawing evidence for a legacy bare-number directory entry.
+    # The displayed project reference remains unchanged.
+    reference_confirmations: tuple[str, ...] = ()
 
 
 PROJECT_ITEMS_PAGE_FIELDS = """
@@ -1254,6 +1257,109 @@ query ($cursor: String!, $limit: Int!) {{
     }}
 }}
 """
+
+# A request containing more references needs a narrower reviewer selection. Never
+# return a partial directory as if it were a complete result.
+MAX_PROJECT_REFERENCE_LOOKUPS = 32
+MAX_PROJECT_REFERENCE_PAGES = 1000
+PROJECT_REFERENCE_ITEMS_PAGE_FIELDS = PROJECT_ITEMS_PAGE_FIELDS.replace(
+    "    state", "    state\n    subitems { name state }")
+NEXT_PROJECT_REFERENCE_ITEMS_PAGE_QUERY = f"""
+query ($cursor: String!, $limit: Int!) {{
+    next_items_page(cursor: $cursor, limit: $limit) {{
+        {PROJECT_REFERENCE_ITEMS_PAGE_FIELDS}
+    }}
+}}
+"""
+
+
+def fetch_project_items_matching_references(
+    access_token: str,
+    board_id: str,
+    references: Sequence[str],
+    *,
+    limit: int = 500,
+) -> tuple[MondayProjectBoardItem, ...]:
+    """Read exact printed project identities, independently of holding relations.
+
+    The numeric component narrows the remote search while a shared-parser check
+    retains the actual prefix and leading zeros. This also handles CRM names with
+    spaces between prefix and digits without aliasing another issuer's project.
+    Old projects are intentionally not subject to the title search's date cutoff.
+    """
+    from .services.specification_references import parse_drawing_reference, parse_project_reference
+
+    identities = {}
+    for literal in references:
+        reference = parse_project_reference(literal) or parse_drawing_reference(literal)
+        if reference is None:
+            raise ValueError("project lookup requires a two-letter project or drawing reference")
+        identities[reference.project_key] = reference
+    if not identities or len(identities) > MAX_PROJECT_REFERENCE_LOOKUPS:
+        raise ValueError(f"between 1 and {MAX_PROJECT_REFERENCE_LOOKUPS} project references are required")
+    normalized_board_id = _normalize_positive_decimal_id(board_id, "board_id")
+    if not 1 <= limit <= 500:
+        raise ValueError("limit must be between 1 and 500")
+    query = f"""
+    query ($boardIds: [ID!], $queryParams: ItemsQuery, $limit: Int!) {{
+        boards(ids: $boardIds) {{
+            items_page(query_params: $queryParams, limit: $limit) {{
+                {PROJECT_REFERENCE_ITEMS_PAGE_FIELDS}
+            }}
+        }}
+    }}
+    """
+    payload = monday_graphql_request(access_token, query, {
+        "boardIds": [normalized_board_id], "limit": limit,
+        "queryParams": {"operator": "or", "rules": [
+            {"column_id": "name", "compare_value": [number], "operator": "contains_text"}
+            for number in dict.fromkeys(reference.project_number for reference in identities.values())
+        ]},
+    }, timeout=20)
+    page = _extract_project_board_page(payload, context="project reference search")
+    items_by_id: dict[str, MondayProjectBoardItem] = {}
+    seen_cursors: set[str] = set()
+    for _ in range(MAX_PROJECT_REFERENCE_PAGES):
+        parsed_items = _parse_project_items(page)
+        raw_by_id = {str(raw.get("id")): raw for raw in page.get("items", []) if isinstance(raw, Mapping)}
+        for item in parsed_items:
+            reference = parse_project_reference(item.project_reference)
+            if reference is not None and reference.project_key in identities:
+                # Keep lifecycle information for review, including archived matches.
+                items_by_id.setdefault(item.item_id, item)
+            elif reference is None:
+                # A bare directory number alone cannot establish a prefix. A
+                # drawing belonging to this project must confirm the exact family.
+                if item.project_reference.strip() not in {entry.project_number for entry in identities.values()}:
+                    continue
+                subitems = raw_by_id.get(item.item_id, {}).get("subitems")
+                if not isinstance(subitems, list):
+                    raise MondayReadContractError(detail="monday bare project reference has unreadable drawing confirmations")
+                confirmations = []
+                for drawing in subitems:
+                    if not isinstance(drawing, Mapping) or drawing.get("state") not in {"active", "archived", "deleted"}:
+                        raise MondayReadContractError(detail="monday project drawing confirmation is incomplete")
+                    parsed = parse_drawing_reference(drawing.get("name"))
+                    if (parsed is not None and parsed.project_key in identities
+                            and item.project_reference.strip() == parsed.project_number):
+                        confirmations.append(parsed.literal)
+                if confirmations:
+                    items_by_id.setdefault(item.item_id, replace(item, reference_confirmations=tuple(sorted(set(confirmations)))))
+        if "cursor" not in page:
+            raise MondayReadContractError(detail="monday project reference page cursor is missing")
+        cursor = page["cursor"]
+        if cursor is None:
+            return tuple(items_by_id.values())
+        if not isinstance(cursor, str) or not cursor or cursor in seen_cursors:
+            raise MondayReadContractError(detail="monday project reference page cursor is malformed or repeated")
+        seen_cursors.add(cursor)
+        next_payload = monday_graphql_request(access_token, NEXT_PROJECT_REFERENCE_ITEMS_PAGE_QUERY,
+            {"cursor": cursor, "limit": limit}, timeout=20)
+        data = _require_mapping(next_payload, "data", context="next project reference page")
+        page = data.get("next_items_page")
+        if not isinstance(page, Mapping):
+            raise MondayReadContractError(detail="monday next project reference page is incomplete")
+    raise MondayReadContractError(detail="monday project reference search exceeded its page limit")
 
 
 def fetch_project_word_hit_counts(
@@ -1477,7 +1583,36 @@ def _fetch_project_items_by_title_terms(
     """
     payload = monday_graphql_request(access_token, query, timeout=20)
     page = _extract_project_board_page(payload, context=context)
-    return _parse_project_items(page)
+    return _read_complete_project_pages(access_token, page, limit=limit, context=context)
+
+
+def _read_complete_project_pages(
+    access_token: str,
+    page: Mapping[str, Any],
+    *,
+    limit: int,
+    context: str,
+) -> tuple[MondayProjectBoardItem, ...]:
+    items: dict[str, MondayProjectBoardItem] = {}
+    seen_cursors: set[str] = set()
+    for _ in range(MAX_PROJECT_REFERENCE_PAGES):
+        for item in _parse_project_items(page):
+            items.setdefault(item.item_id, item)
+        if "cursor" not in page:
+            raise MondayReadContractError(detail=f"monday {context} page cursor is missing")
+        cursor = page["cursor"]
+        if cursor is None:
+            return tuple(items.values())
+        if not isinstance(cursor, str) or not cursor or cursor in seen_cursors:
+            raise MondayReadContractError(detail=f"monday {context} page cursor is malformed or repeated")
+        seen_cursors.add(cursor)
+        payload = monday_graphql_request(access_token, NEXT_PROJECT_ITEMS_PAGE_QUERY,
+            {"cursor": cursor, "limit": limit}, timeout=20)
+        data = _require_mapping(payload, "data", context=f"next {context} page")
+        page = data.get("next_items_page")
+        if not isinstance(page, Mapping):
+            raise MondayReadContractError(detail=f"monday next {context} page is incomplete")
+    raise MondayReadContractError(detail=f"monday {context} search exceeded its page limit")
 
 
 def fetch_active_project_items_since(
@@ -1511,31 +1646,7 @@ def fetch_active_project_items_since(
     """
     payload = monday_graphql_request(access_token, query, timeout=20)
     page = _extract_project_board_page(payload, context="project fallback search")
-    items = list(_parse_project_items(page))
-    cursor = page.get("cursor")
-    while cursor:
-        if not isinstance(cursor, str):
-            raise MondayReadContractError(
-                detail="monday project page cursor is malformed"
-            )
-        next_payload = monday_graphql_request(
-            access_token,
-            NEXT_PROJECT_ITEMS_PAGE_QUERY,
-            {"cursor": cursor, "limit": limit},
-            timeout=20,
-        )
-        next_data = _require_mapping(
-            next_payload,
-            "data",
-            context="next project page",
-        )
-        next_page = next_data.get("next_items_page")
-        if not isinstance(next_page, Mapping):
-            raise MondayReadContractError(
-                detail="monday next project page is incomplete"
-            )
-        items.extend(_parse_project_items(next_page))
-        cursor = next_page.get("cursor")
+    items = _read_complete_project_pages(access_token, page, limit=limit, context="project fallback search")
     return tuple(item for item in items if item.state == "active")
 
 

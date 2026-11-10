@@ -1,5 +1,19 @@
 # Project Performance Specification Details
 
+Phase 4 of Specification Review connects email-first recommendations, durable
+reviewer decisions and separately labelled PDF provenance to the publisher. See
+[source policy and PDF](SpecificationReviewSourcePolicy.md) for the current policy,
+which supersedes the older CRM-first notes below. Phase 3 supplies generalized
+references, cited intent and read-only candidate preparation. See
+[references and intent](SpecificationReviewReferencesAndIntent.md) for the current
+`output-v18` / evidence-v3 contract. Earlier dated diagnostic notes below describe
+their historical runtime policies. Phase 5 adds the independent Landing Zone
+lifecycle described below. Phase 6 adds the direct, authenticated
+[review API](SpecificationReviewAPI.md), including version 1 access for any
+authenticated Monday CRM user with item access. Phase 7 implements the separate
+[embedded reviewer workspace](SpecificationReviewFrontend.md). Live Item View
+registration and allowlisted deployed checks remain Phase 8.
+
 The additional PDF is published to **Project Holding Page** (`1882196103`),
 **AI Data** (`file_mkza7y37`). It contains selectable text with the exact 18 CAD
 labels in the requested order. Resolved dropdowns contain exact permitted strings;
@@ -10,7 +24,7 @@ the raw product or competing values and roof scopes. These fields keep null CAD
 values in `translation_json.values`; their PDF text is stored in
 `translation_json.fieldReviews`. Unverified evidence, incomplete source reads and
 invalid model responses still retain the last successful PDF and retry.
-**Incoming Information** is always blank. Bauder Roof Num
+**Incoming Information** defaults to blank and permits reviewer input. Bauder Roof Num
 is optional and extracted only when explicitly stated in email content.
 
 The specification uses the configured design extraction model in a separate,
@@ -70,7 +84,7 @@ python -m backend.scripts.check_design_processing_sources
 ```
 
 This uses only synthetic DWG, ZIP, XLSX and encrypted-PDF bytes with no database or
-network calls. Expected output includes `status: ok`, `pipeline_revision: output-v17`,
+network calls. Expected output includes `status: ok`, `pipeline_revision: output-v18`,
 and all four checks with `passed: true`. It verifies that DWG and encrypted PDFs
 are skipped, ZIP members are read and long spreadsheet cells retain their final
 technical values. A `.dwg`
@@ -81,13 +95,24 @@ which process produced an earlier/in-flight failure.
 
 ## Scope and existing outputs
 
-Only groups in `AUTO_SYNC_ACTIVE_GROUP_IDS` are eligible. The configured Landing Zone
-and Completed Folder are subtracted even if also listed as active. Archived/deleted
-items are excluded. Current scope is read before translation, after translation,
-before/after publication and before cleanup. Moving to an excluded group cancels
-queued work and fences running work; existing attachments remain. In-flight external
-requests cannot be recalled, so a change during upload may briefly leave a tracked,
-superseded PDF until the next eligible refresh replaces it.
+Specification publication is restricted to `DESIGN_PROCESSING_BOARD_ID` and
+`DESIGN_PROCESSING_LANDING_GROUP_ID`. The item must have live Monday state `active`.
+`AUTO_SYNC_COMPLETED_GROUP_ID` always excludes the item, including when it conflicts
+with the Landing Zone setting. `specification_policy.py` supplies this common scope
+to queueing and source checks. Current scope is read before translation, after
+translation, before/after publication and before cleanup.
+
+Leaving Landing Zone, entering Completed Folder or archive/delete cancels queued
+work and fences running work. The attached PDF, saved decisions and audit history
+remain. A human moves the item; the publisher never moves it back. Return to
+Landing Zone requires a fresh scope/source check before publication. In-flight
+external requests cannot be recalled, so a change during upload may briefly leave
+a tracked, superseded PDF until the next eligible refresh replaces it.
+
+Landing Zone remains excluded from document auto-sync. Cancelling its metadata
+refresh does not cancel specification work. Explicit live lifecycle/scope checks
+and confirmed-deletion retirement own specification cancellation. A Task row,
+active auto-sync state and completed chat ingestion are not prerequisites.
 
 The existing design-processing workflow, its Landing Zone admission, AI Data CSV,
 preview PDF and matched-project PDF are preserved. The new publisher uses its own
@@ -96,11 +121,13 @@ excluded from source ingestion to avoid treating generated data as new evidence.
 
 ## Source resolution
 
-Current populated, readable Monday values take precedence over verified email and
-attachment evidence. Empty CRM fields, including deliberately cleared fields, fall
-back to that evidence on every refresh. Empty reads remain in provenance; they do
-not erase an available source fact. Failed/incomplete reads preserve
-the last published PDF and retry, exposing `last_error` in the refresh record.
+Verified email facts take precedence, with scoped amendment CRM fallback. The
+amendment Company recommendation comes from the project's Account; a differing
+email Company remains visible. New Enquiries do not inherit project technical
+values. Holding Accounts/date do not override email facts. Reviewer values and
+intentional blanks take precedence for all 18 fields. Optional unreadable CRM
+recommendations remain visible without blocking a superseding human decision.
+Required live item/extraction checks still retain the previous PDF on failure.
 
 `specification_semantics.py` supplies the same business meanings to extraction and
 CAD translation. Drawing Reference means the **TaperedPlus-issued** reference; a
@@ -111,18 +138,14 @@ retained as provenance; an incompatible letter/suffix requires review. Company a
 Contact describe the direct requester. Requested U-values remain distinct from
 achieved calculations and unselected template options.
 
-Contact defaults to the selected drawing's `mirror_11__1` column (or its configured
-drawing mapping), with populated holding-item Contact values taking precedence.
-Missing or empty drawing/holding values fall back to verified email evidence.
+Contact uses the current email requester first. Amendment fallback uses the
+selected drawing's `mirror_11__1` column (or its configured drawing mapping).
 Project columns titled **Contact** are not automatically selected: they can roll
 up contacts from several drawings and return unsupported nested mirrors. A project
 Contact source requires an explicit `PERFORMANCE_SPECIFICATION_COLUMN_MAP` mapping,
 for example `{"project":{"Contact":"request_contact"}}`, to a suitable requester
-column. Explicit mappings still undergo normal source validation and remain below
-populated drawing and holding values in precedence. Unreadable or conflicting
-selected Contact values still stop publication and retain the previous PDF.
-This selection fix requires redeploying the specification worker, with no database
-migration or extraction-version bump. Its next refresh uses the corrected source.
+column. Explicit mappings still undergo source validation. Unreadable suggestions
+are shown as review issues; a reviewer can supply an authoritative value.
 
 For an explicitly reviewed item correction, a source manifest can also retain a
 `reviewed_crm` snapshot alongside the original email evidence. Store its CRM IDs,
@@ -164,7 +187,7 @@ follow-up does not replace that client or enquiry date. When only an internal fo
 is supplied, a verified client header within it may establish the context. Simultaneous
 different client senders or unreadable candidate dates require review. Internal-only
 correspondence supplies no client date. Unknown legacy headers retain existing checks.
-Current verified CRM precedence is unchanged.
+Reviewed CRM snapshots remain audit evidence under the email-first source policy.
 
 The reader supports plain text and HTML-only email bodies, PDF/image attachments,
 DOCX, text/CSV/TSV/JSON/XML/HTML and XLS/XLSX/**XLSM**. Workbook readers use cached
@@ -306,63 +329,114 @@ does not automatically include attachments on linked boards.
 
 ## Deployment
 
+Specification rollout now has independent controls. `PERFORMANCE_SPECIFICATION_MODE`
+is `off` by default, even if the existing master flag is true and design processing
+is already enabled. It never inherits `DESIGN_PROCESSING_MODE` or the design
+allowlist. `PERFORMANCE_SPECIFICATION_ALLOWLIST_ITEM_IDS` accepts CSV or JSON-array
+positive Monday item IDs, defaults to `[]`, and must be nonempty in specification
+`allowlist` mode. The master `PERFORMANCE_SPECIFICATION_ENABLED=true` is required
+for rendering even in shadow, publication and approval. The separate
+`PERFORMANCE_SPECIFICATION_REVIEW_ENABLED` flag controls reviewer mutations;
+permitted saves can remain pending while the master processing flag is false.
+Use the [step-by-step deployed guide](SpecificationReviewFrontend.md#deployed-setup-and-rollout)
+for configuration and Item View setup. Existing design outputs and `AUTO_SYNC_*`
+ingestion retain their own policies.
+
 1. Stop/drain API and worker versions that will be replaced. Apply migration
-   through `0018_specification_evidence` with
+   through `0019_specification_review` with
    `python -m alembic -c backend/alembic.ini upgrade head`.
 2. Deploy matching API, ingestion/metadata/design workers and the new publisher.
-   Initially configure `PERFORMANCE_SPECIFICATION_ENABLED=true` and
-   `DESIGN_PROCESSING_MODE=shadow`. Keep existing extraction and reconciliation
-   services running. The new publisher runs as another service:
+   Start with `PERFORMANCE_SPECIFICATION_MODE=off` and review mutations disabled.
+   Explicitly select the new mode during staged verification; an upgrade never
+   enables it from existing design settings. For private verification use
+   `PERFORMANCE_SPECIFICATION_ENABLED=true`, `PERFORMANCE_SPECIFICATION_MODE=shadow`
+   and `PERFORMANCE_SPECIFICATION_REVIEW_ENABLED=true`. Keep existing extraction
+   and reconciliation services running; `DESIGN_PROCESSING_MODE=enabled` may
+   remain unchanged for CSV, preview and matched-report output. Restart the review
+   API, publisher and specification-enqueue/reconciliation processes with matching
+   specification settings. The publisher runs as another service:
    `python -m backend.app.services.performance_specification`.
-3. Extraction identity is now `output-v16` (`output-v9` introduced source evidence;
+3. Extraction identity is now `output-v18` (`output-v9` introduced source evidence;
    `output-v10` added DWG skips and bounded ZIP extraction; `output-v11` preserves
    long spreadsheet cells; `output-v12` skips encrypted PDFs; `output-v13` validates
    recovery against source text and retains request constraints; `output-v14` repairs
    request-note citations and verifies revisions from separate title-block cells;
    `output-v15` adds bounded drawing detail views and audited date/issuer/scope repairs;
    `output-v16` adds literal image regions, client-request context and applicable
-   existing-deck evidence). The CAD publication contract is now
-   `performance-specification-v4`. Existing canonical CSV rows
-   remain unchanged. Run the normal design reconciliation sweep to re-extract eligible
-   historical projects. Old extraction records without the versioned source/evidence
+   existing-deck evidence; `output-v18` adds the intent/reference/candidate sidecars
+   and evidence-v3 contract). The CAD publication contract is now
+   `performance-specification-v5`. The canonical CSV row count and 18 specification
+   labels remain unchanged; Reason for Change explicitly identifies an AI
+   recommendation, separate from the human-owned Monday classification. Run
+   activation-bounded design reconciliation or explicit item-scoped backfill to
+   refresh eligible Landing Zone items. Old extraction records without the versioned source/evidence
    contract wait for this refresh. Changing only the publisher flag does not refresh
    historical extraction evidence.
 4. Review shadow artifacts and translation warnings in the private artifact bucket
    and `performance_specification_artifacts`, plus `performance_specifications.review_json`.
    Review statuses distinguish blocking `conflict`/`source_failure` from successful
    `published_with_review`/`rendered_with_review` outputs. A fully resolved refresh
-   clears the review record. Then use the existing design-processing
-   `allowlist` mode and `DESIGN_PROCESSING_ALLOWLIST_ITEM_IDS` to validate a few items
-   before changing to `enabled`. These existing mode settings govern both workflows.
-   `allowlist` now restricts extraction, CAD translation, private rendering and
-   publication, rather than publication alone. Queued work outside the list remains
+   clears processing diagnostics; durable reviewer decisions and approval history
+   are retained. Then use `PERFORMANCE_SPECIFICATION_MODE=allowlist` and a nonempty
+   `PERFORMANCE_SPECIFICATION_ALLOWLIST_ITEM_IDS` to validate a few items before
+   changing the specification mode to `enabled`. Specification `allowlist`
+   restricts specification queueing/claims, CAD translation, private rendering,
+   reviewer edits, publication and approval. It does not restrict the independent
+   design CSV/preview/matched-report workflow. Queued work outside the list remains
    pending and is filtered before claims. Owned work removed from the allowlist is
    fenced at checkpoints; already-sent external requests may finish.
-5. Subscribe holding field/link/lifecycle changes and linked project/drawing changes
-   to the existing authenticated Monday webhook endpoint. Include project subitem
-   creation, name/column changes, archive/delete and restoration events. Mirror-source
-   boards need corresponding event coverage. The dependency index is established on
-   the first successful specification refresh; periodic checks repair missed events.
+5. Subscribe holding input/lifecycle changes and source project/drawing changes
+   to the existing authenticated Monday webhook endpoint. Audit and provision
+   drawing subscriptions on the **main/parent project board**, using `create_subitem`,
+   `change_subitem_column_value`, `change_subitem_name`, `move_subitem`,
+   `subitem_archived` and `subitem_deleted`. Ordinary project, Account, Contact and
+   mirror-source records use their own board's name/column/archive/delete/restore
+   events. Use [the subscription templates](scripts/specification_source_webhooks.graphql)
+   and [Monday's webhook reference](https://developer.monday.com/api-reference/reference/webhooks).
+   Monday has no `subitem_restored` event; periodic source checks cover restored
+   drawings. The specification dependency index includes detected and
+   candidate project/drawing identities even without a holding TP Ref relation;
+   explicit reviewer selection narrows it and removes obsolete links. Dependencies
+   are recorded during source resolution, including review-required outcomes;
+   periodic checks repair missed events. Generated AI Data and Matched Projects
+   column events are ignored. Holding Accounts and Date Received edits do not
+   override email/reviewer values or change the PDF's semantic identity.
+
+The durable-extraction checkpoint queues specification work before unrelated legacy
+file publication, including specification shadow/recovery paths. An ignored later
+scalar write does not generate another translation or PDF. Set
+`PERFORMANCE_SPECIFICATION_MODE=off` to stop specification work and make review
+read-only, or disable `PERFORMANCE_SPECIFICATION_ENABLED` to pause processing
+while otherwise permitted reviewer saves remain pending. Both retain decisions
+and existing files. Restart affected services with matching policy values. Do not
+restart an older active-group publisher against the new contract. Phases 6 and 7
+provide the reviewer API and interface; live Item View registration and allowlisted
+deployed checks remain Phase 8.
 
 No credentials are stored in queue records. The publisher uses
 `MONDAY_INGESTION_ACCESS_TOKEN`, configured Gemini credentials, and private
 `DESIGN_PROCESSING_ARTIFACT_BUCKET` storage. It requires no CAD integration or public
 artifact URLs. Enabling this setting does not provision webhooks or start a process.
 
-For an isolated Render test of holding item `3320074395`, deploy the same updated
-commit to the API, design-processing worker, reconciliation service and specification
-worker. Configure their shared design settings consistently:
+For a specification-only Render allowlist test of holding item `3320074395`, deploy
+the same updated commit to the API, design-processing worker, reconciliation service
+and specification worker. Configure the specification settings consistently, while
+allowing existing design outputs to continue independently:
 
 ```dotenv
-DESIGN_PROCESSING_MODE=allowlist
-DESIGN_PROCESSING_ALLOWLIST_ITEM_IDS=3320074395
+DESIGN_PROCESSING_MODE=enabled
 DESIGN_PROCESSING_WORKER_ENABLED=true
 PERFORMANCE_SPECIFICATION_ENABLED=true
+PERFORMANCE_SPECIFICATION_MODE=allowlist
+PERFORMANCE_SPECIFICATION_ALLOWLIST_ITEM_IDS=3320074395
+PERFORMANCE_SPECIFICATION_REVIEW_ENABLED=true
 ```
 
-This policy update needs no database migration or extraction-version bump. Ensure
-old worker instances have stopped; a worker on older code still uses its old claim
-policy. Other ingestion/search services keep their existing scope.
+The independent-control change needs no database migration or extraction-version
+bump; the full review feature still requires migration `0019_specification_review`.
+Ensure old worker instances have stopped; a worker on older code still uses its
+old claim policy. The new specification mode defaults to `off` until explicitly
+configured. Other ingestion/search services keep their existing scope.
 
 In the deployed design-worker shell, run:
 
@@ -381,9 +455,11 @@ python -m backend.app.services.performance_specification --once --item-id 332007
 ```
 
 Check the target's design job and `performance_specifications.last_error/review_json`.
-The database's total backlog still includes held unlisted jobs; in allowlist mode
-only listed items are eligible to be claimed. Changing to `enabled` makes the other
-pending jobs eligible again. Historical uploaded files are preserved during the test.
+The specification backlog still includes held unlisted work; in specification
+allowlist mode only listed items are eligible to be claimed. Changing
+`PERFORMANCE_SPECIFICATION_MODE` to `enabled` makes otherwise eligible pending
+specification work claimable again. The design backlog follows its independent
+mode. Historical uploaded files are preserved during the test.
 
 The earlier evidence-matching and inline-review update introduced the
 `performance-specification-v3` publication version, which created a new PDF
@@ -401,20 +477,42 @@ an incomplete source read or invalid response blocks the latest refresh.
 
 The publisher polls its database every five seconds. Requests coalesce using the
 existing debounce setting; idle completed records are rechecked every
-`PERFORMANCE_SPECIFICATION_RECHECK_SECONDS` (default 3600). Existing active projects
-with extraction records are discovered automatically; it does not ingest attachments
-or call an LLM when no work is due. To target an existing item:
+`PERFORMANCE_SPECIFICATION_RECHECK_SECONDS` (default 3600). Periodic discovery uses
+registered design items and durable scope observations, with bounded, fair due
+checks and a live scope read before work. It creates missing records, revives
+eligible cancelled records and repairs obsolete publication/source policy. Repeated
+reconciliation does not increment generations or delay already scheduled work.
+Settled and excluded items retain their recheck delays.
+
+Discovery does not admit unregistered historical items or create missing extraction.
+The design reconciliation activation boundary and explicit item-scoped backfill
+still govern admission. Specification mode `off` prevents processing and makes the
+review read-only; `shadow` permits private rendering when the master processing
+flag is true, and edits when review is enabled, but no Monday publication/approval;
+`allowlist` restricts processing, edits and publication/approval to listed items;
+`enabled` admits all otherwise eligible items. Keep these specification settings
+consistent on all affected services. For older Landing
+Zone items without current extraction, run item-scoped design reconciliation first.
+To request a specification check for an existing registered item:
 
 ```powershell
 venv/Scripts/python.exe -m backend.app.services.performance_specification --once --item-id 1234567890
 ```
+
+Use [the read-only diagnostic query](scripts/diagnose_performance_specifications.sql)
+for Landing Zone items, missing Task rows and retained out-of-scope specifications.
+Set its `scope_settings` CTE from the deployed board/group settings and supply the
+full expected pipeline identity when checking upgrades. It reports extraction and
+artifact freshness, queue state, durable review identity and approval history.
+Stored identity matches are diagnostics; live scope/source authorization and exact
+approval checks remain required before a specification can be complete.
 
 ## Recovery and CAD discovery
 
 Source values, provenance, extraction identity and model/prompt/template version form
 the specification revision. Polling timestamps and unrelated CRM edits do not change
 it. Unchanged inputs reuse the persisted translation and verified PDF bytes.
-Each v2/v3/v4 artifact stores its immutable `source_json`, including field provenance and
+Each v2/v3/v4/v5 artifact stores its immutable `source_json`, including field provenance and
 source texts; later refreshes cannot overwrite that revision's evidence. The current
 record's `source_json` remains the last successful source snapshot. Pre-v2 artifact
 snapshots are null because their historic inputs cannot be reconstructed reliably.
@@ -568,6 +666,9 @@ current request`. For item `3305468770` (job `246c1170`), both responses filled
 Drawing Reference `FA18910_26.01 - A` and Revision `26.01 - A` from two baseline
 citations of an attachment's `PROJECT DETAILS` block, so recovery could never clear
 them. Both scalars are now withdrawn and the reference remains baseline identity.
+
+The following prefix-only policy describes the earlier `output-v17` release; it
+is superseded by the generalized Phase 3 parser described above.
 
 Drawing references whose two-letter prefix is neither `TP` nor the accepted `AX`
 family (for example `FA18910_26.01 - A`) are accepted, but never as verified

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import datetime
+from time import monotonic
 from typing import Any, Literal, Mapping, Optional, Protocol, Sequence
 
 from .. import monday_client
@@ -40,6 +42,12 @@ class DesignProcessingReadGateway(Protocol):
         self,
         words: Sequence[str],
     ) -> dict[str, int]: ...
+
+    def fetch_project_items_matching_references(
+        self, references: Sequence[str],
+    ) -> tuple[monday_client.MondayProjectBoardItem, ...]: ...
+
+    def fetch_specification_project(self, item_id: str) -> dict[str, Any]: ...
 
     def fetch_project_items_matching_words(
         self,
@@ -99,9 +107,68 @@ class DesignProcessingReadGateway(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class _ProjectReferenceCacheEntry:
+    expires_at: float
+    items: tuple[monday_client.MondayProjectBoardItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _SpecificationProjectCacheEntry:
+    expires_at: float
+    item: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
 class MondayDesignProcessingReadGateway:
     access_token: str
     project_board_id: str
+    # Instance scope binds these short-lived reads to one token and project board.
+    _reference_cache: dict[tuple[str, ...], _ProjectReferenceCacheEntry] = field(
+        default_factory=dict, compare=False, repr=False)
+    _specification_project_cache: dict[str, _SpecificationProjectCacheEntry] = field(
+        default_factory=dict, compare=False, repr=False)
+
+    def fetch_project_items_matching_references(
+        self, references: Sequence[str],
+    ) -> tuple[monday_client.MondayProjectBoardItem, ...]:
+        from .specification_references import parse_drawing_reference, parse_project_reference
+
+        keys = []
+        for literal in references:
+            reference = parse_project_reference(literal) or parse_drawing_reference(literal)
+            if reference is None:
+                raise ValueError("project lookup requires a two-letter project or drawing reference")
+            keys.append(reference.project_key)
+        key = tuple(sorted(set(keys)))
+        now = monotonic()
+        cached = self._reference_cache.get(key)
+        if cached is not None and cached.expires_at > now:
+            return cached.items
+        # Bound retained entries as well as their lifetime; failures are not cached.
+        self._reference_cache.clear()
+        items = monday_client.fetch_project_items_matching_references(
+            self.access_token, self.project_board_id, key)
+        self._reference_cache[key] = _ProjectReferenceCacheEntry(monotonic() + 30, items)
+        return items
+
+    def fetch_specification_project(self, item_id: str) -> dict[str, Any]:
+        from .performance_specification_sources import MondaySpecificationGateway
+
+        key = str(item_id)
+        now = monotonic()
+        cached = self._specification_project_cache.get(key)
+        if cached is not None and cached.expires_at > now:
+            return deepcopy(cached.item)
+        item = MondaySpecificationGateway(self.access_token).fetch_project(key)
+        if str((item.get("board") or {}).get("id")) != str(self.project_board_id):
+            raise monday_client.MondayReadContractError(detail="specification project is on another board")
+        for expired in [cache_key for cache_key, value in self._specification_project_cache.items()
+                        if value.expires_at <= now]:
+            self._specification_project_cache.pop(expired, None)
+        if len(self._specification_project_cache) >= monday_client.MAX_PROJECT_REFERENCE_LOOKUPS:
+            self._specification_project_cache.clear()
+        self._specification_project_cache[key] = _SpecificationProjectCacheEntry(monotonic() + 30, deepcopy(item))
+        return deepcopy(item)
 
     def fetch_target(self, item_id: str) -> DesignProcessingTargetSnapshot:
         raw_item = monday_client.fetch_design_processing_intake_item(

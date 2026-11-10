@@ -207,6 +207,11 @@ def test_inline_content_id_links_surrounding_scope_to_exact_attachment():
 
 
 def test_mixed_crm_materials_publish_null_cad_value_with_readable_alternatives(case):
+    data = deepcopy(case.item.extracted_parameters_json)
+    data["performanceParameters"]["Tapered Insulation"] = None
+    data["specificationEvidence"] = [entry for entry in data["specificationEvidence"]
+                                     if entry["field"] != "Tapered Insulation"]
+    case.item.extracted_parameters_json = data
     case.gateway.project["subitems"][0]["column_values"][1] = {
         **column("mirror875__1", "Product Type", None, "dropdown"),
         "values": [{"id": "1", "label": "Tissue Faced PIR"}, {"id": "2", "label": "VIPs"}],
@@ -219,7 +224,7 @@ def test_mixed_crm_materials_publish_null_cad_value_with_readable_alternatives(c
     assert "Tissue Faced PIR" in text and "VIPs" in text and "Tapered Insulation: Review required" in text
 
 
-def test_mirrored_mixed_material_does_not_hide_an_unreadable_second_source(case):
+def test_unreadable_optional_crm_material_does_not_replace_current_email_fact(case):
     case.gateway.project["subitems"][0]["column_values"][1] = {
         **column("mirror875__1", "Product Type", None, "mirror"),
         "mirrored_items": [
@@ -228,7 +233,26 @@ def test_mirrored_mixed_material_does_not_hide_an_unreadable_second_source(case)
             {"linked_item": {"id": "c", "board": {"id": "b"}}, "mirrored_value": {}},
         ],
     }
-    assert run(case) == ["failed"] and not case.gateway.uploads
+    assert run(case) == ["published"]
+    assert current(case).source_json["raw"]["Tapered Insulation"] == "TR27"
+    assert current(case).source_json["sources"]["Tapered Insulation"]["source"] == "Email Context"
+
+
+def test_unreadable_crm_material_fallback_stays_visible_with_its_original_column_audit(case):
+    data = deepcopy(case.item.extracted_parameters_json)
+    data["performanceParameters"]["Tapered Insulation"] = None
+    data["specificationEvidence"] = [entry for entry in data["specificationEvidence"]
+                                     if entry["field"] != "Tapered Insulation"]
+    case.item.extracted_parameters_json = data
+    case.gateway.project["subitems"][0]["column_values"][1] = {
+        **column("mirror875__1", "Product Type", None, "mirror"),
+        "display_value": "Unresolved product", "mirrored_items": [],
+    }
+    assert run(case) == ["published"]
+    source = current(case).source_json
+    assert "Tapered Insulation" in source["issues"]
+    read = next(entry for entry in source["crmReads"] if entry["field"] == "Tapered Insulation")
+    assert read["status"] == "unavailable" and read["columnValue"]["id"] == "mirror875__1"
 
 
 def test_ax_crm_reference_is_selected_and_keeps_its_full_revision(case):
@@ -263,13 +287,13 @@ def test_ds_email_reference_is_confirmed_by_its_crm_drawing(case, issuer):
     resolved = resolve_specification_sources(case.gateway, case.item)
     assert resolved["raw"]["Drawing Reference"] == "D.S - 00121_26.01 - D"
     assert resolved["raw"]["Revision"] == "26.01 - D"
-    assert resolved["sources"]["Drawing Reference"]["source"] == "Monday CRM"
+    assert resolved["sources"]["Drawing Reference"]["source"] == "Email Context"
     assert "Drawing Reference" not in resolved["issues"]
 
 
 @pytest.mark.parametrize("linked_project,reason", [
-    (True, "Requested drawing/roof is missing or ambiguous"),
-    (False, "Reference is not a verified TaperedPlus drawing"),
+    (True, "Drawing Reference requires Monday CRM confirmation as a TaperedPlus drawing"),
+    (False, "Drawing Reference requires Monday CRM confirmation as a TaperedPlus drawing"),
 ])
 def test_ds_email_reference_unconfirmed_by_crm_requires_review(case, linked_project, reason):
     if not linked_project:

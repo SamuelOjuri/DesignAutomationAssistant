@@ -54,8 +54,6 @@ def enqueue_metadata(
         seconds=0 if immediate else policy_from_settings().debounce_seconds,
     )
     record.attempt_count = 0
-    from .performance_specification import enqueue_specification
-    enqueue_specification(db, task.board_id, task.item_id, group_id=task.source_group_id, immediate=immediate)
     return record
 
 
@@ -78,8 +76,8 @@ def enqueue_linked_dependents(db: Session, board_id: str, item_id: str) -> int:
 
 
 def cancel_metadata(db: Session, task: Task) -> None:
-    from .performance_specification import cancel_specification
-    cancel_specification(db, task.board_id, task.item_id)
+    # Metadata belongs to active-project ingestion. Landing Zone intentionally
+    # excludes that workflow while specification review keeps its own queue.
     record = _locked_record(db, task.external_task_key).one_or_none()
     if record is not None:
         record.completed_generation = record.requested_generation
@@ -96,10 +94,6 @@ def _store_fields(db: Session, record: TaskMondayMetadata, fields: list[dict[str
         record.fields_json = fields
         record.revision = revision
         record.changed_at = now
-        from .performance_specification import enqueue_specification
-        task = db.get(Task, record.external_task_key)
-        if task is not None:
-            enqueue_specification(db, task.board_id, task.item_id, group_id=task.source_group_id)
     record.checked_at = now
     db.query(MondayMetadataLink).filter_by(external_task_key=record.external_task_key).delete(synchronize_session=False)
     for field in fields:
@@ -195,6 +189,16 @@ def execute_refresh(db: Session, claim: tuple[str, str, int], access_token: str)
             raise MetadataReadError("Monday task lifecycle is unavailable")
         eligible = policy_from_settings().classify_item(board_id, group_id, item["state"]).should_queue_sync
         fields = normalize_fields(item) if eligible else None
+        from .performance_specification import cancel_specification
+        from .specification_policy import specification_scope_exclusion
+
+        specification_exclusion = specification_scope_exclusion(
+            board_id=board_id, group_id=group_id, item_state=item["state"],
+        )
+        if specification_exclusion not in {None, "board_not_managed"}:
+            # Scope cancellation owns the specification lock before Task and
+            # metadata; active-project metadata updates never enqueue review.
+            cancel_specification(db, board_id, item_id)
         if item["state"] in INACTIVE_SOURCE_STATES:
             # Archival also cancels document work. Acquire its job locks before
             # Task/metadata, matching the orchestrator. Import locally to avoid

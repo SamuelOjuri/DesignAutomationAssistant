@@ -42,10 +42,15 @@ def render_performance_specification_pdf(
     review = ParagraphStyle("SpecificationReview", parent=body,
                             textColor=colors.HexColor("#744500"), backColor=colors.HexColor("#FFF4DC"),
                             borderPadding=6, spaceBefore=6, spaceAfter=12)
+    provenance = ParagraphStyle("SpecificationSource", parent=body, fontSize=8, leading=11,
+                                textColor=colors.HexColor("#556575"), spaceAfter=10)
     values = pdf_values(translation)
     reviews = translation.field_reviews if isinstance(translation, SpecificationPublication) else {}
     source_reviews = translation.source_reviews if isinstance(translation, SpecificationPublication) else []
+    field_sources = translation.field_sources if isinstance(translation, SpecificationPublication) else {}
     story = [Paragraph(TITLE, heading)]
+    if isinstance(translation, SpecificationPublication) and translation.review_version is not None:
+        story.append(Paragraph(f"Specification review version {translation.review_version}", provenance))
     if source_reviews:
         story.append(Paragraph("Review required: some source documents could not be read. Values below "
                                "exclude their contents.", body))
@@ -57,8 +62,19 @@ def render_performance_specification_pdf(
                                "The details are shown beside each affected field.", body))
         story.append(Spacer(1, 8))
     for label in FIELD_NAMES:
-        story.append(Paragraph(f"{escape(label)}: {escape(values[label])}", review if label in reviews else body))
+        field_style = review if label in reviews else body
+        if label in field_sources:
+            # A source line belongs to its field, including across page breaks.
+            field_style = ParagraphStyle(f"{label}WithSource", parent=field_style, keepWithNext=True, spaceAfter=2)
+        literal = escape(values[label]).replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br/>")
+        story.append(Paragraph(f"{escape(label)}: {literal}", field_style))
+        if label in field_sources:
+            story.append(Paragraph(f"Source: {escape(field_sources[label])}", provenance))
         story.append(Spacer(1, 2))
+    if isinstance(translation, SpecificationPublication) and translation.mapping_issues:
+        story.append(Paragraph("CAD mapping requires review", body))
+        for label, detail in translation.mapping_issues.items():
+            story.append(Paragraph(f"{escape(label)} - {escape(detail)}", review))
     if isinstance(translation, SpecificationPublication) and translation.request_notes:
         note_heading = ParagraphStyle("RequestNotesTitle", parent=heading, fontSize=13, leading=18,
                                       spaceBefore=14, spaceAfter=10, keepWithNext=True)

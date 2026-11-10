@@ -11,8 +11,21 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .specification_references import (
+    REFERENCE_TEXT_PATTERN, drawing_reference_key, normalize_reference_dashes,
+    reference_revision,
+)
 
-EVIDENCE_VERSION = 2
+
+EVIDENCE_VERSION = 3
+# Canonical PDF label order is shared by automated export and reviewer contracts.
+PDF_FIELD_NAMES = (
+    "Scale", "Page Size", "Drawing Reference", "Drawing Title",
+    "Bauder Contract Number", "Bauder Roof Num", "Incoming Information",
+    "Revision", "Date Received", "Company", "Contact", "Surveyor",
+    "Target U Value", "Target Min U Value", "Membrane", "Tapered Insulation",
+    "VCL", "Decking",
+)
 ANIMATED_IMAGE_SKIP_STATUS = "skipped:animated_image"
 DWG_SKIP_STATUS = "skipped:dwg"
 ENCRYPTED_PDF_SKIP_STATUS = "skipped:encrypted_pdf"
@@ -29,18 +42,21 @@ FIELD_DEFINITIONS = {
     "Scale": "The drawing scale, usually found in a drawing title block (for example, 1:100).",
     "Page Size": "The drawing page or paper size, usually found in a drawing title block (for example, A1).",
     "Drawing Reference": (
-        "The Drawing Reference Number issued by TaperedPlus "
-        "[e.g. TP*****_**.** - *]. Retain accepted AX references such as "
-        "AX 16670_26.12 - B and D.S references exactly, including their actual issuer; "
-        "never invent a TP prefix or replace AXTER branding with TaperedPlus. "
-        "If several references exist, use the latest "
-        "one associated with the request to TaperedPlus."
+        "The drawing reference number issued for a TaperedPlus project. Its usual "
+        "format has a two-letter alphabetic prefix followed by the project number "
+        "and drawing/version suffix, for example AB12345_26.01 - A. Preserve the "
+        "actual prefix, leading zeros and issuer; never invent or replace branding. "
+        "Use the reference relevant to the current request; when several relevant "
+        "versions are present, use the latest applicable existing version. If none "
+        "is suitable, offer an appropriate existing CRM drawing for reviewer selection. "
+        "Bare-number and D.S forms still require verified provenance or CRM confirmation."
     ),
     "Drawing Title": "The drawing project name, usually the project location.",
     "Revision": (
-        "The suffix of the selected TaperedPlus Drawing Reference. This is the "
-        "suffix after the underscore in the drawing reference "
-        "[e.g. **.** - * from TP*****_**.** - *]."
+        "The complete suffix after the underscore in the selected Drawing Reference, "
+        "for example 26.01 - A from AB12345_26.01 - A. It describes the selected "
+        "existing drawing; never generate a future issued revision. An explicit "
+        "reviewer value overrides automatic derivation."
     ),
     "Date Received": (
         "The date the selected client sent the request to TaperedPlus. Company, "
@@ -108,13 +124,6 @@ def canonical_label(label: str) -> str:
 
 
 REFERENCE_FIELDS = frozenset({"Drawing Reference", "Revision"})
-# Outlook and word processors often typeset 'TP123_45.67 - A' with an en dash.
-_REFERENCE_DASHES = str.maketrans(dict.fromkeys("\u2010\u2011\u2012\u2013\u2014\u2015\u2212", "-"))
-
-
-def normalize_reference_dashes(value):
-    """Read typographic dashes in a drawing reference as the standard '-'."""
-    return value.translate(_REFERENCE_DASHES) if isinstance(value, str) else value
 
 
 U_VALUE_FIELDS = frozenset({"Target U Value", "Target Min U Value"})
@@ -128,46 +137,13 @@ def normalize_unit_spacing(value):
     return re.sub(r"(?<=\d)\s*(?=W\s*/)", " ", value, flags=re.IGNORECASE) if isinstance(value, str) else value
 
 
-# Any other two-letter prefix (e.g. FA18910_26.01 - A) is accepted for review only.
-REVIEW_REFERENCE_PREFIX = r"(?!TP|AX)[A-Z]{2}\s*"
-_REFERENCE_NUMBER = r"\d+_\d+\.\d+(?:\s*-\s*[A-Z]+)?"
-# A literal reference inside source text, including review-only prefixes.
-REFERENCE_TEXT_PATTERN = (
-    r"(?<!\w)(?:(?:TP|AX)\s*|D\.S\s*-\s*|" + REVIEW_REFERENCE_PREFIX + r")?"
-    + _REFERENCE_NUMBER + r"(?!\w|\.\w)"
-)
+def tp_reference_revision(reference: str | None, *, confirmed_crm: bool = False) -> str | None:
+    """Compatibility API for the shared parser, retaining the complete suffix.
 
-
-def review_prefix_reference(reference: str | None) -> bool:
-    """A reference whose two-letter prefix is neither TP nor the accepted AX family."""
-    reference = normalize_reference_dashes(reference)
-    return bool(reference and re.fullmatch(
-        REVIEW_REFERENCE_PREFIX + _REFERENCE_NUMBER, reference.strip(), re.IGNORECASE))
-
-
-def tp_reference_revision(reference: str | None, *, confirmed_crm: bool = False,
-                          review_prefix: bool = False) -> str | None:
-    """Accepted drawing families, preserving branding and the complete suffix.
-
-    AX is an explicitly accepted legacy family. Bare numbers and D.S require
-    confirmed CRM membership or independently verified TP correspondence.
-    Other two-letter prefixes parse only with review_prefix; callers must flag
-    those references for review rather than treat them as verified TP drawings.
+    All two-letter alphabetic prefixes are structurally valid. Bare numbers and
+    D.S remain evidence gated through confirmed_crm.
     """
-    prefix = r"(?:(?:TP|AX)\s*|D\.S\s*-\s*)?" if confirmed_crm else r"(?:TP|AX)\s*"
-    if review_prefix:
-        prefix = r"(?:" + REVIEW_REFERENCE_PREFIX + "|" + prefix + ")"
-    pattern = prefix + _REFERENCE_NUMBER
-    reference = normalize_reference_dashes(reference)
-    if reference and re.fullmatch(pattern, reference.strip(), re.IGNORECASE):
-        return reference.split("_", 1)[1].strip()
-    return None
-
-
-def drawing_reference_key(reference: str | None) -> str:
-    value = re.sub(r"\s+", "", normalize_reference_dashes(str(reference or ""))).casefold()
-    # Bare CRM references and TP-prefixed references share a family; AX does not.
-    return value.removeprefix("tp") if re.match(r"^(?:tp)?\d+_", value) else value
+    return reference_revision(reference, confirmed_legacy=confirmed_crm)
 
 
 def scale_ratio(value: str | None) -> tuple[str, str] | None:
