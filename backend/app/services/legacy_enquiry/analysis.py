@@ -88,6 +88,7 @@ def analyze_downloaded_email_assets(
             records = extract_source_records(
                 content, downloaded.source.filename, client,
                 source_id=f"asset:{downloaded.source.asset_id}",
+                file_extension=getattr(downloaded.source, "file_extension", None),
             )
             manifest.extend(records)
             supplementary_records.extend(records)

@@ -208,12 +208,13 @@ class _ArchiveBudget:
 
 
 def extract_source_records(content, filename, extractor, *, source_id, observed_at=None,
-                           _archive_budget=None, _archive_depth=0):
+                           file_extension=None, _archive_budget=None, _archive_depth=0):
     """Extract a source and ZIP members without writing archive paths to disk."""
     record = source_record(source_id, filename, content, source_type="attachment", observed_at=observed_at)
     records = [record]
     try:
-        if Path(filename).suffix.lower() == ".zip":
+        if (Path(filename).suffix.lower() == ".zip"
+                or str(file_extension or "").strip().lower() in {"zip", ".zip"}):
             budget = _archive_budget if _archive_budget is not None else _ArchiveBudget()
             _extract_archive(content, filename, extractor, source_id, observed_at, budget, _archive_depth, records)
             record["status"] = ARCHIVE_EXPANDED_STATUS

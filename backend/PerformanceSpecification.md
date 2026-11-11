@@ -85,9 +85,11 @@ python -m backend.scripts.check_design_processing_sources
 
 This uses only synthetic DWG, ZIP, XLSX and encrypted-PDF bytes with no database or
 network calls. Expected output includes `status: ok`, `pipeline_revision: output-v18`,
-and all four checks with `passed: true`. It verifies that DWG and encrypted PDFs
-are skipped, ZIP members are read and long spreadsheet cells retain their final
-technical values. A `.dwg`
+and all five checks with `passed: true`. Four reader checks verify that DWG and
+encrypted PDFs are skipped, ZIP members are read and long spreadsheet cells retain
+their final technical values. The fifth check verifies that a ZIP uploaded beside
+an `.eml` in the Email column is selected as a supplementary source, and that adding
+or changing it changes the extraction input revision. A `.dwg`
 failure reported as `failed:ValueError` is inconsistent with the current DWG skip
 path. Check the runtime fields on that failing job and ensure all design-worker
 services run the matching release; a nearby startup message alone does not identify
@@ -313,8 +315,15 @@ Keys are exact PDF field labels; valid scopes are `holding`, `project`, `drawing
 Incoming Information is ignored even if mapped. Confirm live schema/token access
 against the deployed `MONDAY_API_VERSION` before enabling broad publication.
 
-Embedded email attachments are included automatically. To include additional source
-files on the holding item, configure their actual file-column IDs on **all** matching
+Embedded email attachments and separate ZIPs uploaded beside `.eml`/`.msg` files in
+the holding item's Email column are included automatically. No additional setting is
+needed for those ZIPs. A supported email remains required; ZIP-only items are not
+ready for design processing. Other standalone Email-column file types remain ignored.
+The ZIPs participate in the extraction revision and existing archive limits/exclusions
+still apply.
+
+To include files from other holding-item source columns, configure their actual
+file-column IDs on **all** matching
 API/design/reconciliation/publisher services:
 
 ```dotenv
@@ -326,6 +335,14 @@ removing or replacing one triggers fresh extraction. Subscribe those columns to 
 existing holding-board column-change webhook. Email/AI Data/matched-output column
 IDs are rejected here; generated export filenames are also excluded. This setting
 does not automatically include attachments on linked boards.
+
+Deploy the matching API, design worker, reconciliation and specification-worker
+release for same-column ZIP intake. The pipeline remains `output-v18`: affected
+items acquire a new input revision because their ZIP metadata is now included;
+email-only items do not need a global extraction-version change. For existing
+eligible items, inspect item-scoped reconciliation with `--dry-run` before running
+normal reconciliation to queue the current input. Normal reconciliation can also
+produce the existing design outputs according to its configured mode.
 
 ## Deployment
 

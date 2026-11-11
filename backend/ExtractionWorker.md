@@ -243,11 +243,13 @@ Treat the parsed `files` array in `file_mkpbm883.value` as the authoritative Ema
 - `file_mkpbm883` column `value`; and
 - item asset metadata: `id`, `name`, `file_extension`, `file_size`, `created_at`, and a download URL.
 
-Parse each Email-column `assetId` as a decimal string and join it to item asset metadata by asset ID. Only joined assets whose filename or `file_extension` identifies a supported `.eml` or `.msg` file are design-processing inputs. Unsupported files in the Email column are ignored for both eligibility and revision calculation. At least one supported joined asset is required.
+Parse each Email-column `assetId` as a decimal string and join it to item asset metadata by asset ID. Joined `.eml` and `.msg` files establish the email request. A separate `.zip` uploaded beside the email in that same column is automatically included as a supplementary extraction source, including when the ZIP is not embedded in the email. Extension recognition is case-insensitive and accepts the asset filename or `file_extension`. At least one supported joined `.eml` or `.msg` remains required; a ZIP alone does not make an item ready. Other standalone file types in the Email column remain ignored.
+
+The extraction input revision includes admitted emails and supplementary ZIP metadata, so adding, removing, replacing or changing a ZIP triggers fresh extraction for an otherwise eligible item. Assets shared with configured supplementary file columns are downloaded once. Embedded email ZIP attachments continue through the existing archive reader. Its nesting, size and expansion bounds, DWG exclusions and encrypted-PDF exclusions remain in effect.
 
 Do not calculate a revision if `file_mkpbm883.value` is malformed, a referenced supported asset cannot be joined, or its ID, filename, size, `created_at`, or download URL is missing. Treat that condition as not ready or as a retryable Monday/API failure; it must not be interpreted as an empty Email column or as a new valid revision.
 
-For every supported joined asset, create this normalized revision record:
+For every supported joined email or supplementary asset, create this normalized revision record:
 
 ```json
 {

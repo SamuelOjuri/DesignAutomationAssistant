@@ -91,6 +91,14 @@ def is_supported_email_asset(
     )
 
 
+def _is_email_column_zip(filename: Optional[str], file_extension: Optional[str]) -> bool:
+    filename_extension = PurePath(filename or "").suffix.lower()
+    # A named email stays the request even if Monday's extension hint differs.
+    if filename_extension in SUPPORTED_EMAIL_EXTENSIONS:
+        return False
+    return filename_extension == ".zip" or (file_extension or "").strip().lower() in {"zip", ".zip"}
+
+
 def canonical_revision_bytes(assets: Sequence[DesignEmailAsset]) -> bytes:
     ordered_assets = sorted(
         assets,
@@ -202,6 +210,7 @@ def parse_design_processing_target(
     membership = _parse_email_membership(item)
     assets_by_id = _index_asset_metadata(item)
     email_assets: list[DesignEmailAsset] = []
+    supplemental: list[DesignEmailAsset] = []
 
     for member in membership:
         asset_id = _required_decimal_id(
@@ -212,26 +221,30 @@ def parse_design_processing_target(
         if metadata is None:
             member_name = member.get("name")
             if isinstance(member_name, str) and PurePath(member_name).suffix:
-                if not is_supported_email_asset(member_name, None):
+                if not is_supported_email_asset(member_name, None) and not _is_email_column_zip(member_name, None):
                     continue
             raise DesignProcessingInputError(
                 f"Email asset {asset_id} is missing item asset metadata"
             )
 
-        if not is_supported_email_asset(
-            _optional_string(metadata.get("name")),
-            _optional_string(metadata.get("file_extension")),
-        ):
+        filename = _optional_string(metadata.get("name"))
+        file_extension = _optional_string(metadata.get("file_extension"))
+        is_zip = _is_email_column_zip(filename, file_extension)
+        if not is_zip and not is_supported_email_asset(filename, file_extension):
             continue
-        email_assets.append(_parse_supported_asset(asset_id, metadata))
+        asset = _parse_supported_asset(asset_id, metadata)
+        if is_zip:
+            supplemental.append(asset)
+        else:
+            email_assets.append(asset)
 
     email_assets.sort(key=lambda asset: (int(asset.asset_id), asset.filename))
-    if len({asset.asset_id for asset in email_assets}) != len(email_assets):
+    email_column_assets = (*email_assets, *supplemental)
+    if len({asset.asset_id for asset in email_column_assets}) != len(email_column_assets):
         raise DesignProcessingInputError("Email membership contains duplicate asset IDs")
 
     ordered_assets = tuple(email_assets)
-    supplemental = []
-    seen = {asset.asset_id for asset in ordered_assets}
+    seen = {asset.asset_id for asset in email_column_assets}
     for column_id in settings.design_processing_source_file_column_ids:
         for member in _parse_email_membership(item, column_id):
             asset_id = _required_decimal_id(member.get("assetId"), field_name=f"{column_id}.assetId")

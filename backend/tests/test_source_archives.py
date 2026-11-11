@@ -6,6 +6,9 @@ from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 import pytest
 
+from backend.app.config import settings
+from backend.app.services.design_processing_inputs import download_design_email_assets, parse_design_processing_target
+from backend.app.services.design_processing_pipeline import _remove_downloaded_files
 from backend.app.services.legacy_enquiry import source_documents as sources
 from backend.app.services.legacy_enquiry.analysis import analyze_downloaded_email_assets
 from backend.app.services.legacy_enquiry.email_extraction import extract_text_from_email
@@ -14,6 +17,7 @@ from backend.app.services.performance_specification_contract import FIELD_NAMES
 from backend.app.services.performance_specification_evidence import resolve_email_evidence
 from backend.app.services.specification_semantics import COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION
 from backend.tests.pdf_helpers import pdf_bytes
+from backend.tests.test_design_processing_phase3 import _asset, _item
 
 
 def archive_bytes(entries, compression=ZIP_DEFLATED):
@@ -38,6 +42,58 @@ def parameters():
         name: None for name in DesignParameterExtraction.model_fields
         if not name.startswith("specification_")
     })
+
+
+@pytest.mark.parametrize("filename,extension", [("roof-plans.ZIP", "zip"), ("downloaded-roof-plans", ".ZIP")])
+def test_same_email_column_zip_reaches_nested_roof_pdf_analysis_and_temp_cleanup(monkeypatch, tmp_path, filename, extension):
+    monkeypatch.setattr(settings, "design_processing_source_file_column_ids", [])
+    mail = EmailMessage()
+    mail["From"], mail["To"], mail["Subject"] = "client@example.com", "design@taperedplus.co.uk", "Roof B request"
+    mail["Date"] = "Tue, 10 Nov 2026 10:00:00 +0000"
+    mail.set_content("Please review the roof plans supplied alongside this email.")
+    pdf = pdf_bytes()
+    archive = archive_bytes([("plans/nested.zip", archive_bytes([("Roof B.pdf", pdf)]))])
+    contents = {"1": mail.as_bytes(), "2": archive}
+    metadata = [_asset("1", "request.eml", size=len(contents["1"])), _asset("2", filename, size=len(archive))]
+    metadata[1]["file_extension"] = extension
+    snapshot = parse_design_processing_target(_item(
+        files=[{"assetId": "2", "name": filename}, {"assetId": "1", "name": "request.eml"}], assets=metadata,
+    ))
+    calls, pdf_calls, contexts = [], [], []
+
+    def downloader(asset, _access_token):
+        calls.append(asset["id"])
+        content = contents[asset["id"]]
+        path = tmp_path / asset["name"]
+        path.write_bytes(content)
+        return SimpleNamespace(temp_path=str(path), content_type="application/octet-stream",
+            sha256=hashlib.sha256(content).hexdigest(), size_bytes=len(content))
+
+    downloads = download_design_email_assets((*snapshot.email_assets, *snapshot.supplementary_assets),
+        "unused-token", downloader=downloader)
+    try:
+        result = analyze_downloaded_email_assets(downloads, client=SimpleNamespace(
+            process_pdf=lambda content, name: pdf_calls.append((content, name)) or "Roof: B\nScale: 1:100",
+            extract_design_parameters=lambda context: contexts.append(context) or parameters(),
+            query_llm=lambda *args: "Roof B",
+        ))
+    finally:
+        _remove_downloaded_files(downloads)
+
+    assert calls == ["1", "2"]
+    assert pdf_calls == [(pdf, f"{filename}!/plans/nested.zip!/Roof B.pdf")]
+    assert "Roof: B\nScale: 1:100" in contexts[0]
+    manifest = list(result.source_manifest)
+    assert all(record["status"] in COMPLETE_SOURCE_STATUSES for record in manifest)
+    root = next(record for record in manifest if record["sourceId"] == "asset:2")
+    assert root["filename"] == filename and root["status"] == "expanded:archive"
+    assert root["contentSha256"] == hashlib.sha256(archive).hexdigest()
+    assert sum(record["status"] == "expanded:archive" for record in manifest) == 2
+    roof = next(record for record in manifest if record["filename"].endswith("Roof B.pdf"))
+    assert roof["status"] == "read" and roof["contentSha256"] == hashlib.sha256(pdf).hexdigest()
+    assert roof["parentSourceId"] in {record["sourceId"] for record in manifest}
+    assert f"SOURCE ID: {roof['sourceId']}" in contexts[0]
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_dwg_is_skipped_and_audited_without_entering_model_context():

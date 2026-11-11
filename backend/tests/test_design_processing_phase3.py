@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from datetime import datetime, timezone
+from types import SimpleNamespace
 import uuid
 
 import pytest
 
 from backend.app import monday_client
+from backend.app.config import settings
 from backend.app.models import DesignProcessingItem, DesignProcessingJob
 from backend.app.services.design_processing_inputs import (
     DownloadedDesignEmailAsset,
@@ -153,6 +156,133 @@ def test_revision_ignores_membership_order_download_url_and_item_name():
     )
 
     assert changed.input_revision == original.input_revision
+
+
+@pytest.mark.parametrize("filename,extension", [
+    ("roof-plans.zip", "zip"), ("roof-plans.ZIP", "pdf"),
+    ("downloaded-roof-plans", "ZIP"), ("downloaded-roof-plans", ".ZiP"),
+])
+def test_same_email_column_zip_is_supplementary_without_source_column_configuration(monkeypatch, filename, extension):
+    monkeypatch.setattr(settings, "design_processing_source_file_column_ids", [])
+    archive = _asset("2", filename)
+    archive["file_extension"] = extension
+    target = parse_design_processing_target(_item(
+        files=[{"assetId": "1"}, {"assetId": "2"}, {"assetId": "3"}, {"assetId": "4"}],
+        assets=[_asset("1", "request.eml"), archive, _asset("3", "other-request.MSG"), _asset("4", "ignored.pdf")],
+    ))
+    assert [asset.filename for asset in target.email_assets] == ["request.eml", "other-request.MSG"]
+    assert [asset.filename for asset in target.supplementary_assets] == [filename]
+    assert target.input_revision is not None
+
+
+@pytest.mark.parametrize("filename,extension", [
+    ("roof-plans.zip", "zip"), ("roof-plans.ZIP", "eml"), ("downloaded-roof-plans", ".ZiP"),
+])
+def test_zip_only_email_column_still_requires_a_real_email(monkeypatch, filename, extension):
+    monkeypatch.setattr(settings, "design_processing_source_file_column_ids", [])
+    archive = _asset("2", filename)
+    archive["file_extension"] = extension
+    target = parse_design_processing_target(_item(
+        files=[{"assetId": "2", "name": filename}], assets=[archive],
+    ))
+    assert target.missing_email is True
+    assert target.input_revision is None
+    assert [asset.filename for asset in target.supplementary_assets] == [filename]
+
+
+def test_adding_and_removing_same_column_zip_changes_input_revision(monkeypatch):
+    monkeypatch.setattr(settings, "design_processing_source_file_column_ids", [])
+    mail = _asset("1", "request.eml")
+    original = parse_design_processing_target(_item(files=[{"assetId": "1"}], assets=[mail]))
+    with_zip = parse_design_processing_target(_item(
+        files=[{"assetId": "1"}, {"assetId": "2"}], assets=[mail, _asset("2", "roof-plans.zip")],
+    ))
+    removed = parse_design_processing_target(_item(
+        files=[{"assetId": "1"}], assets=[mail, _asset("2", "roof-plans.zip")],
+    ))
+    assert original.input_revision != with_zip.input_revision
+    assert removed.input_revision == original.input_revision
+
+
+@pytest.mark.parametrize("field,value", [
+    ("file_size", 999), ("name", "replacement-plans.zip"),
+    ("created_at", "2026-08-05T12:00:00Z"), ("id", "3"),
+])
+def test_same_column_zip_revision_tracks_replacement_metadata(monkeypatch, field, value):
+    monkeypatch.setattr(settings, "design_processing_source_file_column_ids", [])
+    item = _item(files=[{"assetId": "1"}, {"assetId": "2"}],
+                 assets=[_asset("1", "request.eml"), _asset("2", "roof-plans.zip")])
+    original = parse_design_processing_target(item)
+    changed = deepcopy(item)
+    changed["assets"][1][field] = value
+    if field == "id":
+        changed["column_values"][0]["value"] = json.dumps({"files": [{"assetId": "1"}, {"assetId": value}]})
+    assert parse_design_processing_target(changed).input_revision != original.input_revision
+
+
+def test_same_column_zip_revision_ignores_membership_order_and_rotated_urls(monkeypatch):
+    monkeypatch.setattr(settings, "design_processing_source_file_column_ids", [])
+    assets = [_asset("1", "request.eml"), _asset("2", "roof-plans.zip")]
+    original = parse_design_processing_target(_item(files=[{"assetId": "1"}, {"assetId": "2"}], assets=assets))
+    changed_assets = deepcopy(list(reversed(assets)))
+    changed_assets[0]["url"] = "https://monday.invalid/new-archive-url"
+    reordered = parse_design_processing_target(_item(files=[{"assetId": "2"}, {"assetId": "1"}], assets=changed_assets))
+    assert reordered.input_revision == original.input_revision
+
+
+@pytest.mark.parametrize("field,value", [
+    ("name", None), ("name", ""), ("file_size", None), ("file_size", -1),
+    ("file_size", True), ("file_size", 12.5), ("created_at", None),
+    ("created_at", "2026-08-05T12:00:00"), ("url", None),
+])
+def test_same_column_zip_requires_complete_revision_and_download_metadata(monkeypatch, field, value):
+    monkeypatch.setattr(settings, "design_processing_source_file_column_ids", [])
+    archive = _asset("2", "roof-plans.zip")
+    archive[field] = value
+    with pytest.raises(DesignProcessingInputError):
+        parse_design_processing_target(_item(files=[{"assetId": "1"}, {"assetId": "2"}],
+            assets=[_asset("1", "request.eml"), archive]))
+
+
+def test_missing_same_column_zip_metadata_fails_instead_of_silently_omitting_drawings(monkeypatch):
+    monkeypatch.setattr(settings, "design_processing_source_file_column_ids", [])
+    with pytest.raises(DesignProcessingInputError, match="missing item asset metadata"):
+        parse_design_processing_target(_item(
+            files=[{"assetId": "1"}, {"assetId": "2", "name": "roof-plans.ZIP"}],
+            assets=[_asset("1", "request.eml")],
+        ))
+
+
+def test_duplicate_same_column_zip_membership_is_rejected(monkeypatch):
+    monkeypatch.setattr(settings, "design_processing_source_file_column_ids", [])
+    with pytest.raises(DesignProcessingInputError, match="Email membership contains duplicate asset IDs"):
+        parse_design_processing_target(_item(
+            files=[{"assetId": "1"}, {"assetId": "2"}, {"assetId": "0002"}],
+            assets=[_asset("1", "request.eml"), _asset("2", "roof-plans.zip")],
+        ))
+
+
+def test_same_zip_in_email_and_configured_source_column_downloads_once(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "design_processing_source_file_column_ids", ["source_files"])
+    item = _item(files=[{"assetId": "1"}, {"assetId": "2"}],
+                 assets=[_asset("1", "request.eml", size=4), _asset("2", "roof-plans.zip", size=4)])
+    item["column_values"].append({"id": "source_files", "value": json.dumps({"files": [{"assetId": "2"}]})})
+    target = parse_design_processing_target(item)
+    calls = []
+
+    def downloader(asset, _access_token):
+        calls.append(asset["id"])
+        content = b"test"
+        path = tmp_path / asset["name"]
+        path.write_bytes(content)
+        return SimpleNamespace(temp_path=str(path), content_type="application/octet-stream",
+            sha256=hashlib.sha256(content).hexdigest(), size_bytes=len(content))
+
+    downloads = download_design_email_assets((*target.email_assets, *target.supplementary_assets),
+        "unused-token", downloader=downloader)
+    assert calls == ["1", "2"]
+    assert [asset.source.asset_id for asset in downloads] == ["1", "2"]
+    assert [asset.asset_id for asset in target.supplementary_assets] == ["2"]
 
 
 def test_valid_empty_or_unsupported_email_column_is_readiness_not_error():
@@ -754,6 +884,26 @@ def test_execution_gate_compares_remote_desired_and_execution_identity():
             expected_board_id="1882196103",
             expected_group_id="group_mkpbd6vy",
             worker_id="worker-1",
+        )
+    assert exc_info.value.reason == "input_changed"
+
+
+def test_standalone_zip_change_fences_existing_execution_even_when_email_is_unchanged(monkeypatch):
+    monkeypatch.setattr(settings, "design_processing_source_file_column_ids", [])
+    source_item = _item(files=[{"assetId": "1"}, {"assetId": "2"}],
+                        assets=[_asset("1", "request.eml"), _asset("2", "roof-plans.zip")])
+    original = parse_design_processing_target(source_item)
+    identity = ProcessingIdentity(original.input_revision, "pipeline-v1")
+    item = _processing_item(desired=identity, state="processing")
+    job = _running_job(identity)
+    source_item["assets"][1]["file_size"] += 1
+    changed = parse_design_processing_target(source_item)
+    assert changed.email_assets == original.email_assets
+
+    with pytest.raises(DesignProcessingTargetMismatch) as exc_info:
+        assert_current_execution_target(
+            item, job, gateway=FakeReadGateway(changed), pipeline_version="pipeline-v1",
+            expected_board_id="1882196103", expected_group_id="group_mkpbd6vy", worker_id="worker-1",
         )
     assert exc_info.value.reason == "input_changed"
 
