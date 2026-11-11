@@ -183,6 +183,7 @@ def _extraction_payload(
         "requestContext": request_context_summary(select_client_request(result.source_manifest)),
         "sources": result.sources,
         "projectName": result.project_name,
+        "processingTimings": dict(result.stage_timings),
         "emailContentHashes": [
             {
                 "assetId": audit.asset_id,
@@ -216,7 +217,9 @@ def _update_job_progress(
     *,
     completed_stage: str,
 ) -> None:
+    progress = (job.result_json or {}).get("progress")
     job.result_json = {
+        **({"progress": progress} if progress is not None else {}),
         "schemaVersion": 1,
         **_identity_payload(identity),
         "completedStage": completed_stage,
@@ -322,6 +325,7 @@ def run_analysis_pipeline(
             check_current=check_current,
         )
         try:
+            from .design_processing_progress import persist_analysis_progress
             extraction_result = run_interruptible_analysis(
                 downloaded_assets,
                 client=analysis_client,
@@ -330,6 +334,9 @@ def run_analysis_pipeline(
                 remote_validation_seconds=(
                     settings.design_processing_extraction_remote_validation_seconds
                 ),
+                source_scope=f"monday-board:{snapshot.board_id}",
+                on_progress=lambda progress: persist_analysis_progress(
+                    db, job_id, worker_id=worker_id, progress=progress),
             )
         finally:
             _remove_downloaded_files(downloaded_assets)

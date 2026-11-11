@@ -2,10 +2,22 @@
 
 Specification Review Phase 3 adds the versioned intent/reference/candidate
 sidecars described in [references and intent](SpecificationReviewReferencesAndIntent.md).
-The runtime is `output-v19`. This revision admits source files and ZIPs up to
+The runtime is `output-v20`. Source files and ZIPs accept up to
 40 MiB and audits unsupported formats as `skipped:unsupported_format`; supported
 formats that cannot be read still require retry/review. The pinned legacy producer provenance below remains
 the historical baseline; the new recommendation behavior is versioned separately.
+
+This release adds conservative native PDF reading and board-scoped transcription
+reuse, shared PostgreSQL admission for Gemini generations, and early read-only
+review previews. Apply migration `0021_processing_acceleration` before running
+the new code. The matched frontend displays current stages and source counts;
+provisional fields do not permit saves or publication before normal analysis
+gates complete. See [processing acceleration deployment](ProcessingAccelerationDeployment.md)
+for the two-worker commands, environment settings, verification and retention.
+The full extraction identity also includes the native-PDF enablement flag;
+changing it requires fresh extraction. Cache enablement/TTL does not force a new
+pipeline identity. Per-stage extraction durations are retained in
+`processingTimings`, separate from queue, matching and publication delays.
 
 Specification Review Phase 5 gives the separate performance-specification publisher
 its own Landing Zone lifecycle. It uses the configured design board/Landing group,

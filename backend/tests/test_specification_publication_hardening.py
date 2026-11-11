@@ -32,6 +32,12 @@ def parameters(**values):
 
 
 def extract_twice(initial, recovered, manifest):
+    # These regressions exercise preservation/merging during an actual recovery.
+    # Complete, verified absences no longer cause a second request by themselves.
+    initial = initial.model_copy(deep=True)
+    initial.specification_assessed_fields = [
+        label for label in initial.specification_assessed_fields if label != "Surveyor"
+    ]
     replies, calls = iter([initial.model_dump(), recovered.model_dump()]), []
     def generate(model, prompt, config):
         calls.append(prompt)

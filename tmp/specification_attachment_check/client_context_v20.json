@@ -1,0 +1,389 @@
+{
+  "internal_domains": "taperedplus.co.uk",
+  "selected_client_request": {
+    "messageIndex": 1,
+    "sender": "a.harvey@bauder.co.uk",
+    "recipients": [
+      "nick@taperedplus.co.uk",
+      "j.bailey@bauder.co.uk",
+      "bauder@taperedplus.co.uk",
+      "sales@taperedplus.co.uk",
+      "j.duron@bauder.co.uk",
+      "g.whiteing@bauder.co.uk"
+    ],
+    "sentDate": "11 November 2026 10:59",
+    "sentAt": "2026-11-11T10:59:00+00:00",
+    "requestRole": "forwarded_request",
+    "headerSnippet": "From:\n Aaron Harvey <a.harvey@bauder.co.uk> \n\nSent: 11 November 2026 10:59\n\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\n\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: RE: Urgent - B260681 St. Cleres School",
+    "text": "From:\n Aaron Harvey <a.harvey@bauder.co.uk> \n\nSent: 11 November 2026 10:59\n\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\n\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: RE: Urgent - B260681 St. Cleres School\n\n\n\n\n\n\n \n\n\nHi Nick,\n\n\n \n\n\nI’ve uploaded to WeTransfer to avoid any file size limitations. I didn’t think they would be over the limit.\n\n\n\n \n\n\nhttps://we.tl/t-4yTHpr7zgKLf96FO\n\n\n \n\n\nLet me know if you need anything further.\n\n\n\n \n\n\nThanks, \n\n\n \n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\nAaron Harvey\n\n\n\n\n\n\n\n \n\n​​​​​\n\n\n\n\n\n\n\n\n\n\n\n \n\nDesign Technician Co‑ordinator\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image002.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n​\n\n\n\n\n\n\n \n\n [Image: cid:image003.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\nBauder Ltd\n\n\n\n\n\n\n \n\n70 Landseer Road, Ipswich, England IP3 0DH \n\n\n\n\n\n\n \n\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image004.png@01DD71D4.215F6BD0] \n\n\n \n\n +44 1473 267158\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image005.png@01DD71D4.215F6BD0] \n\n\n \n\n a.harvey@bauder.co.uk\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image006.png@01DD71D4.215F6BD0] \n\n\n \n\n www.bauder.co.uk\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image007.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image008.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image009.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n​Bauder Limited is a limited company registered in England and Wales.\n\n​Registered number: 01466215.\n\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n",
+    "sourceId": "asset:1:body"
+  },
+  "fallback_intent": {
+    "schema_version": 1,
+    "recommended_type": "uncertain",
+    "explanation": "The current request does not clearly distinguish new work from a change to an existing scheme.",
+    "evidence": [],
+    "detected_references": [
+      {
+        "kind": "project",
+        "literal": "IP3",
+        "evidence": {
+          "source_id": "asset:1:body",
+          "excerpt": "70 Landseer Road, Ipswich, England IP3 0DH",
+          "location": "selected client request subject/body",
+          "scope": null
+        },
+        "role": "current_request"
+      },
+      {
+        "kind": "project",
+        "literal": "DO2",
+        "evidence": {
+          "source_id": "asset:1:body",
+          "excerpt": "Fifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland",
+          "location": "selected client request subject/body",
+          "scope": null
+        },
+        "role": "current_request"
+      },
+      {
+        "kind": "project",
+        "literal": "VH94",
+        "evidence": {
+          "source_id": "asset:1:body",
+          "excerpt": "Fifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland",
+          "location": "selected client request subject/body",
+          "scope": null
+        },
+        "role": "current_request"
+      },
+      {
+        "kind": "project",
+        "literal": "IP3",
+        "evidence": {
+          "source_id": "asset:1:body",
+          "excerpt": "70 Landseer Road, Ipswich, England IP3 0DH",
+          "location": "earlier forwarded context",
+          "scope": null
+        },
+        "role": "forwarded_context"
+      },
+      {
+        "kind": "project",
+        "literal": "DO2",
+        "evidence": {
+          "source_id": "asset:1:body",
+          "excerpt": "Fifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland",
+          "location": "earlier forwarded context",
+          "scope": null
+        },
+        "role": "forwarded_context"
+      },
+      {
+        "kind": "project",
+        "literal": "VH94",
+        "evidence": {
+          "source_id": "asset:1:body",
+          "excerpt": "Fifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland",
+          "location": "earlier forwarded context",
+          "scope": null
+        },
+        "role": "forwarded_context"
+      },
+      {
+        "kind": "project",
+        "literal": "NB1",
+        "evidence": {
+          "source_id": "asset:1:body",
+          "excerpt": "NB1 Roof B – Additional outlets, and 40mm sump depth",
+          "location": "earlier forwarded context",
+          "scope": null
+        },
+        "role": "forwarded_context"
+      },
+      {
+        "kind": "project",
+        "literal": "NB2",
+        "evidence": {
+          "source_id": "asset:1:body",
+          "excerpt": "NB2 Roof B – Check outlets on new plan, but now require tapered gutter with 200mm in main field. 40mm sump depth.",
+          "location": "earlier forwarded context",
+          "scope": null
+        },
+        "role": "forwarded_context"
+      }
+    ],
+    "matched_projects": [],
+    "ambiguity_reasons": [
+      "The current request does not clearly distinguish new work from a change to an existing scheme."
+    ]
+  },
+  "messages": [
+    {
+      "messageIndex": 0,
+      "sender": "nick@taperedplus.co.uk",
+      "recipients": [
+        "a.harvey@bauder.co.uk",
+        "j.bailey@bauder.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk"
+      ],
+      "sentDate": "Wed, 11 Nov 2026 11:59:42 +0000",
+      "sentAt": "2026-11-11T11:59:42+00:00",
+      "requestRole": "direct_request",
+      "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000",
+      "text": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000\n\nThanks Aaron – received. I will get it through the system asap.\n\n\n\n \n\n\n\n\nKind Regards,\n\n\n \n\n\n [Image: cid:image001.png@01DD71D4.215F6BD0] \n\n\n \n\n\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on\n the below link and on our website\n\n\nTerms & Conditions | Tapered Plus\n\n\n \n\n\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the\n use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by\n telephone on 01642 677342 or e-mail sales@taperedplus.co.uk. \n TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\n\n\n\n\n \n\n\n\n\n\n\n"
+    },
+    {
+      "messageIndex": 1,
+      "sender": "a.harvey@bauder.co.uk",
+      "recipients": [
+        "nick@taperedplus.co.uk",
+        "j.bailey@bauder.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk",
+        "j.duron@bauder.co.uk",
+        "g.whiteing@bauder.co.uk"
+      ],
+      "sentDate": "11 November 2026 10:59",
+      "sentAt": "2026-11-11T10:59:00+00:00",
+      "requestRole": "forwarded_request",
+      "headerSnippet": "From:\n Aaron Harvey <a.harvey@bauder.co.uk> \n\nSent: 11 November 2026 10:59\n\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\n\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: RE: Urgent - B260681 St. Cleres School",
+      "text": "From:\n Aaron Harvey <a.harvey@bauder.co.uk> \n\nSent: 11 November 2026 10:59\n\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\n\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: RE: Urgent - B260681 St. Cleres School\n\n\n\n\n\n\n \n\n\nHi Nick,\n\n\n \n\n\nI’ve uploaded to WeTransfer to avoid any file size limitations. I didn’t think they would be over the limit.\n\n\n\n \n\n\nhttps://we.tl/t-4yTHpr7zgKLf96FO\n\n\n \n\n\nLet me know if you need anything further.\n\n\n\n \n\n\nThanks, \n\n\n \n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\nAaron Harvey\n\n\n\n\n\n\n\n \n\n​​​​​\n\n\n\n\n\n\n\n\n\n\n\n \n\nDesign Technician Co‑ordinator\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image002.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n​\n\n\n\n\n\n\n \n\n [Image: cid:image003.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\nBauder Ltd\n\n\n\n\n\n\n \n\n70 Landseer Road, Ipswich, England IP3 0DH \n\n\n\n\n\n\n \n\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image004.png@01DD71D4.215F6BD0] \n\n\n \n\n +44 1473 267158\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image005.png@01DD71D4.215F6BD0] \n\n\n \n\n a.harvey@bauder.co.uk\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image006.png@01DD71D4.215F6BD0] \n\n\n \n\n www.bauder.co.uk\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image007.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image008.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image009.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n​Bauder Limited is a limited company registered in England and Wales.\n\n​Registered number: 01466215.\n\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n"
+    },
+    {
+      "messageIndex": 2,
+      "sender": "nick@taperedplus.co.uk",
+      "recipients": [
+        "a.harvey@bauder.co.uk",
+        "j.bailey@bauder.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk",
+        "j.duron@bauder.co.uk",
+        "g.whiteing@bauder.co.uk"
+      ],
+      "sentDate": "11 November 2026 10:32",
+      "sentAt": "2026-11-11T10:32:00+00:00",
+      "requestRole": "forwarded_request",
+      "headerSnippet": "From:\n Nick Lane <Nick@Taperedplus.co.uk> \n\nSent: 11 November 2026 10:32\n\nTo: Aaron Harvey <a.harvey@bauder.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>;\n Sales <sales@Taperedplus.co.uk>\n\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: RE: Urgent - B260681 St. Cleres School",
+      "text": "From:\n Nick Lane <Nick@Taperedplus.co.uk> \n\nSent: 11 November 2026 10:32\n\nTo: Aaron Harvey <a.harvey@bauder.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>;\n Sales <sales@Taperedplus.co.uk>\n\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: RE: Urgent - B260681 St. Cleres School\n\n\n\n\n \n\n\nHi Aaron,\n\n\n \n\n\nI have taken a look through all our emails and I cannot see the below request.\n\n\n\n \n\n\nAre the plans attached to the email large?\n\n\n \n\n\nWe have had this happen a couple of times with yourselves…. But we don’t get any indication our side that your email has bounced.\n\n\n\n \n\n\nCould you resend the plans over and I will mark it as a priority.\n\n\n\n \n\n\nKind Regards,\n\n\n \n\n\n [Image: cid:image001.png@01DD71D4.215F6BD0] \n\n\n \n\n\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on\n the below link and on our website\n\n\nTerms\n & Conditions | Tapered Plus\n\n\n \n\n\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the\n use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by\n telephone on 01642 677342 or e-mail sales@taperedplus.co.uk. \n TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\n\n\n \n\n\n\n\n"
+    },
+    {
+      "messageIndex": 3,
+      "sender": "a.harvey@bauder.co.uk",
+      "recipients": [
+        "j.bailey@bauder.co.uk",
+        "nick@taperedplus.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk",
+        "j.duron@bauder.co.uk",
+        "g.whiteing@bauder.co.uk"
+      ],
+      "sentDate": "10 November 2026 14:56",
+      "sentAt": "2026-11-10T14:56:00+00:00",
+      "requestRole": "forwarded_request",
+      "headerSnippet": "From:\n Aaron Harvey <a.harvey@bauder.co.uk> \n\nSent: 10 November 2026 14:56\n\nTo: Jonathan Bailey <j.bailey@bauder.co.uk>; Nick Lane <Nick@Taperedplus.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales\n <sales@Taperedplus.co.uk>\n\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: RE: Urgent - B260681 St. Cleres School",
+      "text": "From:\n Aaron Harvey <a.harvey@bauder.co.uk> \n\nSent: 10 November 2026 14:56\n\nTo: Jonathan Bailey <j.bailey@bauder.co.uk>; Nick Lane <Nick@Taperedplus.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales\n <sales@Taperedplus.co.uk>\n\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: RE: Urgent - B260681 St. Cleres School\n\n\n\n\n \n\n\nHi Nick,\n\n\n \n\n\nCan you confirm receipt of Jonathans email below? He had attached my original request from the 22nd.\n\n\n\n \n\n\nThanks, \n\n\n \n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\nAaron Harvey\n\n\n\n\n\n\n\n \n\n​​​​​\n\n\n\n\n\n\n\n\n\n\n\n \n\nDesign Technician Co‑ordinator\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image002.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n​\n\n\n\n\n\n\n \n\n [Image: cid:image003.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\nBauder Ltd\n\n\n\n\n\n\n \n\n70 Landseer Road, Ipswich, England IP3 0DH \n\n\n\n\n\n\n \n\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image004.png@01DD71D4.215F6BD0] \n\n\n \n\n +44 1473 267158\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image005.png@01DD71D4.215F6BD0] \n\n\n \n\n a.harvey@bauder.co.uk\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image006.png@01DD71D4.215F6BD0] \n\n\n \n\n www.bauder.co.uk\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image007.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image008.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image009.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n​Bauder Limited is a limited company registered in England and Wales.\n\n​Registered number: 01466215.\n\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n"
+    },
+    {
+      "messageIndex": 4,
+      "sender": "j.bailey@bauder.co.uk",
+      "recipients": [
+        "nick@taperedplus.co.uk",
+        "a.harvey@bauder.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk",
+        "j.duron@bauder.co.uk",
+        "g.whiteing@bauder.co.uk"
+      ],
+      "sentDate": "10 November 2026 12:10",
+      "sentAt": "2026-11-10T12:10:00+00:00",
+      "requestRole": "forwarded_request",
+      "headerSnippet": "From:\n Jonathan Bailey <j.bailey@bauder.co.uk>\n\n\nSent: 10 November 2026 12:10\n\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Aaron Harvey <a.harvey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales\n <sales@Taperedplus.co.uk>\n\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: RE: Urgent - B260681 St. Cleres School",
+      "text": "From:\n Jonathan Bailey <j.bailey@bauder.co.uk>\n\n\nSent: 10 November 2026 12:10\n\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Aaron Harvey <a.harvey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales\n <sales@Taperedplus.co.uk>\n\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: RE: Urgent - B260681 St. Cleres School\n\n\n\n\n \n\n\nHi Nick,\n\n\n \n\n\nI just checked our system, we had received the Rev B versions all fine, but Aaron sent out a new request on the 22nd October\n\n\nto check the latest roof plans and to revise the roofs below:\n\n\n \n\n\nNB1 Roof B – Additional outlets, and 40mm sump depth\n\n\n\nNB2 Roof B – Check outlets on new plan, but now require tapered gutter with 200mm in main field. 40mm sump depth.\n\n\n\n \n\n\nI have attached the email for reference.\n\n\n \n\n\nKind regards,\n\n\n \n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\nJonathan Bailey\n\n\n\n\n\n\n\n \n\n​​​​​\n\n\n\n\n\n\n\n\n\n\n\n \n\nDesign Technician Coordinator\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image002.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n​\n\n\n\n\n\n\n \n\n [Image: cid:image003.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\nBauder Ltd\n\n\n\n\n\n\n \n\n70 Landseer Road, Ipswich, England IP3 0DH \n\n\n\n\n\n\n \n\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image004.png@01DD71D4.215F6BD0] \n\n\n \n\n +44 1473 372538\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image005.png@01DD71D4.215F6BD0] \n\n\n \n\n j.bailey@bauder.co.uk\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image006.png@01DD71D4.215F6BD0] \n\n\n \n\n www.bauder.co.uk\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image007.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image008.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image009.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n​Bauder Limited is a limited company registered in England and Wales.\n\n​Registered number: 01466215.\n\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n"
+    },
+    {
+      "messageIndex": 5,
+      "sender": "nick@taperedplus.co.uk",
+      "recipients": [
+        "a.harvey@bauder.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk",
+        "j.bailey@bauder.co.uk",
+        "j.duron@bauder.co.uk",
+        "g.whiteing@bauder.co.uk"
+      ],
+      "sentDate": "10 November 2026 11:59",
+      "sentAt": "2026-11-10T11:59:00+00:00",
+      "requestRole": "forwarded_request",
+      "headerSnippet": "From:\n Nick Lane <Nick@Taperedplus.co.uk> \n\nSent: 10 November 2026 11:59\n\nTo: Aaron Harvey <a.harvey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\n\nCc: Jonathan Bailey <j.bailey@bauder.co.uk>; Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: RE: Urgent - B260681 St. Cleres School",
+      "text": "From:\n Nick Lane <Nick@Taperedplus.co.uk> \n\nSent: 10 November 2026 11:59\n\nTo: Aaron Harvey <a.harvey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\n\nCc: Jonathan Bailey <j.bailey@bauder.co.uk>; Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: RE: Urgent - B260681 St. Cleres School\n\n\n\n\n \n\n\nHi Aaron,\n\n\n \n\n\nI just spoke with Jonathan over the phone to ensure you are getting all the files.\n\n\n \n\n\nPlease touch base with Jonathan when you return from lunch!\n\n\n\n \n\n\nKind Regards,\n\n\n \n\n\n [Image: cid:image001.png@01DD71D4.215F6BD0] \n\n\n \n\n\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on\n the below link and on our website\n\n\nTerms\n & Conditions | Tapered Plus\n\n\n \n\n\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the\n use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by\n telephone on 01642 677342 or e-mail sales@taperedplus.co.uk. \n TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\n\n\n \n\n\n\n\n"
+    },
+    {
+      "messageIndex": 6,
+      "sender": "a.harvey@bauder.co.uk",
+      "recipients": [
+        "nick@taperedplus.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk",
+        "j.bailey@bauder.co.uk",
+        "j.duron@bauder.co.uk",
+        "g.whiteing@bauder.co.uk"
+      ],
+      "sentDate": "10 November 2026 11:45",
+      "sentAt": "2026-11-10T11:45:00+00:00",
+      "requestRole": "forwarded_request",
+      "headerSnippet": "From:\n Aaron Harvey <a.harvey@bauder.co.uk> \n\nSent: 10 November 2026 11:45\n\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\n\nCc: Jonathan Bailey <j.bailey@bauder.co.uk>; Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: Urgent - B260681 St. Cleres School\n\nImportance: High",
+      "text": "From:\n Aaron Harvey <a.harvey@bauder.co.uk> \n\nSent: 10 November 2026 11:45\n\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\n\nCc: Jonathan Bailey <j.bailey@bauder.co.uk>; Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\nSubject: Urgent - B260681 St. Cleres School\n\nImportance: High\n\n\n\n\n \n\n\nHi Nick,\n\n\n \n\n\nCould you provide an update for this scheme please? A revision was requested on 22nd October, and I’ve chased a couple of times already, but I haven’t received anything further.\n\n\n\n \n\n\nAre you missing any information preventing you from proceeding with the scheme?\n\n\n\n \n\n\nKind Regards, \n\n\n \n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\nAaron Harvey\n\n\n\n\n\n\n\n \n\n​​​​​\n\n\n\n\n\n\n\n\n\n\n\n \n\nDesign Technician Co‑ordinator\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image002.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n​\n\n\n\n\n\n\n \n\n [Image: cid:image003.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\nBauder Ltd\n\n\n\n\n\n\n \n\n70 Landseer Road, Ipswich, England IP3 0DH \n\n\n\n\n\n\n \n\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image004.png@01DD71D4.215F6BD0] \n\n\n \n\n +44 1473 267158\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image005.png@01DD71D4.215F6BD0] \n\n\n \n\n a.harvey@bauder.co.uk\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image006.png@01DD71D4.215F6BD0] \n\n\n \n\n www.bauder.co.uk\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image007.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image008.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n \n\n\n\n\n \n\n [Image: cid:image009.png@01DD71D4.215F6BD0] \n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n\n​Bauder Limited is a limited company registered in England and Wales.\n\n​Registered number: 01466215.\n\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n\n\n \n\n\nDisclaimer\n\n\nThe information contained in this communication from the sender is confidential. It is intended solely for use by the recipient and others authorised to receive it. If you are not\n the recipient, you are hereby notified that any disclosure, copying,\n\ndistribution or taking action in relation of the contents of this information is strictly prohibited and may be unlawful.\n\n\n\nThis email has been scanned for viruses and malware, and may have been automatically archived by\nMimecast Ltd, an innovator in Software as a Service (SaaS) for business. \n\nProviding a safer and more useful place for your human generated data. Specialising in Security, archiving and compliance."
+    }
+  ],
+  "plain_text_messages": [
+    {
+      "messageIndex": 0,
+      "sender": "nick@taperedplus.co.uk",
+      "recipients": [
+        "a.harvey@bauder.co.uk",
+        "j.bailey@bauder.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk"
+      ],
+      "sentDate": "Wed, 11 Nov 2026 11:59:42 +0000",
+      "sentAt": "2026-11-11T11:59:42+00:00",
+      "requestRole": "direct_request",
+      "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000",
+      "text": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000\n\nThanks Aaron – received. I will get it through the system asap.\n\nKind Regards,\n\n[cid:image001.png@01DD71D4.215F6BD0]<https://source.thenbs.com/en/product/taperedpluss-rockdeck-insulation-system-flat-tapered/gChe6uKDJCFGQDDDoTCUEZ/oscG3z7bZzkDEq5DdRyUNR>\n\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on the below link and on our website\nTerms & Conditions | Tapered Plus<https://www.taperedplus.co.uk/terms-conditions/>\n\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by telephone on 01642 677342 or e-mail sales@taperedplus.co.uk<mailto:sales@taperedplus.co.uk>.  TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\n\n"
+    },
+    {
+      "messageIndex": 1,
+      "sender": "a.harvey@bauder.co.uk",
+      "recipients": [
+        "nick@taperedplus.co.uk",
+        "j.bailey@bauder.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk",
+        "j.duron@bauder.co.uk",
+        "g.whiteing@bauder.co.uk"
+      ],
+      "sentDate": "11 November 2026 10:59",
+      "sentAt": "2026-11-11T10:59:00+00:00",
+      "requestRole": "forwarded_request",
+      "headerSnippet": "From: Aaron Harvey <a.harvey@bauder.co.uk>\nSent: 11 November 2026 10:59\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School",
+      "text": "From: Aaron Harvey <a.harvey@bauder.co.uk>\nSent: 11 November 2026 10:59\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\n\nHi Nick,\n\nI’ve uploaded to WeTransfer to avoid any file size limitations. I didn’t think they would be over the limit.\n\nhttps://we.tl/t-4yTHpr7zgKLf96FO<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwe.tl%2ft-4yTHpr7zgKLf96FO&c=E,1,5TxqOpbFMjLt_2NztEt_tZZYju2ZlOE8jPwRfRSXUzHNJ0H-TGdIi0AjzFsOQLPNDd9mFCHiwBxa7E7DWNERc4TtNe76QsVNFYpOiM0wYM1idiLMlrM1cUarRg,,&typo=1>\n\nLet me know if you need anything further.\n\nThanks,\n\nAaron Harvey\n​​​​​\nDesign Technician Co‑ordinator\n[cid:image002.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,7qOtb14t2yW3k_5psznGeFJaAsysBI4E75PCfUM-Caz9jboZFfIyJvPtXi_3MAqf72eYz_7vwC9GUrDJlJ5yN4WQewCDHwTveSPh1O9DoDy7h-S9sA,,&typo=1>\n\n​\n[cid:image003.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2fbauder-service&c=E,1,qNUUO0aQExKUYSQ3w54DP78H138GQNCNheMAFG83UbYMgKWYf9Ii3nDjp2asNrmTID-WNMG_TPuQNI0UrcnUxCPo6Phgqp5Bg3LM1dFRBarTN7WS6w,,&typo=1>\nBauder Ltd\n70 Landseer Road, Ipswich, England IP3 0DH\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n[cid:image004.png@01DD71D4.215F6BD0]\n +44 1473 267158<tel:+44%201473%20267158>\n[cid:image005.png@01DD71D4.215F6BD0]\n a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>\n[cid:image006.png@01DD71D4.215F6BD0]\n www.bauder.co.uk<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,o1nMmosgQFlSMT8oYKUG-f8nU3mRAts0whLUVhemfkuyurn2Gn1UzO50W_jLzI_tHJ0AUsKs63rYHfgquAheP102un2H77r9UxFw89Ib7AKw9CmC_TWSbFdROzo,&typo=1>\n[cid:image007.png@01DD71D4.215F6BD0]<https://www.linkedin.com/company/bauderltd/mycompany/>\n[cid:image008.png@01DD71D4.215F6BD0]<https://x.com/BauderLtd>\n[cid:image009.png@01DD71D4.215F6BD0]<https://www.youtube.com/user/BauderLtd>\n\n​Bauder Limited is a limited company registered in England and Wales.\n​Registered number: 01466215.\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\n"
+    },
+    {
+      "messageIndex": 2,
+      "sender": "nick@taperedplus.co.uk",
+      "recipients": [
+        "a.harvey@bauder.co.uk",
+        "j.bailey@bauder.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk",
+        "j.duron@bauder.co.uk",
+        "g.whiteing@bauder.co.uk"
+      ],
+      "sentDate": "11 November 2026 10:32",
+      "sentAt": "2026-11-11T10:32:00+00:00",
+      "requestRole": "forwarded_request",
+      "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>\nSent: 11 November 2026 10:32\nTo: Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>; Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\nCc: Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\nSubject: RE: Urgent - B260681 St. Cleres School",
+      "text": "From: Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>\nSent: 11 November 2026 10:32\nTo: Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>; Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\nCc: Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\nSubject: RE: Urgent - B260681 St. Cleres School\n\nHi Aaron,\n\nI have taken a look through all our emails and I cannot see the below request.\n\nAre the plans attached to the email large?\n\nWe have had this happen a couple of times with yourselves…. But we don’t get any indication our side that your email has bounced.\n\nCould you resend the plans over and I will mark it as a priority.\n\nKind Regards,\n\n[cid:image001.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsource.thenbs.com%2fen%2fproduct%2ftaperedpluss-rockdeck-insulation-system-flat-tapered%2fgChe6uKDJCFGQDDDoTCUEZ%2foscG3z7bZzkDEq5DdRyUNR&c=E,1,Kjl0DUW980yquX6NiuF8Qu8h9wWfAwLwW-WsgNKB805ZuVAmSD0_pLxZQOFWC-EhIsyt0cVh7v86z6I0bj01r0BYuI0qPYa87n7_kuh1Kw,,&typo=1>\n\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on the below link and on our website\nTerms & Conditions | Tapered Plus<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.taperedplus.co.uk%2fterms-conditions%2f&c=E,1,7WDdYvnKX5cxrBJVlUEM3pT4XgpHJ6gChebCJ2ezXC_dn28nLqeAHkMWg5xB108_-oJR3rGq-fLGnr_4oVKPbESIRvrDhMHWpupkUs9nVbePISrw&typo=1>\n\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by telephone on 01642 677342 or e-mail sales@taperedplus.co.uk<mailto:sales@taperedplus.co.uk>.  TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\n\n"
+    },
+    {
+      "messageIndex": 3,
+      "sender": "a.harvey@bauder.co.uk",
+      "recipients": [
+        "j.bailey@bauder.co.uk",
+        "nick@taperedplus.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk",
+        "j.duron@bauder.co.uk",
+        "g.whiteing@bauder.co.uk"
+      ],
+      "sentDate": "10 November 2026 14:56",
+      "sentAt": "2026-11-10T14:56:00+00:00",
+      "requestRole": "forwarded_request",
+      "headerSnippet": "From: Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>\nSent: 10 November 2026 14:56\nTo: Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>; Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\nCc: Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\nSubject: RE: Urgent - B260681 St. Cleres School",
+      "text": "From: Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>\nSent: 10 November 2026 14:56\nTo: Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>; Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\nCc: Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\nSubject: RE: Urgent - B260681 St. Cleres School\n\nHi Nick,\n\nCan you confirm receipt of Jonathans email below? He had attached my original request from the 22nd.\n\nThanks,\n\nAaron Harvey\n​​​​​\nDesign Technician Co‑ordinator\n[cid:image002.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,blQncAY1j3MdMZVUlqSNOfLDVRO_Zv3-CUA9JVzmdwcPm4gR8FLKFekLNE1drm4cGZUEgITQlW5fyqDg10m5FZWdVWfENjryXl4RVUMb&typo=1>\n\n​\n[cid:image003.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2fbauder-service&c=E,1,xj4IPqJ68J24MoPYkj47BcB94FwCS1iynyLHWjBKrMPkxCBcgQ_x5jOqWytpmaPDBxylobzwAx8c9JEfS8lBZh78y3BSogimWEUspJXy2uLZQiYk3pIbvxk8X2om&typo=1>\nBauder Ltd\n70 Landseer Road, Ipswich, England IP3 0DH\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n[cid:image004.png@01DD71D4.215F6BD0]\n +44 1473 267158<tel:+44%201473%20267158>\n[cid:image005.png@01DD71D4.215F6BD0]\n a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>\n[cid:image006.png@01DD71D4.215F6BD0]\n www.bauder.co.uk<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,61gdriI7Z4uHsLNr2g9eonSzOw74RJd7kYoQxi0eNbO4HKeZpGEuleRQG0wmGDYbPu2lQNiNlM1e1y4o7O4YX5X8SnAUO5yWIk3zo6NXIv6kAIP4&typo=1>\n[cid:image007.png@01DD71D4.215F6BD0]<https://www.linkedin.com/company/bauderltd/mycompany/>\n[cid:image008.png@01DD71D4.215F6BD0]<https://x.com/BauderLtd>\n[cid:image009.png@01DD71D4.215F6BD0]<https://www.youtube.com/user/BauderLtd>\n\n​Bauder Limited is a limited company registered in England and Wales.\n​Registered number: 01466215.\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\n"
+    },
+    {
+      "messageIndex": 4,
+      "sender": "j.bailey@bauder.co.uk",
+      "recipients": [
+        "nick@taperedplus.co.uk",
+        "a.harvey@bauder.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk",
+        "j.duron@bauder.co.uk",
+        "g.whiteing@bauder.co.uk"
+      ],
+      "sentDate": "10 November 2026 12:10",
+      "sentAt": "2026-11-10T12:10:00+00:00",
+      "requestRole": "forwarded_request",
+      "headerSnippet": "From: Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>\nSent: 10 November 2026 12:10\nTo: Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>; Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\nCc: Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\nSubject: RE: Urgent - B260681 St. Cleres School",
+      "text": "From: Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>\nSent: 10 November 2026 12:10\nTo: Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>; Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\nCc: Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\nSubject: RE: Urgent - B260681 St. Cleres School\n\nHi Nick,\n\nI just checked our system, we had received the Rev B versions all fine, but Aaron sent out a new request on the 22nd October\nto check the latest roof plans and to revise the roofs below:\n\nNB1 Roof B – Additional outlets, and 40mm sump depth\nNB2 Roof B – Check outlets on new plan, but now require tapered gutter with 200mm in main field. 40mm sump depth.\n\nI have attached the email for reference.\n\nKind regards,\n\nJonathan Bailey\n​​​​​\nDesign Technician Coordinator\n[cid:image002.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,mj-Zj-8z3dDYIUxOxvLpGQRqPmaRCUOrKcMLdTqjdslk2-P357BK8j3Ml6ZEv7ivaogBvORNSszoCFnbV9-9sHxXDjd7Tp1m-dsF7CJkHKaMSYe8-ddtgnePfxYR&typo=1>\n\n​\n[cid:image003.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2fbauder-service&c=E,1,icsvkHfKTfMlEQuZVdZvorhwWXfiE9A_IkPQdAwGmHk32KDhgzwIHE-0auL9NzSeuStlP1Okjy5zaZb4pNLEubImlnrGlNigyIiY0tOkgmI,&typo=1>\nBauder Ltd\n70 Landseer Road, Ipswich, England IP3 0DH\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n[cid:image004.png@01DD71D4.215F6BD0]\n +44 1473 372538<tel:+44%201473%20372538>\n[cid:image005.png@01DD71D4.215F6BD0]\n j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>\n[cid:image006.png@01DD71D4.215F6BD0]\n www.bauder.co.uk<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,uOHsWI8vbthRQR61W0oZxy3NEhIabVoxsqUSPBuaopyEmDX3tIg_EtkAN3g7i4xegPNrvVd35Fmeqo3bIbpkRPi8nSQz41EP1Bs8u-xUTuNjEkYAd-Oniwl_eA,,&typo=1>\n[cid:image007.png@01DD71D4.215F6BD0]<https://www.linkedin.com/company/bauderltd/mycompany/>\n[cid:image008.png@01DD71D4.215F6BD0]<https://x.com/BauderLtd>\n[cid:image009.png@01DD71D4.215F6BD0]<https://www.youtube.com/user/BauderLtd>\n\n​Bauder Limited is a limited company registered in England and Wales.\n​Registered number: 01466215.\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\n"
+    },
+    {
+      "messageIndex": 5,
+      "sender": "nick@taperedplus.co.uk",
+      "recipients": [
+        "a.harvey@bauder.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk",
+        "j.bailey@bauder.co.uk",
+        "j.duron@bauder.co.uk",
+        "g.whiteing@bauder.co.uk"
+      ],
+      "sentDate": "10 November 2026 11:59",
+      "sentAt": "2026-11-10T11:59:00+00:00",
+      "requestRole": "forwarded_request",
+      "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>\nSent: 10 November 2026 11:59\nTo: Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\nCc: Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>; Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\nSubject: RE: Urgent - B260681 St. Cleres School",
+      "text": "From: Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>\nSent: 10 November 2026 11:59\nTo: Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\nCc: Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>; Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\nSubject: RE: Urgent - B260681 St. Cleres School\n\nHi Aaron,\n\nI just spoke with Jonathan over the phone to ensure you are getting all the files.\n\nPlease touch base with Jonathan when you return from lunch!\n\nKind Regards,\n\n[cid:image001.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsource.thenbs.com%2fen%2fproduct%2ftaperedpluss-rockdeck-insulation-system-flat-tapered%2fgChe6uKDJCFGQDDDoTCUEZ%2foscG3z7bZzkDEq5DdRyUNR&c=E,1,6xxRnVf-p5Xasu8lFbvOz0_gSukNlbqspBE0Lh3quormwpkJ-IFrMzzbUyP2fSxosel75__U4ENNtQVQr4fMgZnODR9iDgb9L9RSAXSSJ-xvCB-b3Hq1EXo,&typo=1>\n\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on the below link and on our website\nTerms & Conditions | Tapered Plus<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.taperedplus.co.uk%2fterms-conditions%2f&c=E,1,vMUJXksc3YTC2IU5jhnfy8zHdgqY5uVTxBdNoU0KumPPlLSn9upyjjbBnnHDtke25Dw3HNwgGTYnzs1tv0qpm_I7sNPHgqIXZ0jLhmoqq6afc-dvauMWy1V06w,,&typo=1>\n\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by telephone on 01642 677342 or e-mail sales@taperedplus.co.uk<mailto:sales@taperedplus.co.uk>.  TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\n\n"
+    },
+    {
+      "messageIndex": 6,
+      "sender": "a.harvey@bauder.co.uk",
+      "recipients": [
+        "nick@taperedplus.co.uk",
+        "bauder@taperedplus.co.uk",
+        "sales@taperedplus.co.uk",
+        "j.bailey@bauder.co.uk",
+        "j.duron@bauder.co.uk",
+        "g.whiteing@bauder.co.uk"
+      ],
+      "sentDate": "10 November 2026 11:45",
+      "sentAt": "2026-11-10T11:45:00+00:00",
+      "requestRole": "forwarded_request",
+      "headerSnippet": "From: Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>\nSent: 10 November 2026 11:45\nTo: Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\nCc: Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>; Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\nSubject: Urgent - B260681 St. Cleres School\nImportance: High",
+      "text": "From: Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>\nSent: 10 November 2026 11:45\nTo: Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\nCc: Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>; Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\nSubject: Urgent - B260681 St. Cleres School\nImportance: High\n\nHi Nick,\n\nCould you provide an update for this scheme please? A revision was requested on 22nd October, and I’ve chased a couple of times already, but I haven’t received anything further.\n\nAre you missing any information preventing you from proceeding with the scheme?\n\nKind Regards,\n\nAaron Harvey\n​​​​​\nDesign Technician Co‑ordinator\n[cid:image002.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,5QrK1f-MdNWXI0GkRCFzIcfO8v1ESCMHK2YJh7QqBeSrvPTF-WyWj-wLZre-lODhfflTGhchmNTUDaP0J8PY_tLztV8S10n3tkUCoH9qAuwdMRkaYw,,&typo=1>\n\n​\n[cid:image003.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2fbauder-service&c=E,1,Y-sNtvUxpACFUhg2m6aAiR6I3zMK3QvblHvjpTxXKRpG4N-M6jYNJw5fTwAaHiMcdRAksBhxydjS0zEgNljVGwfbGfyvPk949moD3bgphcHhJqFMX7K6c4Ufjw4,&typo=1>\nBauder Ltd\n70 Landseer Road, Ipswich, England IP3 0DH\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n[cid:image004.png@01DD71D4.215F6BD0]\n +44 1473 267158<tel:+44%201473%20267158>\n[cid:image005.png@01DD71D4.215F6BD0]\n a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>\n[cid:image006.png@01DD71D4.215F6BD0]\n www.bauder.co.uk<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,M7wmdjBJXnaUhmD1jEEHpd4eeoEzRIWbuCbUy3ba7slzMy_RudLAZ-BrcJIRZa0neoZgfv28tkLpVnH8O7ckuWUb6rpf88ycV1QKzY6d5MLH1s_C73SB_mx6&typo=1>\n[cid:image007.png@01DD71D4.215F6BD0]<https://www.linkedin.com/company/bauderltd/mycompany/>\n[cid:image008.png@01DD71D4.215F6BD0]<https://x.com/BauderLtd>\n[cid:image009.png@01DD71D4.215F6BD0]<https://www.youtube.com/user/BauderLtd>\n\n​Bauder Limited is a limited company registered in England and Wales.\n​Registered number: 01466215.\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\n\n\nDisclaimer\n\nThe information contained in this communication from the sender is confidential. It is intended solely for use by the recipient and others authorised to receive it. If you are not the recipient, you are hereby notified that any disclosure, copying,\ndistribution or taking action in relation of the contents of this information is strictly prohibited and may be unlawful.\n\nThis email has been scanned for viruses and malware, and may have been automatically archived by Mimecast Ltd, an innovator in Software as a Service (SaaS) for business.\nProviding a safer and more useful place for your human generated data. Specialising in Security, archiving and compliance.\n"
+    }
+  ],
+  "plain_text_only_selection": {
+    "messageIndex": 1,
+    "sender": "a.harvey@bauder.co.uk",
+    "recipients": [
+      "nick@taperedplus.co.uk",
+      "j.bailey@bauder.co.uk",
+      "bauder@taperedplus.co.uk",
+      "sales@taperedplus.co.uk",
+      "j.duron@bauder.co.uk",
+      "g.whiteing@bauder.co.uk"
+    ],
+    "sentDate": "11 November 2026 10:59",
+    "sentAt": "2026-11-11T10:59:00+00:00",
+    "requestRole": "forwarded_request",
+    "headerSnippet": "From: Aaron Harvey <a.harvey@bauder.co.uk>\nSent: 11 November 2026 10:59\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School",
+    "text": "From: Aaron Harvey <a.harvey@bauder.co.uk>\nSent: 11 November 2026 10:59\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\n\nHi Nick,\n\nI’ve uploaded to WeTransfer to avoid any file size limitations. I didn’t think they would be over the limit.\n\nhttps://we.tl/t-4yTHpr7zgKLf96FO<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwe.tl%2ft-4yTHpr7zgKLf96FO&c=E,1,5TxqOpbFMjLt_2NztEt_tZZYju2ZlOE8jPwRfRSXUzHNJ0H-TGdIi0AjzFsOQLPNDd9mFCHiwBxa7E7DWNERc4TtNe76QsVNFYpOiM0wYM1idiLMlrM1cUarRg,,&typo=1>\n\nLet me know if you need anything further.\n\nThanks,\n\nAaron Harvey\n​​​​​\nDesign Technician Co‑ordinator\n[cid:image002.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,7qOtb14t2yW3k_5psznGeFJaAsysBI4E75PCfUM-Caz9jboZFfIyJvPtXi_3MAqf72eYz_7vwC9GUrDJlJ5yN4WQewCDHwTveSPh1O9DoDy7h-S9sA,,&typo=1>\n\n​\n[cid:image003.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2fbauder-service&c=E,1,qNUUO0aQExKUYSQ3w54DP78H138GQNCNheMAFG83UbYMgKWYf9Ii3nDjp2asNrmTID-WNMG_TPuQNI0UrcnUxCPo6Phgqp5Bg3LM1dFRBarTN7WS6w,,&typo=1>\nBauder Ltd\n70 Landseer Road, Ipswich, England IP3 0DH\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n[cid:image004.png@01DD71D4.215F6BD0]\n +44 1473 267158<tel:+44%201473%20267158>\n[cid:image005.png@01DD71D4.215F6BD0]\n a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>\n[cid:image006.png@01DD71D4.215F6BD0]\n www.bauder.co.uk<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,o1nMmosgQFlSMT8oYKUG-f8nU3mRAts0whLUVhemfkuyurn2Gn1UzO50W_jLzI_tHJ0AUsKs63rYHfgquAheP102un2H77r9UxFw89Ib7AKw9CmC_TWSbFdROzo,&typo=1>\n[cid:image007.png@01DD71D4.215F6BD0]<https://www.linkedin.com/company/bauderltd/mycompany/>\n[cid:image008.png@01DD71D4.215F6BD0]<https://x.com/BauderLtd>\n[cid:image009.png@01DD71D4.215F6BD0]<https://www.youtube.com/user/BauderLtd>\n\n​Bauder Limited is a limited company registered in England and Wales.\n​Registered number: 01466215.\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\n",
+    "sourceId": "asset:1:body"
+  },
+  "email_attachment_names": [],
+  "inline_image_names": [
+    "image001.png",
+    "image002.png",
+    "image003.png",
+    "image004.png",
+    "image005.png",
+    "image006.png",
+    "image007.png",
+    "image008.png",
+    "image009.png"
+  ]
+}

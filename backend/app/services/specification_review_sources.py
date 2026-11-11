@@ -42,7 +42,7 @@ def _email_facts(provenance):
         scope=entry.get("scope"))]) for entry in provenance.get("candidates", [])]
 
 
-def resolve_review_sources(gateway, item, previous=None, *, review_state=None):
+def resolve_review_sources(gateway, item, previous=None, *, review_state=None, preview=False):
     # Import the shared gateway parsers lazily: their public entry point delegates
     # here while candidate preparation still uses the same verified column reads.
     from .performance_specification_sources import (
@@ -64,9 +64,11 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None):
     if extraction.get("pipelineVersion") != settings.design_processing_pipeline_version:
         raise SpecificationSourceWaiting("Waiting for extraction from the current configured pipeline")
     if (not target.input_revision or extraction.get("inputRevision") != target.input_revision
-            or item.latest_analyzed_input_revision != item.latest_desired_input_revision
-            or item.latest_analyzed_pipeline_version != item.latest_desired_pipeline_version
-            or extraction.get("pipelineVersion") != item.latest_analyzed_pipeline_version):
+            or (preview and (extraction.get("inputRevision") != item.latest_desired_input_revision
+                or extraction.get("pipelineVersion") != item.latest_desired_pipeline_version))
+            or (not preview and (item.latest_analyzed_input_revision != item.latest_desired_input_revision
+                or item.latest_analyzed_pipeline_version != item.latest_desired_pipeline_version
+                or extraction.get("pipelineVersion") != item.latest_analyzed_pipeline_version))):
         raise SpecificationSourceWaiting("Waiting for current email extraction")
     if not isinstance(extraction.get("performanceParameters"), dict) or not extraction["performanceParameters"]:
         raise SpecificationSourceWaiting("Waiting for evidence-aware email extraction")
@@ -98,7 +100,8 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None):
     match_contract = match_payload.get("result") or {}
     candidate_context = match_contract.get("specificationCandidates") or {}
     candidate_lookup = CandidateLookup.model_validate(candidate_context.get("lookup") or {
-        "status": "available", "projects": [entry.model_dump(mode="json") for entry in intent.matched_projects],
+        "status": "pending" if preview and not candidate_context else "available",
+        "projects": [entry.model_dump(mode="json") for entry in intent.matched_projects],
     })
     projects = {entry.record.item_id: entry for entry in candidate_lookup.projects}
     for entry in intent.matched_projects:

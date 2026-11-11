@@ -153,7 +153,7 @@ def html_text(content: str | bytes) -> str:
     return clean_source_text("".join(parser.parts).strip())
 
 
-def extract_document(content: bytes, filename: str, extractor) -> str:
+def extract_document(content: bytes, filename: str, extractor, *, extraction_metadata=None) -> str:
     suffix = Path(filename).suffix.lower()
     skip_status = _document_skip_status(filename)
     if skip_status == DWG_SKIP_STATUS:
@@ -174,16 +174,25 @@ def extract_document(content: bytes, filename: str, extractor) -> str:
                                       + " Recalculate and save uncached formulas in Excel, or supply a smaller readable export.")
         text = "\n\n".join(doc["text"] for doc in documents)
     elif suffix == ".pdf":
+        native_text = None
         try:
             with PdfReader(io.BytesIO(content)) as reader:
                 # Skip all encryption, including owner-only restrictions with
                 # an empty opening password. Never send these bytes to Gemini.
                 if reader.is_encrypted:
                     raise EncryptedPdfSkipped("Encrypted PDFs are excluded from extraction")
+                if getattr(extractor, "pdf_native_text_enabled", False):
+                    from .native_pdf_text import native_pdf_text
+                    native_result = native_pdf_text(reader)
+                    native_text = native_result.text
+                    if extraction_metadata is not None:
+                        extraction_metadata["pdfTextMethod"] = "native" if native_text is not None else "gemini"
+                        if native_text is None:
+                            extraction_metadata["pdfNativeTextFallbackReason"] = native_result.reason
         except PdfReadError:
             raise SourceDocumentError("unreadable_pdf", "PDF could not be read; supply a valid PDF export.") from None
         # Per-document calls retain identity and make individual failures retryable.
-        text = extractor.process_pdf(content, filename)
+        text = native_text if native_text is not None else extractor.process_pdf(content, filename)
     elif suffix in IMAGE_EXTENSIONS:
         from PIL import Image
         with Image.open(io.BytesIO(content)) as image:
@@ -229,7 +238,7 @@ class _ArchiveBudget:
 
 
 def extract_source_records(content, filename, extractor, *, source_id, observed_at=None,
-                           file_extension=None, _archive_budget=None, _archive_depth=0):
+                           file_extension=None, _archive_budget=None, _archive_depth=0, on_source=None):
     """Extract a source and ZIP members without writing archive paths to disk."""
     record = source_record(source_id, filename, content, source_type="attachment", observed_at=observed_at)
     records = [record]
@@ -237,10 +246,10 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
         if (Path(filename).suffix.lower() == ".zip"
                 or str(file_extension or "").strip().lower() in {"zip", ".zip"}):
             budget = _archive_budget if _archive_budget is not None else _ArchiveBudget()
-            _extract_archive(content, filename, extractor, source_id, observed_at, budget, _archive_depth, records)
+            _extract_archive(content, filename, extractor, source_id, observed_at, budget, _archive_depth, records, on_source)
             record["status"] = ARCHIVE_EXPANDED_STATUS
         else:
-            text = extract_document(content, filename, extractor)
+            text = extract_document(content, filename, extractor, extraction_metadata=record)
             if _archive_budget is not None:
                 _archive_budget.text_chars += len(text)
                 if _archive_budget.text_chars > MAX_CONTEXT_CHARS:
@@ -275,10 +284,12 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
         error = source_failure_details(exc)
         if error:
             record["error"] = error
+    if on_source is not None:
+        on_source(record)
     return records
 
 
-def _extract_archive(content, filename, extractor, source_id, observed_at, budget, depth, records):
+def _extract_archive(content, filename, extractor, source_id, observed_at, budget, depth, records, on_source=None):
     if len(content) > MAX_SOURCE_BYTES:
         raise SourceDocumentError("source_size_limit", "ZIP exceeds the 40 MiB source size limit; split the archive.")
     if depth >= MAX_ARCHIVE_DEPTH:
@@ -300,6 +311,11 @@ def _extract_archive(content, filename, extractor, source_id, observed_at, budge
                 raise SourceDocumentError("archive_expansion_limit", "ZIP exceeds the 100 MiB total expansion limit including nested archives; split the archive.")
             if any(entry.flag_bits & 1 for entry in files):
                 raise SourceDocumentError("encrypted_archive", "ZIP contains encrypted files; supply an unencrypted archive.")
+            if on_source is not None:
+                on_source({"sourceId": source_id, "status": ARCHIVE_EXPANDED_STATUS})
+                for index, entry in enumerate(entries):
+                    if not entry.is_dir():
+                        on_source({"sourceId": f"{source_id}:member:{index}", "status": "pending"})
             for index, entry in enumerate(entries):
                 if entry.is_dir():
                     continue
@@ -317,6 +333,7 @@ def _extract_archive(content, filename, extractor, source_id, observed_at, budge
                     member_content, f"{filename}!/{entry.filename}", extractor,
                     source_id=f"{source_id}:member:{index}", observed_at=observed_at,
                     _archive_budget=budget, _archive_depth=depth + 1,
+                    on_source=on_source,
                 )
                 children[0]["parentSourceId"] = source_id
                 records.extend(children)

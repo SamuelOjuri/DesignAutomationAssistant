@@ -6,13 +6,23 @@ reviewer decisions and separately labelled PDF provenance to the publisher. See
 which supersedes the older CRM-first notes below. Phase 3 supplies generalized
 references, cited intent and read-only candidate preparation. See
 [references and intent](SpecificationReviewReferencesAndIntent.md) for the current
-`output-v19` / evidence-v3 contract. Earlier dated diagnostic notes below describe
+`output-v20` / evidence-v3 contract. Earlier dated diagnostic notes below describe
 their historical runtime policies. Phase 5 adds the independent Landing Zone
 lifecycle described below. Phase 6 adds the direct, authenticated
 [review API](SpecificationReviewAPI.md), including version 1 access for any
 authenticated Monday CRM user with item access. Phase 7 implements the separate
 [embedded reviewer workspace](SpecificationReviewFrontend.md). Live Item View
 registration and allowlisted deployed checks remain Phase 8.
+
+The current acceleration release adds per-source transcription reuse, conservative
+native PDF text, shared Gemini admission and provisional read-only review fields.
+Apply `0021_processing_acceleration`, deploy matching API/workers and rebuild the
+frontend. See [processing acceleration deployment](ProcessingAccelerationDeployment.md)
+for exact settings, two design workers, verification and expiry maintenance.
+The native-PDF flag is part of the full extraction fingerprint; cache enablement
+and TTL are operational settings that do not force re-extraction. Source-reading,
+field-extraction and title-extraction durations are recorded in `processingTimings`
+for comparison with queue, matching and PDF-publication milestones.
 
 The additional PDF is published to **Project Holding Page** (`1882196103`),
 **AI Data** (`file_mkza7y37`). It contains selectable text with the exact 18 CAD
@@ -83,14 +93,16 @@ To check the deployed source readers independently of Gemini, run:
 python -m backend.scripts.check_design_processing_sources
 ```
 
-This uses only synthetic DWG, ZIP, XLSX, encrypted-PDF and unsupported-format bytes
+This uses only synthetic DWG, ZIP, XLSX, native/encrypted-PDF and unsupported-format bytes
 with no database or network calls. Expected output includes `status: ok`,
-`pipeline_revision: output-v19`, `max_source_mib: 40`,
-`unsupported_format_status: skipped:unsupported_format`, and all seven checks with
-`passed: true`. Six reader checks verify that DWG, encrypted PDFs and unsupported
+`pipeline_revision: output-v20`, `max_source_mib: 40`,
+`unsupported_format_status: skipped:unsupported_format`, and all eight checks with
+`passed: true`. Seven reader checks verify that DWG, encrypted PDFs and unsupported
 formats are skipped, readable ZIP members proceed, long spreadsheet cells retain
 their final technical values, and a supported text file with invalid encoding
-remains a failed source. The seventh check verifies that a ZIP uploaded beside
+remains a failed source. Native text-only PDF title values must be read without
+calling a model. Runtime fields report native PDF/cache enablement, cache TTL and
+shared-budget mode/limits; they do not exercise the database. The eighth check verifies that a ZIP uploaded beside
 an `.eml` in the Email column is selected as a supplementary source, and that adding
 or changing it changes the extraction input revision. A `.dwg`
 failure reported as `failed:ValueError` is inconsistent with the current DWG skip
@@ -344,8 +356,9 @@ IDs are rejected here; generated export filenames are also excluded. This settin
 does not automatically include attachments on linked boards.
 
 Deploy the matching API, design worker, reconciliation and specification-worker
-release for same-column ZIP intake. The current pipeline is `output-v19`, which
-also raises the source/archive limit to 40 MiB and skips unsupported formats.
+release for same-column ZIP intake. The current pipeline is `output-v20`, which
+retains the 40 MiB source/archive limit and unsupported-format skips while adding
+transcription reuse, native text and early read-only review previews.
 Included ZIP metadata changes affected items' input revisions; the pipeline
 revision requires fresh extraction of otherwise eligible items. For existing
 eligible items, inspect item-scoped reconciliation with `--dry-run` before running
@@ -368,7 +381,7 @@ for configuration and Item View setup. Existing design outputs and `AUTO_SYNC_*`
 ingestion retain their own policies.
 
 1. Stop/drain API and worker versions that will be replaced. Apply migration
-   through `0019_specification_review` with
+   through `0021_processing_acceleration` with
    `python -m alembic -c backend/alembic.ini upgrade head`.
 2. Deploy matching API, ingestion/metadata/design workers and the new publisher.
    Start with `PERFORMANCE_SPECIFICATION_MODE=off` and review mutations disabled.
@@ -381,7 +394,7 @@ ingestion retain their own policies.
    API, publisher and specification-enqueue/reconciliation processes with matching
    specification settings. The publisher runs as another service:
    `python -m backend.app.services.performance_specification`.
-3. Extraction identity is now `output-v19` (`output-v9` introduced source evidence;
+3. Extraction identity is now `output-v20` (`output-v9` introduced source evidence;
    `output-v10` added DWG skips and bounded ZIP extraction; `output-v11` preserves
    long spreadsheet cells; `output-v12` skips encrypted PDFs; `output-v13` validates
    recovery against source text and retains request constraints; `output-v14` repairs
@@ -390,7 +403,8 @@ ingestion retain their own policies.
    `output-v16` adds literal image regions, client-request context and applicable
    existing-deck evidence; `output-v18` adds the intent/reference/candidate sidecars
    and evidence-v3 contract; `output-v19` admits 40 MiB source/archive inputs and
-   audits unsupported formats as intentional skips). The CAD publication contract is now
+   audits unsupported formats as intentional skips; `output-v20` adds native text,
+   per-source transcription caching and earlier review visibility). The CAD publication contract is now
    `performance-specification-v5`. The canonical CSV row count and 18 specification
    labels remain unchanged; Reason for Change explicitly identifies an AI
    recommendation, separate from the human-owned Monday classification. Run

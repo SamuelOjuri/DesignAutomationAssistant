@@ -32,12 +32,14 @@ export function rebaseDraft(draft: ReviewDraft): ReviewDraft {
   };
 }
 
-type ReviewIdentity = Pick<ReviewStatusSnapshot, "board_id" | "item_id" | "review_version" | "source_fingerprint" | "decision_digest" | "desired_publication_identity">;
+type ReviewIdentity = Pick<ReviewStatusSnapshot, "board_id" | "item_id" | "review_version" | "source_fingerprint" | "decision_digest" | "desired_publication_identity" | "provisional" | "extraction_identity">;
 
 export function sameReviewIdentity(a: ReviewIdentity, b: ReviewIdentity): boolean {
   return a.board_id === b.board_id && a.item_id === b.item_id && a.review_version === b.review_version
     && a.source_fingerprint === b.source_fingerprint && a.decision_digest === b.decision_digest
-    && a.desired_publication_identity === b.desired_publication_identity;
+    && a.desired_publication_identity === b.desired_publication_identity
+    && Boolean(a.provisional) === Boolean(b.provisional)
+    && (a.extraction_identity ?? null) === (b.extraction_identity ?? null);
 }
 
 /** Keep source proposals and user drafts untouched. Callers must explicitly reconcile changed identities. */
@@ -46,7 +48,8 @@ export function mergeStatus(workspace: ReviewWorkspace, status: ReviewStatusSnap
   if (!sameReviewIdentity(workspace, status)) {
     // Keep the baseline used to author drafts. A newer poll must not silently rebase a stale command.
     return { ...workspace, status: status.status, queue: status.queue, pdf: status.pdf, published_pdf: status.published_pdf,
-      approval: status.approval, capabilities: status.capabilities, scope_reason: status.scope_reason };
+      approval: status.approval, capabilities: status.capabilities, scope_reason: status.scope_reason,
+      analysis: status.analysis, provisional: status.provisional };
   }
   return { ...workspace, ...status };
 }
@@ -63,6 +66,7 @@ export function draftValidationErrors(draft: ReviewDraft): Partial<Record<FieldN
 }
 
 export function commandIdentity(workspace: ReviewStatusSnapshot, idempotencyKey: string) {
+  if (workspace.provisional || (workspace.analysis && !workspace.analysis.ready)) throw new Error("Wait for matching and analysis to finish before saving.");
   if (!workspace.source_fingerprint) throw new Error("Wait for current source analysis before saving.");
   return { expected_review_version: workspace.review_version, expected_source_fingerprint: workspace.source_fingerprint, idempotency_key: idempotencyKey };
 }
@@ -77,6 +81,7 @@ export function saveCommand(workspace: ReviewWorkspace, draft: ReviewDraft, idem
 
 /** Explain the human choices required by the API's final approval checks. */
 export function completionIssues(workspace: ReviewWorkspace): string[] {
+  if (workspace.provisional || (workspace.analysis && !workspace.analysis.ready)) return ["Wait for current analysis and matching to finish."];
   const source = workspace.source;
   if (!source) return ["Wait for current source recommendations."];
   const issues: string[] = [];
@@ -111,7 +116,8 @@ export function completionIssues(workspace: ReviewWorkspace): string[] {
 /** Final approval is possible only after the exact published preview has loaded. */
 export function canComplete(workspace: ReviewStatusSnapshot | ReviewWorkspace, draft: ReviewDraft, previewedRevision?: string | null): boolean {
   const queue = workspace.queue;
-  return workspace.capabilities.approve && workspace.status === "awaiting_final_review" && !hasUnsavedChanges(draft)
+  return !workspace.provisional && (!workspace.analysis || workspace.analysis.ready)
+    && workspace.capabilities.approve && workspace.status === "awaiting_final_review" && !hasUnsavedChanges(draft)
     && Boolean(workspace.source_fingerprint && workspace.decision_digest && workspace.desired_publication_identity)
     && Boolean(workspace.published_pdf?.published && workspace.pdf?.revision === workspace.published_pdf.revision
       && previewedRevision === workspace.published_pdf.revision)
@@ -129,6 +135,7 @@ export function approvalCommand(workspace: ReviewStatusSnapshot, idempotencyKey:
 
 const STATUS_TEXT: Record<ReviewStatus, string> = {
   source_waiting: "Waiting for source analysis",
+  analysis_pending: "Validated fields available; analysis pending",
   source_unavailable: "Recommendations temporarily unavailable",
   needs_review: "Needs review",
   regenerating_pdf: "Regenerating PDF",

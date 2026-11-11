@@ -82,7 +82,8 @@ export default function ReviewWorkspace() {
       setCheckedPdf(false);
       // Revoked capabilities apply immediately, even while the old draft is kept.
       setWorkspace({ ...before, capabilities: next.capabilities, scope_reason: next.scope_reason,
-        status: next.status === "read_only" ? "read_only" : before.status });
+        analysis: next.analysis, provisional: next.provisional,
+        status: ["read_only", "analysis_pending", "source_waiting"].includes(next.status) ? next.status : before.status });
       return;
     }
     if (!before || !sameReviewIdentity(before, next)) setCheckedPdf(false);
@@ -291,8 +292,9 @@ export default function ReviewWorkspace() {
   const usable = workspace && context && workspace.board_id === context.boardId && workspace.item_id === context.itemId;
   const readOnly = Boolean(usable && workspace.status === "read_only");
   const statusDescription = usable ? getReviewStatusDescription({ status: workspace.status,
-    scopeReason: workspace.scope_reason, hasSource: Boolean(workspace.source), hasPdf: Boolean(workspace.pdf || workspace.published_pdf) }) : null;
-  const editable = Boolean(usable && workspace.capabilities.edit && connection === "ready" && !busy && !conflict);
+    scopeReason: workspace.scope_reason, hasSource: Boolean(workspace.source), hasPdf: Boolean(workspace.pdf || workspace.published_pdf), analysis: workspace.analysis }) : null;
+  const analysisPending = Boolean(usable && (workspace.provisional || (workspace.analysis && !workspace.analysis.ready)));
+  const editable = Boolean(usable && !analysisPending && workspace.capabilities.edit && connection === "ready" && !busy && !conflict);
   const completeAllowed = Boolean(usable && !conflict && !busy && connection === "ready" && checkedPdf && canComplete(workspace, draft, pdfRevision || undefined));
   const unmappedFields = usable ? FIELD_NAMES.filter((label) => {
     const field = workspace.fields[label];
@@ -312,9 +314,10 @@ export default function ReviewWorkspace() {
           {context && <p className="mt-1 text-sm text-muted-foreground">Item {context.itemId} · Board {context.boardId}</p>}
           {usable && <p className="mt-1 text-sm text-muted-foreground">Saved review version {workspace.review_version} · {readOnly
             ? workspace.source ? "Saved source context retained" : "No source analysis available for review"
+            : workspace.provisional ? "Current extraction available; matching and documents pending"
             : workspace.source ? "Current source context available" : "Waiting for current source context"}</p>}
         </div>
-        {usable && <ReviewStatus status={workspace.status} scopeReason={workspace.scope_reason} hasSource={Boolean(workspace.source)} hasPdf={Boolean(workspace.pdf || workspace.published_pdf)} hasUnsavedChanges={dirty} />}
+        {usable && <ReviewStatus status={workspace.status} scopeReason={workspace.scope_reason} hasSource={Boolean(workspace.source)} hasPdf={Boolean(workspace.pdf || workspace.published_pdf)} hasUnsavedChanges={dirty} analysis={workspace.analysis} />}
       </header>
       {error && <div role="alert" className="rounded-md border border-red-300 bg-red-50 p-4 text-red-900">{error}</div>}
       {notice && <p role="status" className="rounded-md border bg-white p-4">{notice}</p>}
@@ -339,7 +342,7 @@ export default function ReviewWorkspace() {
         <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
           <section id="review-fields" aria-labelledby="review-fields-title" className="min-w-0 space-y-4">
             <h2 id="review-fields-title" className="text-xl font-semibold">Specification fields</h2>
-            <p className="text-sm text-muted-foreground">{readOnly ? "Any saved field values are shown for reference. Editing is unavailable in this view." : "Save corrections to regenerate the PDF. Entered values and intentional blanks display Source: Reviewer Specified."}</p>
+            <p className="text-sm text-muted-foreground">{analysisPending ? "Validated source recommendations are available to read. Wait for analysis and matching to finish before making corrections." : readOnly ? "Any saved field values are shown for reference. Editing is unavailable in this view." : "Save corrections to regenerate the PDF. Entered values and intentional blanks display Source: Reviewer Specified."}</p>
             {FIELD_NAMES.map((label) => workspace.fields[label] && <FieldEditor key={label} label={label} field={workspace.fields[label]!} operation={draft.field_operations[label]} disabled={!editable} onChange={(operation) => changeField(label, operation)} />)}
             {!workspace.source && <p>{readOnly ? "No specification fields are available for this item." : "Fields will appear when current source analysis is available."}</p>}
             {workspace.source?.source_issues.map((issue) => {

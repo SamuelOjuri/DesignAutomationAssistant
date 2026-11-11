@@ -76,6 +76,28 @@ test("status from another item never crosses the context boundary", () => {
   assert.strictEqual(mergeStatus(initial, workspace({ item_id: "another" })), initial);
 });
 
+test("provisional validated fields cannot be saved or completed before full analysis", () => {
+  const preview = workspace({ provisional: true, status: "analysis_pending",
+    analysis: { ready: false, stage: "matching" } });
+  const draft = updateField(emptyDraft(), "Decking", { operation: "specify_value", display_value: "Kept draft" });
+  assert.throws(() => saveCommand(preview, draft, "early-save"), /matching and analysis/);
+  assert.equal(canComplete(preview, emptyDraft(), "revision-1"), false);
+  assert.deepEqual(completionIssues(preview), ["Wait for current analysis and matching to finish."]);
+  assert.equal(draft.field_operations.Decking.display_value, "Kept draft");
+});
+
+test("recorded progress updates do not replace fields or change a draft identity", () => {
+  const initial = workspace({ provisional: true, extraction_identity: "extraction-1",
+    analysis: { ready: false, stage: "matching", updated_at: "2026-11-11T12:00:00Z" } });
+  const progress = { ...initial, analysis: { ...initial.analysis, stage: "rendering", updated_at: "2026-11-11T12:01:00Z" } };
+  assert.equal(sameReviewIdentity(initial, progress), true);
+  const merged = mergeStatus(initial, progress);
+  assert.strictEqual(merged.fields, initial.fields);
+  assert.equal(merged.analysis.stage, "rendering");
+  assert.equal(sameReviewIdentity(initial, { ...progress, provisional: false }), false);
+  assert.equal(sameReviewIdentity(initial, { ...progress, extraction_identity: "extraction-2" }), false);
+});
+
 test("polling an item leaving Landing Zone exposes its read-only reason while preserving available data", () => {
   for (const ready of [false, true]) {
     const initial = workspace({ status: ready ? "needs_review" : "source_waiting",

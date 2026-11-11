@@ -48,6 +48,7 @@ with redirect_stdout(captured), redirect_stderr(captured):
         "backend/tests/test_auto_sync_postgres_concurrency.py",
         "backend/tests/test_design_processing_phase2_postgres.py",
         "backend/tests/test_design_processing_phase5_postgres.py",
+        "backend/tests/test_processing_acceleration_storage.py",
         "-q", "--tb=short", "--disable-warnings",
     ])
 

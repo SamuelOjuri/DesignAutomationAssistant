@@ -420,3 +420,14 @@ def resolve_specification_sources(gateway, item, previous: dict[str, Any] | None
     """Resolve email-first recommendations and durable PDF-only decisions."""
     from .specification_review_sources import resolve_review_sources
     return resolve_review_sources(gateway, item, previous, review_state=review_state)
+
+
+def preview_specification_sources(gateway, item):
+    """Read current validated extraction before matching/design rendering ends.
+
+    This separate entry point is only for the read-only workspace preview. It
+    does not grant the publisher or reviewer commands an early readiness gate,
+    and it deliberately does not apply decisions from an older source context.
+    """
+    from .specification_review_sources import resolve_review_sources
+    return resolve_review_sources(gateway, item, preview=True)

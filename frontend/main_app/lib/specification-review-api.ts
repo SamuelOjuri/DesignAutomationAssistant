@@ -92,13 +92,21 @@ export type Approval = {
   id: string; artifact_revision: string; review_version: number; actor_monday_user_id: string; approved_at: string;
 };
 export type ReviewStatus = "read_only" | "source_waiting" | "source_unavailable" | "publication_failed"
-  | "regenerating_pdf" | "complete" | "awaiting_final_review" | "needs_review";
+  | "analysis_pending" | "regenerating_pdf" | "complete" | "awaiting_final_review" | "needs_review";
+export type AnalysisProgress = {
+  status: string; stage: string | null; ready: boolean; current_extraction: boolean;
+  extraction_identity: string | null; phase?: string;
+  source_counts: Partial<Record<"total" | "read" | "skipped" | "review" | "failed", number>>;
+  created_at: string | null; started_at: string | null; updated_at: string | null;
+  completed_at: string | null; heartbeat_at: string | null;
+};
 export type ReviewStatusSnapshot = {
   board_id: string; item_id: string; status: ReviewStatus; review_version: number;
   source_fingerprint: string | null; decision_digest: string | null; desired_publication_identity: string | null;
   queue: { requested_generation: number; completed_generation: number; running: boolean; failed: boolean } | null;
   pdf: PdfArtifact | null; published_pdf: PdfArtifact | null; approval: Approval | null;
   capabilities: ReviewCapabilities; scope_reason: string | null;
+  provisional?: boolean; analysis?: AnalysisProgress | null; extraction_identity?: string | null;
 };
 export type ReviewWorkspace = ReviewStatusSnapshot & {
   review: ReviewDecisionState; source: ReviewSource | null; fields: Partial<Record<FieldName, ReviewField>>;

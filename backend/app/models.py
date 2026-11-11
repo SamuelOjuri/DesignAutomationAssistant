@@ -22,6 +22,29 @@ from pgvector.sqlalchemy import Vector
 from .db import Base
 
 
+class SourceTranscriptionCache(Base):
+    """Private, scoped reusable text, independent of request/CRM decisions."""
+    __tablename__ = "source_transcription_cache"
+    scope_key = Column(String(64), primary_key=True)
+    cache_key = Column(String(64), primary_key=True)
+    content_sha256 = Column(String(64), nullable=False)
+    text_sha256 = Column(String(64), nullable=False)
+    text = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class GeminiRequestLease(Base):
+    """Shared request admission; no credentials or project document contents."""
+    __tablename__ = "gemini_request_leases"
+    token = Column(String(64), primary_key=True)
+    scope_key = Column(String(64), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    released_at = Column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (Index("ix_gemini_request_leases_scope_started", "scope_key", "started_at"),)
+
+
 class AppUser(Base):
     __tablename__ = "app_users"
     __table_args__ = (

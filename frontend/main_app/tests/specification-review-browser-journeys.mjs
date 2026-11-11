@@ -49,6 +49,17 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
   try {
     await navigate("new_enquiry");
     assert(labels.every((label) => fieldset(label)), "All 18 specification fields render without a Task/chat page");
+    await command("analysis_pending");
+    await waitFor(() => text().includes("Validated fields available"), "early validated field preview");
+    assert(labels.every((label) => fieldset(label)), "Validated extraction fields remain visible while project matching is pending");
+    assert(text().includes("Matching projects and drawings") && text().includes("8 of 8 sources processed"), "Review shows the recorded matching stage and source counts");
+    assert(button("Specify value", fieldset("Decking")).disabled && button("Save corrections and regenerate PDF").disabled && button("Mark specification complete").disabled, "Provisional extraction is read-only and cannot save or complete");
+    await command("analysis_rendering");
+    await waitFor(() => text().includes("Preparing design documents"), "recorded render progress update");
+    assert(labels.every((label) => fieldset(label)), "A lightweight progress update preserves all displayed fields");
+    await command("analysis_complete");
+    await waitFor(() => !button("Specify value", fieldset("Decking")).disabled, "full analysis enables review controls");
+    await waitFor(() => documentOf().querySelector('iframe[title="Current specification PDF preview"]'), "completed analysis preview loaded");
     assert(button("Mark specification complete").disabled, "Completion requires saved classification and reviewed fields");
     for (const label of labels) assert(["Use recommendation", "Specify value", "Specify blank", "Restore recommendation"].every((action) => button(action, fieldset(label))), `${label} exposes all four distinct field actions`);
     await chooseType("new_enquiry");

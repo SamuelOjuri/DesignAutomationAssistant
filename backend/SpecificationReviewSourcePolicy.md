@@ -1,10 +1,10 @@
 # Specification Review source policy and PDF (Phase 4)
 
 Phase 4 connects the typed source and decision contracts to the specification
-publisher. It uses `output-v19`, evidence version 3, source policy
+publisher. It uses `output-v20`, evidence version 3, source policy
 `specification-review-source-v1`, the versioned reference parser, and
-`performance-specification-v5`. Apply migration `0019_specification_review` before
-running this worker. Publishing remains disabled by default. Phase 5 supplies the
+`performance-specification-v5`. Apply through migration
+`0021_processing_acceleration` before running the current worker. Publishing remains disabled by default. Phase 5 supplies the
 Landing Zone lifecycle, and [Phase 6](SpecificationReviewAPI.md) supplies the review
 API/auth boundary. The embedded UI remains Phase 7. Phase 4 alone enables none of
 these entry points and does not change group membership.

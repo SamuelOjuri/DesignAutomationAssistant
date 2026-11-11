@@ -70,6 +70,31 @@ test("normal source waiting preserves the existing description without claiming 
   assert.doesNotMatch(description.detail, /queued|running|retained PDF/i);
 });
 
+test("validated fields explain matching or rendering without claiming the PDF is ready", () => {
+  for (const [stage, expected] of [["matching", /Matching projects and drawings/], ["rendering", /Preparing design documents/]]) {
+    const description = getReviewStatusDescription({ status: "analysis_pending", hasSource: true,
+      analysis: { ready: false, status: "running", stage, source_counts: { total: 8, read: 5, skipped: 3 } } });
+    assert.equal(description.title, "Validated fields available");
+    assert.match(description.detail, expected);
+    assert.match(description.detail, /8 of 8 sources processed/);
+    assert.match(description.detail, /5 read, 3 skipped/);
+    assert.match(description.detail, /latest recorded worker stage/);
+    assert.match(description.detail, /Editing and completion become available when analysis finishes/);
+    assert.doesNotMatch(description.detail, /PDF is ready|complete|100%/);
+  }
+});
+
+test("source reading and retry states report observed progress without inventing activity", () => {
+  const reading = getReviewStatusDescription({ status: "source_waiting",
+    analysis: { ready: false, status: "running", stage: "extracting", phase: "reading_sources", source_counts: { total: 4, read: 1 } } });
+  assert.match(reading.detail, /Reading email and attachments/);
+  assert.match(reading.detail, /1 of 4 sources processed/);
+  const retry = getReviewStatusDescription({ status: "source_waiting",
+    analysis: { ready: false, status: "retry_wait", stage: "extracting", source_counts: {} } });
+  assert.match(retry.detail, /latest attempt did not finish; waiting for a retry/);
+  assert.doesNotMatch(retry.detail, /is running|recorded worker stage/);
+});
+
 test("source failures only mention a previous PDF when one is available", () => {
   for (const status of ["source_unavailable", "publication_failed"]) {
     const absent = getReviewStatusDescription({ status, hasPdf: false });

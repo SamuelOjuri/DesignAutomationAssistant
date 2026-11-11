@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from .gemini_models import ThinkingLevel, validate_thinking_level
 from .services.legacy_enquiry import LEGACY_MANIFEST_DIGEST
 
-DESIGN_PROCESSING_PIPELINE_REVISION = "output-v19"
+DESIGN_PROCESSING_PIPELINE_REVISION = "output-v20"
 
 class Settings(BaseSettings):
     # monday
@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str
     gemini_model: str = "gemini-3.8-flash"
+    # Shared across worker processes using the same API key/database. Enable
+    # after migration and set these values within the actual provider quota.
+    gemini_shared_rate_limit_enabled: bool = False
+    gemini_shared_budget_scope: str = "default-project"
+    gemini_shared_max_concurrent: int = Field(default=8, ge=1, le=100)
+    gemini_shared_requests_per_minute: int = Field(default=60, ge=1)
+    gemini_shared_lease_seconds: int = Field(default=900, ge=60, le=3600)
+    gemini_shared_wait_seconds: int = Field(default=300, ge=1, le=3600)
+    gemini_request_timeout_seconds: int = Field(default=240, ge=10, le=1800)
 
     # Chat retrieval
     chat_retrieval_max_queries: int = Field(default=2, ge=1, le=2)
@@ -139,6 +148,9 @@ class Settings(BaseSettings):
     design_processing_internal_email_domains: str = "taperedplus.co.uk"
     design_processing_extraction_remote_validation_seconds: int = Field(default=60, ge=1)
     design_processing_thinking_level: ThinkingLevel = "medium"
+    design_processing_native_pdf_text_enabled: bool = True
+    design_processing_transcription_cache_enabled: bool = True
+    design_processing_transcription_cache_ttl_days: int = Field(default=30, ge=1, le=365)
     design_processing_artifact_bucket: str = "design-processing-artifacts"
     design_processing_allowlist_item_ids: Annotated[list[str], NoDecode] = Field(
         default_factory=list
@@ -369,6 +381,7 @@ class Settings(BaseSettings):
             f"model-{self.design_processing_extraction_model}:"
             f"thinking-{self.design_processing_thinking_level}:"
             f"request-domains-{domain_identity}:"
+            f"native-pdf-{int(self.design_processing_native_pdf_text_enabled)}:"
             f"{DESIGN_PROCESSING_PIPELINE_REVISION}"
         )
 

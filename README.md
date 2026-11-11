@@ -411,14 +411,22 @@ digest, the separately pinned `gemini-3.8-flash` extraction model, and a
 code-owned output revision that changes whenever rendered or extracted output
 semantics change.
 
-The current design pipeline is `output-v19`. Design source files, ZIP archives
+The current design pipeline is `output-v20`. Design source files, ZIP archives
 and readable archive members accept up to 40 MiB, including design workbooks; search
 ingestion keeps its separate 20 MiB workbook limit. Unsupported formats are
 audited as `skipped:unsupported_format` and contribute no field evidence.
 Unreadable supported sources still require retry/review. Check the deployed
 reader contract without network calls using
-`python -m backend.scripts.check_design_processing_sources`; expect seven passing
+`python -m backend.scripts.check_design_processing_sources`; expect eight passing
 checks, `max_source_mib: 40` and the unsupported-format skip status.
+
+Processing acceleration adds conservative native PDF reads, a private per-source
+transcription cache, shared PostgreSQL Gemini admission and provisional read-only
+review fields before full analysis finishes. Apply migration
+`0021_processing_acceleration` before deploying the matching API/workers and
+rebuild the matching frontend. See
+[processing acceleration deployment](backend/ProcessingAccelerationDeployment.md)
+for the exact settings, two-design-worker commands, quota controls and retention.
 
 ## Design Processing Operations
 

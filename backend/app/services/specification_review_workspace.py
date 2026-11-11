@@ -9,6 +9,7 @@ starts chat ingestion or writes Monday business fields.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import timezone
 import hashlib
 from types import SimpleNamespace
 from typing import Annotated
@@ -16,7 +17,7 @@ from typing import Annotated
 from pydantic import Field
 
 from ..models import (
-    DesignProcessingItem, PerformanceSpecification, PerformanceSpecificationArtifact,
+    DesignProcessingItem, DesignProcessingJob, PerformanceSpecification, PerformanceSpecificationArtifact,
     PerformanceSpecificationApproval, PerformanceSpecificationReview,
     PerformanceSpecificationReviewEvent,
 )
@@ -25,7 +26,9 @@ from .design_processing_artifacts import SupabaseDesignArtifactStorage
 from .performance_specification_sources import (
     SpecificationIneligible, SpecificationReviewRequired, SpecificationSourceError,
     SpecificationSourceWaiting, resolve_specification_sources,
+    preview_specification_sources,
 )
+from ..config import settings
 from .specification_review_artifacts import build_review_artifact_metadata
 from .specification_policy import specification_publication_allowed
 from .specification_review_contract import (
@@ -45,6 +48,49 @@ def _copy_row(row):
         return None
     return SimpleNamespace(**{column.key: deepcopy(getattr(row, column.key))
                               for column in row.__table__.columns})
+
+
+def _analysis_progress(db, item):
+    """Only current-identity stages/counts cross the lightweight polling API."""
+    if (item is None or not item.latest_desired_input_revision
+            or item.latest_desired_pipeline_version != settings.design_processing_pipeline_version):
+        return None
+    extraction = getattr(item, "extracted_parameters_json", None)
+    extraction_input = (extraction or {}).get("inputRevision") if extraction is not None else getattr(item, "extraction_input", None)
+    extraction_pipeline = (extraction or {}).get("pipelineVersion") if extraction is not None else getattr(item, "extraction_pipeline", None)
+    current_extraction = (extraction_input == item.latest_desired_input_revision
+                          and extraction_pipeline == item.latest_desired_pipeline_version)
+    ready = (item.latest_analyzed_input_revision == item.latest_desired_input_revision
+             and item.latest_analyzed_pipeline_version == item.latest_desired_pipeline_version)
+    job = db.query(DesignProcessingJob.status, DesignProcessingJob.stage,
+        DesignProcessingJob.created_at, DesignProcessingJob.started_at, DesignProcessingJob.updated_at,
+        DesignProcessingJob.completed_at, DesignProcessingJob.heartbeat_at,
+        DesignProcessingJob.result_json["progress"].label("progress"),
+    ).filter_by(
+        board_id=item.board_id, item_id=item.item_id,
+        execution_input_revision=item.latest_desired_input_revision,
+        execution_pipeline_version=item.latest_desired_pipeline_version,
+    ).order_by(DesignProcessingJob.created_at.desc()).first()
+    progress = job.progress if job else {}
+    progress = progress if isinstance(progress, dict) else {}
+    counts = progress.get("source_counts", {})
+    counts = counts if isinstance(counts, dict) else {}
+    result = {
+        "status": job.status if job else "pending", "stage": job.stage if job else None,
+        "ready": ready, "current_extraction": current_extraction,
+        "extraction_identity": hashlib.sha256(
+            f"{extraction_input}:{extraction_pipeline}".encode()).hexdigest() if current_extraction else None,
+        "source_counts": {key: value for key, value in counts.items()
+                          if key in {"total", "read", "skipped", "review", "failed"}
+                          and type(value) is int and value >= 0},
+    }
+    phase = progress.get("phase")
+    if phase in {"reading_sources", "extracting_fields", "matching", "rendering"}:
+        result["phase"] = phase
+    for key in ("created_at", "started_at", "updated_at", "completed_at", "heartbeat_at"):
+        value = getattr(job, key, None) if job else None
+        result[key] = (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat() if value else None
+    return result
 
 
 def _context(db, board_id, item_id, account_id):
@@ -86,6 +132,7 @@ def _context(db, board_id, item_id, account_id):
                          "actor_monday_user_id": row.actor_monday_user_id,
                          "created_at": row.created_at.isoformat(), "explanation": row.explanation}
                         for row in events],
+            "analysis": _analysis_progress(db, item),
         }
     finally:
         db.rollback()
@@ -201,8 +248,10 @@ def _status(*, spec, review, source_ready, exact, approval, editable, source_err
     return "awaiting_final_review" if exact else "needs_review"
 
 
-def _payload(context, *, board_id, item_id, editable, source=None, source_error=None):
+def _payload(context, *, board_id, item_id, editable, source=None, source_error=None, provisional=False):
     spec, review, state = context["spec"], context["review"], context["state"]
+    if provisional:
+        state = ReviewDecisionState()
     if source is None and context["retained_source"] is not None:
         source = ReviewSourceSnapshot.model_validate(context["retained_source"])
     current = next((artifact for artifact in context["artifacts"]
@@ -218,10 +267,14 @@ def _payload(context, *, board_id, item_id, editable, source=None, source_error=
     approval = context["approval"]
     status = _status(spec=spec, review=review, source_ready=source is not None, exact=exact,
                      approval=approval, editable=editable, source_error=source_error)
+    if provisional and editable:
+        status = "analysis_pending"
     return {
         "board_id": str(board_id), "item_id": str(item_id), "status": status,
+        "provisional": provisional, "analysis": context.get("analysis"),
+        "extraction_identity": (context.get("analysis") or {}).get("extraction_identity"),
         "review_version": review.review_version if review else 0,
-        "source_fingerprint": review.source_fingerprint if review else None,
+        "source_fingerprint": review.source_fingerprint if review and not provisional else None,
         "decision_digest": review.decision_digest if review else None,
         "desired_publication_identity": review.desired_publication_identity if review else None,
         "review": state.model_dump(mode="json"),
@@ -235,19 +288,19 @@ def _payload(context, *, board_id, item_id, editable, source=None, source_error=
         "queue": {"requested_generation": spec.requested_generation,
                   "completed_generation": spec.completed_generation,
                   "running": spec.lease_token is not None, "failed": bool(spec.last_error)} if spec else None,
-        "pdf": _artifact_info(preview, board_id, item_id),
+        "pdf": _artifact_info(preview, board_id, item_id) if not provisional else None,
         "published_pdf": _artifact_info(current, board_id, item_id),
         "approval": {"id": str(approval.id), "artifact_revision": approval.artifact_revision,
                      "review_version": approval.review_version,
                      "actor_monday_user_id": approval.actor_monday_user_id,
-                     "approved_at": approval.approved_at.isoformat()} if approval else None,
+                     "approved_at": approval.approved_at.isoformat()} if approval and not provisional else None,
         "history": context["history"],
     }
 
 
 def get_workspace(db, *, board_id, item_id, account_id, gateway, editable):
     context = _context(db, board_id, item_id, account_id)
-    source, source_error = None, None
+    source, source_error, provisional = None, None, False
     if editable:
         try:
             source = _resolve(db, context, gateway)
@@ -258,6 +311,18 @@ def get_workspace(db, *, board_id, item_id, account_id, gateway, editable):
             if exc.code not in {"source_waiting", "source_unavailable"}:
                 raise
             source_error = exc.code
+            analysis = context.get("analysis") or {}
+            if (exc.code == "source_waiting" and context["item"] is not None
+                    and analysis.get("current_extraction") and not analysis.get("ready")):
+                try:
+                    preview = preview_specification_sources(gateway, context["item"])
+                    source = ReviewSourceSnapshot.model_validate(preview["reviewSource"])
+                    provisional = True
+                except (SpecificationSourceError, ValueError):
+                    pass  # Invalid/stale evidence never becomes an early preview.
+            if provisional:
+                return _payload(context, board_id=board_id, item_id=item_id, editable=editable,
+                                source=source, provisional=True)
             if context["spec"]:
                 _record_source_error(db, context, board_id=board_id, item_id=item_id,
                                      account_id=account_id, code=exc.code)
@@ -302,22 +367,33 @@ def get_status(db, *, board_id, item_id, account_id, editable):
             PerformanceSpecificationApproval.artifact_revision, PerformanceSpecificationApproval.review_version,
             PerformanceSpecificationApproval.actor_monday_user_id, PerformanceSpecificationApproval.approved_at
         ).filter_by(id=review.current_approval_id).one_or_none() if review and review.current_approval_id else None
+        item = db.query(DesignProcessingItem.board_id, DesignProcessingItem.item_id,
+            DesignProcessingItem.latest_desired_input_revision, DesignProcessingItem.latest_desired_pipeline_version,
+            DesignProcessingItem.latest_analyzed_input_revision, DesignProcessingItem.latest_analyzed_pipeline_version,
+            DesignProcessingItem.extracted_parameters_json["inputRevision"].as_string().label("extraction_input"),
+            DesignProcessingItem.extracted_parameters_json["pipelineVersion"].as_string().label("extraction_pipeline"),
+        ).filter_by(board_id=board_id, item_id=item_id).one_or_none()
+        analysis = _analysis_progress(db, item)
+        provisional = bool(analysis and analysis["current_extraction"] and not analysis["ready"])
+        source_error = "analysis_pending" if provisional else "source_waiting" if analysis and not analysis["ready"] else None
         return {"board_id": board_id, "item_id": item_id,
             "status": _status(spec=spec, review=review, source_ready=review is not None,
-                              exact=exact, approval=approval, editable=editable),
+                              exact=exact, approval=approval, editable=editable, source_error=source_error),
+            "provisional": provisional, "analysis": analysis,
+            "extraction_identity": analysis["extraction_identity"] if analysis else None,
             "review_version": review.review_version if review else 0,
-            "source_fingerprint": review.source_fingerprint if review else None,
+            "source_fingerprint": review.source_fingerprint if review and not provisional else None,
             "decision_digest": review.decision_digest if review else None,
             "desired_publication_identity": review.desired_publication_identity if review else None,
             "queue": {"requested_generation": spec.requested_generation,
                       "completed_generation": spec.completed_generation,
                       "running": spec.lease_token is not None, "failed": bool(spec.last_error)} if spec else None,
-            "pdf": _artifact_info(preview, board_id, item_id),
+            "pdf": _artifact_info(preview, board_id, item_id) if not provisional else None,
             "published_pdf": _artifact_info(current, board_id, item_id),
             "approval": {"id": str(approval.id), "artifact_revision": approval.artifact_revision,
                          "review_version": approval.review_version,
                          "actor_monday_user_id": approval.actor_monday_user_id,
-                         "approved_at": approval.approved_at.isoformat()} if approval else None,
+                         "approved_at": approval.approved_at.isoformat()} if approval and not provisional else None,
         }
     finally:
         db.rollback()

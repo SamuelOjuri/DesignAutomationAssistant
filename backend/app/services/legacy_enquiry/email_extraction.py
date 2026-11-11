@@ -205,6 +205,7 @@ def extract_text_from_email(
     source_prefix: str = "email",
     observed_at: str | None = None,
     source_metadata: dict | None = None,
+    on_source=None,
 ) -> str:
     records = [source_record(
         source_prefix + ":body", "Email body", email_text.encode("utf-8"),
@@ -212,11 +213,16 @@ def extract_text_from_email(
     )]
     records[0].update(source_metadata or {})
     attachments = list(attachments_data) + list(inline_images or ())
+    if on_source is not None:
+        on_source(records[0])
+        for index in range(len(attachments)):
+            on_source({"sourceId": f"{source_prefix}:attachment:{index}", "status": "pending"})
     results = {}
     if attachments:
         with ThreadPoolExecutor(max_workers=min(getattr(extractor, "max_attachment_workers", 4), len(attachments))) as executor:
             futures = {executor.submit(extract_source_records, a["content"], a["filename"], extractor,
-                                       source_id=f"{source_prefix}:attachment:{index}", observed_at=observed_at): index
+                                       source_id=f"{source_prefix}:attachment:{index}", observed_at=observed_at,
+                                       on_source=on_source): index
                        for index, a in enumerate(attachments)}
             for future in as_completed(futures):
                 index = futures[future]

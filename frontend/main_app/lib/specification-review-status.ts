@@ -1,8 +1,11 @@
+import type { AnalysisProgress } from "./specification-review-api.ts";
+
 export interface ReviewStatusContext {
   status: string;
   scopeReason?: string | null;
   hasSource?: boolean;
   hasPdf?: boolean;
+  analysis?: AnalysisProgress | null;
 }
 
 export interface ReviewStatusDescription {
@@ -13,6 +16,7 @@ export interface ReviewStatusDescription {
 
 const descriptions: Record<string, ReviewStatusDescription> = {
   source_waiting: { title: "Waiting for source analysis", detail: "Current email and attachment analysis is not ready yet. This view will check for updates.", tone: "bg-secondary text-foreground" },
+  analysis_pending: { title: "Validated fields available", detail: "The current email and attachment fields are shown below. Matching and document preparation are still pending. Editing and completion become available when analysis finishes.", tone: "bg-secondary text-foreground" },
   source_unavailable: { title: "Sources temporarily unavailable", detail: "Recommendations could not be checked. Your saved decisions and the previous PDF are retained.", tone: "bg-amber-50 text-amber-950" },
   needs_review: { title: "Needs review", detail: "Check the request, drawing choices and field recommendations, then save your corrections.", tone: "bg-amber-50 text-amber-950" },
   regenerating_pdf: { title: "Regenerating PDF", detail: "Saved decisions are waiting for their matching PDF. Completion is unavailable until publication succeeds.", tone: "bg-secondary text-foreground" },
@@ -34,7 +38,7 @@ const readOnlyReasons: Record<string, { title: string; reason: string }> = {
 };
 
 export function getReviewStatusDescription({
-  status, scopeReason, hasSource = false, hasPdf = false,
+  status, scopeReason, hasSource = false, hasPdf = false, analysis,
 }: ReviewStatusContext): ReviewStatusDescription {
   if (status === "read_only") {
     const scope = scopeReason ? readOnlyReasons[scopeReason] : undefined;
@@ -57,6 +61,21 @@ export function getReviewStatusDescription({
   if (status === "publication_failed" && !hasPdf) {
     return { ...descriptions.publication_failed, title: "Update failed",
       detail: "Your decisions remain saved. No PDF is available in this view. Retry the update before completing the specification." };
+  }
+  if (analysis && !analysis.ready && ["source_waiting", "analysis_pending"].includes(status)) {
+    const stage = analysis.stage === "matching" ? "Matching projects and drawings"
+      : analysis.stage === "rendering" ? "Preparing design documents"
+      : analysis.phase === "reading_sources" ? "Reading email and attachments"
+      : analysis.phase === "extracting_fields" ? "Extracting and validating specification fields"
+      : "Waiting for current analysis";
+    const counts = analysis.source_counts;
+    const completed = (counts.read || 0) + (counts.skipped || 0) + (counts.review || 0) + (counts.failed || 0);
+    const observed = counts.total ? ` ${completed} of ${counts.total} sources processed (${counts.read || 0} read, ${counts.skipped || 0} skipped${counts.review ? `, ${counts.review} need review` : ""}${counts.failed ? `, ${counts.failed} failed` : ""}).` : "";
+    const state = ["failed", "retry_wait"].includes(analysis.status)
+      ? " The latest attempt did not finish; waiting for a retry."
+      : analysis.status === "running" ? " This is the latest recorded worker stage." : " Waiting for the worker to continue.";
+    return { ...(descriptions[status] ?? descriptions.source_waiting),
+      detail: `${stage}.${observed}${state} ${status === "analysis_pending" ? descriptions.analysis_pending.detail : "This view will check for updates."}` };
   }
   return { ...(descriptions[status] ?? descriptions.needs_review) };
 }

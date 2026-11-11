@@ -9,6 +9,7 @@ import logging
 import os
 import platform
 import re
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class GeminiRequestFailure(RuntimeError):
 
 
 def request_gemini(generate_content, model, contents, config, *, stage, input_bytes=None):
+    started = time.monotonic()
     try:
         response = generate_content(model, contents, config)
     except Exception as exc:
@@ -86,6 +88,8 @@ def request_gemini(generate_content, model, contents, config, *, stage, input_by
     elif getattr(response, "parsed", None) is None and not str(getattr(response, "text", "") or "").strip():
         code = "empty_response"
     else:
+        logger.info("Gemini request completed stage=%s model=%s duration_seconds=%.3f input_bytes=%s",
+                    stage, model, time.monotonic() - started, input_bytes)
         return response
     schema = getattr(config, "response_json_schema", None)
     details = runtime_diagnostics(model, str(getattr(getattr(config, "thinking_config", None), "thinking_level", "")), schema)

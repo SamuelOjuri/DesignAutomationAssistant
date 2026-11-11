@@ -45,6 +45,7 @@ export function installHarness(fixtures) {
   let nextFailure = null;
   let receipts = new Map();
   let requests = [];
+  let beforeAnalysis = null;
   const tell = (type, data) => parent.postMessage({ source: "specification-review-harness", type, data }, location.origin);
   const report = () => tell("requests", requests);
   const record = (path, method, body, headers) => {
@@ -80,6 +81,27 @@ export function installHarness(fixtures) {
   window.addEventListener("message", (event) => {
     if (event.origin !== location.origin || event.source !== parent || event.data?.source !== "specification-review-controls") return;
     switch (event.data.action) {
+      case "analysis_pending":
+        beforeAnalysis = clone(current);
+        current.provisional = true;
+        current.status = "analysis_pending";
+        current.source_fingerprint = null;
+        current.extraction_identity = `current-extraction-${context.itemId}`;
+        current.pdf = null;
+        current.approval = null;
+        current.analysis = { ready: false, current_extraction: true, status: "running", stage: "matching",
+          extraction_identity: current.extraction_identity, phase: "extracting_fields",
+          source_counts: { total: 8, read: 5, skipped: 3 },
+          created_at: new Date().toISOString(), started_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(), completed_at: null, heartbeat_at: new Date().toISOString() };
+        break;
+      case "analysis_rendering":
+        if (current.analysis) current.analysis = { ...current.analysis, stage: "rendering", phase: "rendering", updated_at: new Date().toISOString() };
+        break;
+      case "analysis_complete":
+        if (beforeAnalysis) current = { ...beforeAnalysis, provisional: false,
+          extraction_identity: current.extraction_identity, analysis: { ...current.analysis, ready: true, status: "completed", completed_at: new Date().toISOString() } };
+        break;
       case "regeneration_failure": nextFailure = "publication_failed"; break;
       case "concurrent_save": nextFailure = "stale_review"; break;
       case "sources_change": sourceChanged(); break;
@@ -130,6 +152,7 @@ export function installHarness(fixtures) {
       return json(clone(current));
     }
     if (!current.capabilities.edit) return error("scope_changed", 409);
+    if (current.provisional) return error("source_waiting", 202);
     if (receipts.has(body.idempotency_key)) return json(clone(receipts.get(body.idempotency_key)));
     if (nextFailure === "stale_review") { nextFailure = null; current.review_version++; current.review.review_version++; current.decision_digest += "-other"; return error("stale_review", 409); }
     if (body.expected_review_version !== current.review_version) return error("stale_review", 409);

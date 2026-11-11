@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
+import logging
+import time
 from pathlib import Path
 from typing import Protocol, Sequence
 from zoneinfo import ZoneInfo
@@ -21,12 +24,15 @@ from .parameter_extraction import (
     extract_project_name_from_content,
 )
 from .source_documents import IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_source_records, source_record
-from ..specification_semantics import COMPLETE_SOURCE_STATUSES, SpecificationEvidence
+from ..specification_semantics import COMPLETE_SOURCE_STATUSES, SpecificationEvidence, missing
+from ..source_progress import SourceProgress
 from ..specification_request_context import (
     email_messages, internal_address, select_client_request,
 )
 from ..source_text import require_json_safe_text
 from ..specification_intent import build_request_intent, reason_for_change
+
+logger = logging.getLogger(__name__)
 
 
 class LegacyAnalysisClient(AttachmentTextExtractor, Protocol):
@@ -57,22 +63,31 @@ class LegacyAnalysisResult:
     specification_request_notes: tuple[dict, ...] = ()
     specification_evidence_repairs: tuple[dict, ...] = ()
     specification_request_intent: dict = field(default_factory=dict)
+    stage_timings: dict[str, float] = field(default_factory=dict)
 
 
 def analyze_downloaded_email_assets(
     downloaded_assets: Sequence[DownloadedDesignEmailAsset],
     *,
     client: LegacyAnalysisClient,
+    on_progress=None,
 ) -> LegacyAnalysisResult:
     if not downloaded_assets:
         raise ValueError("at least one downloaded Email asset is required")
+    started = time.monotonic()
+    stage_timings = {}
 
     all_text = ""
     first_email_text = ""
     audits: list[EmailContentAudit] = []
     manifest = []
     supplementary_records = []
+    supplementary_assets = []
     parsed_assets = []
+    progress = SourceProgress(on_progress)
+    for downloaded in downloaded_assets:
+        progress.record({"sourceId": f"asset:{downloaded.source.asset_id}" + (
+            ":body" if downloaded.source.filename.lower().endswith((".eml", ".msg")) else ""), "status": "pending"})
     for downloaded in downloaded_assets:
         content = Path(downloaded.temp_path).read_bytes()
         actual_digest = hashlib.sha256(content).hexdigest()
@@ -85,13 +100,7 @@ def analyze_downloaded_email_assets(
                 f"downloaded Email asset {downloaded.source.asset_id} size changed on disk"
             )
         if not downloaded.source.filename.lower().endswith((".eml", ".msg")):
-            records = extract_source_records(
-                content, downloaded.source.filename, client,
-                source_id=f"asset:{downloaded.source.asset_id}",
-                file_extension=getattr(downloaded.source, "file_extension", None),
-            )
-            manifest.extend(records)
-            supplementary_records.extend(records)
+            supplementary_assets.append(downloaded)
             continue
         try:
             metadata = {}
@@ -100,6 +109,7 @@ def analyze_downloaded_email_assets(
         except Exception as exc:
             manifest.append(source_record(f"asset:{downloaded.source.asset_id}", downloaded.source.filename, content,
                                           source_type="email_body", status="failed:" + type(exc).__name__))
+            progress.record({**manifest[-1], "sourceId": f"asset:{downloaded.source.asset_id}:body"})
             continue
         raw_date = next((line[6:] for line in header.splitlines() if line.startswith("Date: ")), "")
         try:
@@ -110,18 +120,46 @@ def analyze_downloaded_email_assets(
         except (TypeError, ValueError, OverflowError):
             request_time = None  # Upload time is not the date of the request.
         parsed_assets.append((request_time or "", downloaded.source.asset_id, downloaded, header, body, attachments, inline_images, metadata))
+    def read_supplementary(downloaded):
+        content = Path(downloaded.temp_path).read_bytes()
+        if hashlib.sha256(content).hexdigest() != downloaded.content_sha256 or len(content) != downloaded.size_bytes:
+            raise ValueError("Downloaded source changed before transcription")
+        return extract_source_records(content, downloaded.source.filename, client,
+            source_id=f"asset:{downloaded.source.asset_id}",
+            file_extension=getattr(downloaded.source, "file_extension", None), on_source=progress.record)
+
+    def read_email(entry):
+        request_time, _, downloaded, header, body, attachments, inline_images, metadata = entry
+        records = []
+        try:
+            text = extract_text_from_email(f"{header}\n{body}", attachments, extractor=client,
+                inline_images=inline_images, manifest=records, source_prefix=f"asset:{downloaded.source.asset_id}",
+                observed_at=request_time or None, source_metadata=metadata, on_source=progress.record)
+        except IncompleteSourceExtraction:
+            text = None
+        return text, records
+
+    # Independent top-level sources overlap; source IDs and chronological output
+    # remain deterministic. ZIP budgets remain local to each archive traversal.
+    completed = {}
+    with ThreadPoolExecutor(max_workers=max(1, min(getattr(client, "max_attachment_workers", 4), len(downloaded_assets)))) as pool:
+        futures = {pool.submit(read_supplementary, downloaded): ("supplementary", index)
+                   for index, downloaded in enumerate(supplementary_assets)}
+        futures.update({pool.submit(read_email, entry): ("email", index) for index, entry in enumerate(parsed_assets)})
+        for future in as_completed(futures):
+            completed[futures[future]] = future.result()
+    for index in range(len(supplementary_assets)):
+        records = completed[("supplementary", index)]
+        manifest.extend(records)
+        supplementary_records.extend(records)
     # Display chronologically. ID is only a stable tie-breaker, never recency.
     for request_time, _, downloaded, header, body, attachments, inline_images, metadata in sorted(parsed_assets, key=lambda entry: (entry[0], int(entry[1]))):
         email_text = f"{header}\n{body}"
-        try:
-            extracted = extract_text_from_email(
-                email_text, attachments, extractor=client, inline_images=inline_images,
-                manifest=manifest, source_prefix=f"asset:{downloaded.source.asset_id}",
-                observed_at=request_time or None,
-                source_metadata=metadata,
-            )
-        except IncompleteSourceExtraction:
-            continue  # Finish the inventory, then retry the incomplete extraction.
+        index = next(index for index, entry in enumerate(parsed_assets) if entry[2] is downloaded)
+        extracted, records = completed[("email", index)]
+        manifest.extend(records)
+        if extracted is None:
+            continue
         all_text += (
             f"\n\nEMAIL FILE: {downloaded.source.filename}\n"
             f"{extracted}\n{'=' * 50}\n"
@@ -147,13 +185,17 @@ def analyze_downloaded_email_assets(
         raise ValueError("Combined source text exceeds extraction limit; review required")
 
     client_request = select_client_request(manifest)
+    stage_timings["reading_sources_seconds"] = round(time.monotonic() - started, 3)
     internal_only = bool(parsed_assets) and all(
         (messages := email_messages(entry[3])) and internal_address(messages[0]["sender"])
         for entry in parsed_assets
     ) and client_request is None
     extract_with_manifest = getattr(client, "extract_design_parameters_with_manifest", None)
+    progress.phase("extracting_fields")
+    extracting_started = time.monotonic()
     structured_parameters = (extract_with_manifest(all_text, manifest) if extract_with_manifest
                              else client.extract_design_parameters(all_text))
+    stage_timings["extracting_fields_seconds"] = round(time.monotonic() - extracting_started, 3)
     dated_requests = [entry for entry in parsed_assets if entry[0]]
     if client_request:
         from ..performance_specification_evidence import resolve_email_evidence
@@ -204,13 +246,21 @@ def analyze_downloaded_email_assets(
     if internal_only:
         parameters["Date Received"] = parameters["Hour Received"] = "Not provided"
     query_llm: QueryLlm = client.query_llm
-    project_name = extract_project_name_from_content(
-        first_email_text,
-        all_text,
-        query_llm=query_llm,
-    )
+    title_started = time.monotonic()
+    project_name = None
+    if structured_parameters.specification_evidence:
+        from ..performance_specification_evidence import resolve_email_evidence
+        from ..specification_recovery import extraction_payload
+        verified, _, issues = resolve_email_evidence(extraction_payload(structured_parameters, manifest))
+        if not missing(verified.get("Drawing Title")) and "Drawing Title" not in issues:
+            project_name = verified["Drawing Title"]
+    if not project_name:
+        project_name = extract_project_name_from_content(first_email_text, all_text, query_llm=query_llm)
     if not project_name:
         raise ValueError("project-name extraction returned no title")
+    stage_timings["project_title_seconds"] = round(time.monotonic() - title_started, 3)
+    stage_timings["analysis_seconds"] = round(time.monotonic() - started, 3)
+    logger.info("analysis_stage_timings %s", stage_timings)
     sources = {parameter: "Email Content" for parameter in parameters}
     intent = build_request_intent(manifest, structured_parameters.specification_request_intent)
     parameters["Reason for Change"] = reason_for_change(intent)
@@ -233,6 +283,7 @@ def analyze_downloaded_email_assets(
         specification_request_intent=intent.model_dump(mode="json"),
         specification_assessed_fields=tuple(structured_parameters.specification_assessed_fields),
         source_manifest=tuple(manifest),
+        stage_timings=stage_timings,
     )
     require_json_safe_text(asdict(result))
     return result

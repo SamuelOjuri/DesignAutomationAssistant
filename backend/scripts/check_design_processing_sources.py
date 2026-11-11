@@ -6,10 +6,12 @@ No model requests, database access, or external writes are made.
 
 import io
 import json
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 import openpyxl
 from pypdf import PdfWriter
+from reportlab.pdfgen import canvas
 
 from backend.app.config import settings
 from backend.app.services.design_processing_diagnostics import source_runtime_diagnostics
@@ -57,6 +59,33 @@ def check_email_column_zip_intake():
     }
 
 
+def check_native_pdf_read():
+    """Prove the text-only fast path preserves title values without a model call."""
+    output = io.BytesIO()
+    document = canvas.Canvas(output, pageCompression=0)
+    for index, line in enumerate((
+        "Contract Name: Synthetic school roof specification",
+        "Contract Number: B260681; Drawing Reference: D.S - 00074_26.01",
+        "Scale: 1:500 @ ISO A3; Material: BauderPIR FA G16",
+        "Please revise the roof outlets and provide a forty millimetre sump depth.",
+    )):
+        document.drawString(30, 750 - index * 18, line)
+    document.save()
+
+    def unexpected_model_call(*args):
+        raise AssertionError("The synthetic native PDF must not invoke a model")
+
+    client = SimpleNamespace(pdf_native_text_enabled=True, process_pdf=unexpected_model_call)
+    records = extract_source_records(output.getvalue(), "native-text.pdf", client, source_id="diagnostic-native")
+    record = records[0]
+    return {
+        "source": "native-text.pdf",
+        "passed": len(records) == 1 and record["status"] == "read" and record.get("pdfTextMethod") == "native"
+                  and all(value in record["text"] for value in ("B260681", "D.S - 00074_26.01", "1:500 @ ISO A3")),
+        "source_statuses": [record["status"]], "pdf_text_method": record.get("pdfTextMethod"),
+    }
+
+
 def check_sources():
     output = io.BytesIO()
     with ZipFile(output, "w") as archive:
@@ -91,6 +120,7 @@ def check_sources():
         text = "\n".join(record["text"] for record in records)
         results.append({"source": name, "passed": statuses == expected_statuses and required_text in text,
                         "source_statuses": statuses})
+    results.append(check_native_pdf_read())
     results.append(check_email_column_zip_intake())
     return results
 

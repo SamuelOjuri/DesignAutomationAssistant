@@ -1,0 +1,54 @@
+{
+  "root_keys": [
+    "/Type",
+    "/Version",
+    "/Pages",
+    "/AcroForm",
+    "/OutputIntents"
+  ],
+  "pages": [
+    {
+      "page": 1,
+      "resources": [
+        "/Font",
+        "/XObject"
+      ],
+      "annotations": 0,
+      "fonts": [
+        {
+          "name": "/DSVTMN+ArialMT",
+          "subtype": "/Type0",
+          "base": "/DSVTMN+ArialMT",
+          "unicode": true,
+          "encoding": "/Identity-H"
+        },
+        {
+          "name": "/VOUMMO+Arial-ItalicMT",
+          "subtype": "/Type0",
+          "base": "/VOUMMO+Arial-ItalicMT",
+          "unicode": true,
+          "encoding": "/Identity-H"
+        },
+        {
+          "name": "/UYDIVI+Arial-BoldItalicMT",
+          "subtype": "/Type0",
+          "base": "/UYDIVI+Arial-BoldItalicMT",
+          "unicode": true,
+          "encoding": "/Identity-H"
+        }
+      ],
+      "xobjects": [
+        {
+          "name": "/Image_0FA574864AD843AEAAE19829439934A5",
+          "subtype": "/Image",
+          "width": 1174,
+          "height": 719,
+          "length": 2532318,
+          "resources": []
+        }
+      ],
+      "text_length": 2728
+    }
+  ],
+  "elapsed": 3.3036703999969177
+}

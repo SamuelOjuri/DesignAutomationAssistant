@@ -18,12 +18,15 @@ from .parameter_extraction import (
     DesignParameterExtraction,
     PARAMETER_EXTRACTION_PROMPT,
 )
-from ..specification_semantics import FIELD_DEFINITIONS, canonical_label, missing
+from ..specification_semantics import (
+    COMPLETE_SOURCE_STATUSES, FIELD_DEFINITIONS, REVIEW_SOURCE_STATUSES, canonical_label, missing,
+)
 from ..specification_image_text import IMAGE_TRANSCRIPTION_PROMPT
 from ..specification_request_context import request_context_summary, select_client_request
 from ..source_text import require_json_safe_text
 from ..specification_failures import SpecificationEvidenceError
 from ..specification_intent import build_request_intent
+from ..source_transcription_cache import cached_transcription
 
 
 GenerateContent = Callable[[str, Any, types.GenerateContentConfig], Any]
@@ -43,6 +46,8 @@ class LegacyGeminiClient:
     thinking_level: ThinkingLevel = "medium"
     max_attachment_workers: int = 4
     generate_content: GenerateContent = _default_generate_content
+    pdf_native_text_enabled: bool = True
+    transcription_cache_scope: str | None = None
 
     def __post_init__(self) -> None:
         if not self.model.strip():
@@ -137,8 +142,17 @@ class LegacyGeminiClient:
         required = set(FIELD_DEFINITIONS) - {"Incoming Information"}
         fields = {canonical_label(key): value for key, value in result.as_canonical_parameters().items()}
         fields["Bauder Roof Num"] = result.bauder_roof_num
-        gaps = {label for label in required if missing(fields.get(label))}
-        gaps |= required - set(result.specification_assessed_fields)
+        assessed = set(result.specification_assessed_fields)
+        complete_sources = bool(source_manifest) and all(
+            source.get("status") in COMPLETE_SOURCE_STATUSES - REVIEW_SOURCE_STATUSES
+            and (source.get("status") != "read" or bool(str(source.get("text") or "").strip()))
+            for source in source_manifest
+        ) and any(source.get("status") == "read" for source in source_manifest)
+        gaps = required - assessed
+        if not complete_sources:
+            # Without a complete readable inventory, an absent scalar is not a
+            # verified assessment of absence. Keep the legacy recovery path.
+            gaps |= {label for label in required if missing(fields.get(label))}
         gaps |= {label for label in required if not missing(fields.get(label))} - {e.field for e in result.specification_evidence}
         diagnostics = {}
         note_diagnostics = {}
@@ -279,6 +293,7 @@ class LegacyGeminiClient:
         total_size = sum(len(pdf["content"]) for pdf in pdf_files)
         return total_size <= 100 * 1024 * 1024 and 1 < len(pdf_files) <= 3
 
+    @cached_transcription("pdf")
     def process_pdf(self, pdf_content: bytes, filename: str) -> str:
         from .pdf_detail_views import pdf_detail_views
 
@@ -370,6 +385,7 @@ class LegacyGeminiClient:
                 indexed_results.append((index, rendered))
         return "\n".join(text for _, text in sorted(indexed_results))
 
+    @cached_transcription("image")
     def process_image(
         self,
         image_content: bytes,

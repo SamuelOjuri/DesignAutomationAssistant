@@ -3,6 +3,10 @@
 Prepared: 10 November 2026. This runbook describes deployment and acceptance;
 it does not record a completed production rollout.
 
+Updated for the 11 November `output-v20` acceleration release. Follow
+[processing acceleration deployment](ProcessingAccelerationDeployment.md) for
+the migration, cache/native settings, shared Gemini budget and two design workers.
+
 Use the existing Netlify proxy, existing Monday app and independent
 specification rollout settings. Local tests and mocked browser journeys are
 implementation evidence; actual allowlisted Monday journeys establish release
@@ -110,9 +114,10 @@ python -m alembic -c backend/alembic.ini upgrade head
 python -m alembic -c backend/alembic.ini current
 ```
 
-The current source head is `0020_monday_item_availability`, following
-`0019_specification_review`. Apply 0020 before starting the updated backend
-services: it adds the shared worker availability table. See
+The current source head is `0021_processing_acceleration`, following
+`0020_monday_item_availability` and `0019_specification_review`. Apply through 0021
+before starting the updated backend services: 0020 adds shared worker
+availability, and 0021 adds private transcription cache and Gemini admission tables. See
 [Monday worker availability](MondayWorkerAvailability.md) for the common retry
 settings, lifecycle recovery and operator retry commands. Independent specification
 rollout controls retain their existing behavior.
@@ -175,8 +180,8 @@ These commands check synthetic source handling and report runtime configuration.
 The Gemini command makes no model request unless `--live` is added; optional
 `--live` performs a small synthetic model compatibility request.
 
-The source diagnostic must report seven passing checks, including same-Email-column
-ZIP intake. ZIP files uploaded beside `.eml`/`.msg` files in the Email column are
+The source diagnostic must report eight passing checks, including native text-only
+PDF reading without a model and same-Email-column ZIP intake. ZIP files uploaded beside `.eml`/`.msg` files in the Email column are
 now included automatically as supplementary extraction sources. An email remains
 required; other standalone Email-column file types remain ignored. No
 `DESIGN_PROCESSING_SOURCE_FILE_COLUMN_IDS` entry is needed for these ZIPs, and the
@@ -187,10 +192,12 @@ three-level nesting bounds remain. Unsupported formats are recorded as
 fail to read still block incomplete extraction. Design workbooks also accept
 40 MiB; search ingestion retains its separate 20 MiB workbook limit. Confirm
 diagnostic fields `max_source_mib: 40` and
-`unsupported_format_status: skipped:unsupported_format`.
+`unsupported_format_status: skipped:unsupported_format`. Confirm native PDF,
+transcription cache/TTL and shared-budget runtime fields match the intended
+configuration; the synthetic probe itself does not query cache/admission tables.
 
 Deploy this intake change consistently across the API, design worker,
-reconciliation and specification worker. The current revision is `output-v19`;
+reconciliation and specification worker. The current revision is `output-v20`;
 the newly included ZIP metadata changes affected items' input revisions. Existing eligible
 items can be inspected and queued using the item-scoped reconciliation commands
 below. Keep `--dry-run` for inspection; the normal command can queue the existing
@@ -199,9 +206,14 @@ eligible extraction for the larger source limit and unsupported-format skip poli
 
 Confirm the services share the correct database, private artifact storage,
 existing Gemini configuration and compatible extraction identity. Current
-extraction uses the full configured `output-v19` pipeline and evidence version 3;
+extraction uses the full configured `output-v20` pipeline and evidence version 3;
 the publication contract is `performance-specification-v5`. Compare the full
-pipeline identity, not just its suffix.
+pipeline identity, not just its suffix. Its `native-pdf-1`/`native-pdf-0` segment
+must agree across services; changing native reading requires fresh extraction.
+Cache enablement and TTL do not change that identity. Follow the acceleration
+guide's bounded `purge_processing_cache --dry-run --limit 1000` and purge commands
+for daily expiry maintenance, and use persisted `processingTimings` alongside
+queue/PDF milestones when assessing latency.
 
 Verify the actual `DESIGN_PROCESSING_BOARD_ID`,
 `DESIGN_PROCESSING_LANDING_GROUP_ID`, `DESIGN_PROCESSING_PROJECT_BOARD_ID` and

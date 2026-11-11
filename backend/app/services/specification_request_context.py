@@ -16,7 +16,34 @@ CLIENT_FIELDS = frozenset({"Company", "Contact", "Date Received"})
 def _addresses(values):
     # Outlook's plain-text alternative repeats linked addresses as <mailto:...>.
     cleaned = [re.sub(r"<mailto:[^>]*>", "", value, flags=re.I) for value in values]
-    return list(dict.fromkeys(address.lower() for _, address in getaddresses(cleaned) if "@" in address))
+    addresses = []
+    for value in cleaned:
+        parsed = getaddresses([value])
+        if not any("@" in address for _, address in parsed) and ";" in value:
+            # Outlook separates displayed recipients with semicolons, which
+            # strict RFC parsers reject. Quoted names/local parts stay literal;
+            # valid RFC groups already parsed successfully above.
+            quoted = escaped = False
+            angle_depth = 0
+            characters = []
+            for character in value:
+                if escaped:
+                    escaped = False
+                elif character == "\\" and quoted:
+                    escaped = True
+                elif character == '"':
+                    quoted = not quoted
+                elif not quoted:
+                    if character == "<":
+                        angle_depth += 1
+                    elif character == ">":
+                        angle_depth = max(0, angle_depth - 1)
+                    elif character == ";" and not angle_depth:
+                        character = ","
+                characters.append(character)
+            parsed = getaddresses(["".join(characters)])
+        addresses.extend(address.lower() for _, address in parsed if "@" in address)
+    return list(dict.fromkeys(addresses))
 
 
 def message_timestamp(value):
@@ -37,7 +64,7 @@ def email_messages(text):
     # Apple reply headers are boundaries too, even when they cannot establish
     # recipients for selecting a new client request.
     apple = r"On (.+?), at (\d{1,2}:\d{2}(?::\d{2})?), (.+?<[^>]+>) wrote:"
-    starts = [match.start() for match in re.finditer(r"(?mi)^(?:From:[ \t]|" + apple + r")", text)]
+    starts = [match.start() for match in re.finditer(r"(?mi)^(?:From:(?:[ \t]|\n)|" + apple + r")", text)]
     messages = []
     for index, start in enumerate(starts):
         block = text[start:starts[index + 1] if index + 1 < len(starts) else len(text)]
@@ -52,7 +79,10 @@ def email_messages(text):
         headers = []
         values = {}
         after_blank = False
-        for line in block.splitlines():
+        cursor = header_end = 0
+        for literal_line in block.splitlines(keepends=True):
+            cursor += len(literal_line)
+            line = literal_line.rstrip("\n")
             if not line.strip():
                 after_blank = True
                 continue  # Outlook puts blank lines between forwarded headers.
@@ -61,11 +91,23 @@ def email_messages(text):
                 key = match[1].lower()
                 values.setdefault(key, []).append(match[2])
                 headers.append(line)
+                header_end = cursor
+                after_blank = False
+            elif (headers and not values[key][-1] and
+                  ((_addresses([line]) if key in {"from", "to", "cc", "bcc"} else
+                    message_timestamp(line) if key in {"date", "sent"} else False))):
+                # HTML layout can put an address/date below its empty label,
+                # with or without indentation. Only recognizable header values
+                # can fill that slot; ordinary body lines cannot extend it.
+                headers[-1] += "\n" + line
+                values[key][-1] = line.strip()
+                header_end = cursor
                 after_blank = False
             elif line[0].isspace() and headers and not after_blank:
                 headers[-1] += "\n" + line
                 # Folded recipient lines matter when selecting a client request.
                 values[key][-1] += " " + line.strip()
+                header_end = cursor
             else:
                 break
         dates = values.get("date", []) + values.get("sent", [])
@@ -77,7 +119,7 @@ def email_messages(text):
             "messageIndex": index, "sender": senders[0] if senders else None, "recipients": recipients,
             "sentDate": dates[0], "sentAt": message_timestamp(dates[0]),
             "requestRole": "direct_request" if index == 0 else "forwarded_request",
-            "headerSnippet": "\n".join(headers), "text": block,
+            "headerSnippet": block[:header_end].rstrip("\n"), "text": block,
         })
     return messages
 

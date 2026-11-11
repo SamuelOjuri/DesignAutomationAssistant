@@ -1,0 +1,450 @@
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+7
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+6
+7
+8
+1+160
+6
+7
+8
+1+160
+6
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+3
+4
+5
+6
+7
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+7
+8
+7
+8
+7
+8
+7
+8
+1+160
+7
+8
+1+160
+5
+6
+7
+7
+8
+5
+6
+7
+8 5
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+7
+8
+1+160
+7
+8
+1+160 6
+7
+8
+1+160
+3
+4
+5
+6
+8
+1+160
+8
+1+160
+8
+88
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+7
+8
+7
+8
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+7
+8
+7
+8
+7
+8
+77
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+7
+8
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+7
+8
+7
+8
+1+160
+7
+8
+1+160
+6
+7
+8
+6
+7
+8
+7
+8
+1+160
+7
+8
+1+160
+6
+7
+8
+6
+7
+8
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+7
+8
+1+160
+1+160
+2+160
+3+160 1+160+V
+7
+8
+1+160
+2+160
+3+160
+7+V
+5
+6
+6
+5
+6
+6
+5
+5
+5
+5
+6
+6
+6
+6
+6
+6
+6
+7 7
+7
+7
+7 7 5 5
+6 6
+8 8
+1+160 1+160
+2+160 2+160
+3+160 3+160
+4+160 4+160
+5+160 5+160
+6+160 6+160
+5
+6
+7
+5
+6
+7 7
+7
+5
+6
+77
+5+V
+6+V
+5+V
+6+V
+5+V
+5+V
+5+V
+5+V
+5+V
+6+V
+6+V
+6+V
+6+V
+6+V
+7+V
+7+V
+6
+7
+7
+8
+88
+1+160
+1+1601+160
+6
+7
+7
+88
+8
+1+1601+160
+1+160
+6
+7
+7
+2+160 2+160
+3+160 3+160
+4+160 4+160
+5+160 5+160
+2+1602+160
+3+1603+160
+4+1604+160
+5+1605+160
+6+V
+7+V
+8+V
+1+160+V
+6+V
+7+V
+8+V
+1+160+V
+6+V
+7+V
+6+V
+7+V
+NB1 Roof B NB1 Roof A Tapered Gutter - Max. 200mm 
+NB2 Roof A Tapered Gutter - Max. 200mm 
+NB2 Staircore Roof
+7
+8
+1+160
+NB2 Roof B
+200mm Flat Board
+(Not Included In Thermal Calculation)
+(Not Included In Thermal Calculation)
+200mm Flat Board
+Rev Date Notes By
+- 08/05/26 Drawing Issued For Approval & Comment BR
+A 12/05/26 200mm Flat Board Removed BR
+B 09/10/26 Updated To New Issue Plan MM
+NB1 Roof B Bauder - Concrete 0.21 W/m² K 0.11 W/m² K 141.61 232.80 248.40
+NB2 Roof B Bauder - Concrete 0.21 W/m² K 0.11 W/m² K 411.42 650.31 699.84
+NB1 Staircore Roof Bauder - Concrete 0.21 W/m² K 0.12 W/m² K 13.34 21.33 25.20
+NB2 Staircore Roof Bauder - Concrete 0.21 W/m² K 0.11 W/m² K 05.98 12.30 17.28
+NB1 Roof A (Gutter) Bauder - Concrete 0.21 W/m² K 0.14 W/m² K 97.57 110.87 125.28
+NB2 Roof A (Gutter) Bauder - Concrete 0.35 W/m² K 0.14 W/m² K 105.16 123.65 137.52
+Roof Name Area: Deck Type Minimum
+U Value
+Effective
+U Value
+Approximate
+Net Roof Area
+(m²)
+Approximate Area
+of Insulation to be
+Bonded (m²)
+Total Insulation
+Required Inc
+Waste (m²)
+3
+70 mm
+4
+90 mm
+5
+110 mm
+6
+130 mm
+7
+150 mm
+8
+170 mm
+1
+190 mm
+2
+210 mm
+3
+230 mm
+4
+250 mm
+5
+270 mm
+6
+290 mm 310 mm
+160 mm BauderPIR FA G16 Baselayer
+(Not To Scale)
+Multi Layered Tapered Build Up Section - 1 in 60
+Material: BauderPIR FA G16
+83898
+600
+19180
+24082
+19369
+66521
+1311
+6600
+2021
+34099
+4014
+34913
+4098
+5549
+600
+25092
+19489
+25519
+NB1 Staircore Roof
+600
+600
+Drainage/Outlet Locations TBC
+Roof Extents TBC
