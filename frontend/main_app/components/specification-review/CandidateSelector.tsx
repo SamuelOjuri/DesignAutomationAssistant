@@ -26,7 +26,7 @@ export default function CandidateSelector({ candidates, intent, selections, disa
       <h2 id={`${id}-title`} className="text-lg font-semibold">Request and drawing</h2>
       {intent && (
         <div className="mt-4 rounded-lg bg-secondary/60 p-3 text-sm">
-          <p className="font-semibold">AI recommendation: {requestLabel}</p>
+          <p className="font-semibold">Request type recommendation: {requestLabel}</p>
           <p className="mt-1 [overflow-wrap:anywhere]">{intent.explanation}</p>
           {intent.ambiguity_reasons.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-900">{intent.ambiguity_reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>}
           {intent.evidence.length > 0 && (
@@ -71,7 +71,10 @@ export default function CandidateSelector({ candidates, intent, selections, disa
               <input type="radio" name={`${id}-project`} value={recordKey(project.record)} checked={projectKey === recordKey(project.record)} disabled={disabled}
                 className="mt-0.5 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 onChange={() => onChange({ selected_project: project.record, selected_drawing: null })} />
-              <span className="min-w-0 [overflow-wrap:anywhere]"><span className="block font-semibold">Project item {project.record.item_id}</span><span className="mt-1 block text-muted-foreground">{project.rationale}</span></span>
+              <span className="min-w-0 [overflow-wrap:anywhere]">
+                <span className="block font-semibold">{project.project_reference?.trim() || "TP Ref unavailable"} — {project.project_title?.trim() || "Project title unavailable"}</span>
+                <span className="mt-1 block text-muted-foreground">{project.rationale}</span>
+              </span>
             </label>
           ))}
           {projectKey && !candidates.projects.some((project) => recordKey(project.record) === projectKey) && <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">The saved project ({selections.selected_project?.item_id}) is no longer among the current candidates. Review the selection before completion.</p>}

@@ -150,6 +150,8 @@ class DetectedReference(ReviewModel):
 class ProjectMatch(ReviewModel):
     record: MondayRecord
     rationale: NonemptyText
+    project_reference: str | None = None
+    project_title: str | None = None
     # A matcher score is supporting evidence, never a calibrated intent probability.
     similarity_score: float | None = Field(default=None, ge=0, le=1)
 

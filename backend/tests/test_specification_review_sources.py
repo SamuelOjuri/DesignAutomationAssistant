@@ -103,6 +103,49 @@ def test_uncertain_intent_is_not_classified_from_project_matches_or_holding_rela
     assert result["raw"]["Target U Value"] == "0.18"
 
 
+@pytest.mark.parametrize("cached_lookup", [False, True])
+def test_old_project_candidates_gain_display_labels_from_current_matching_metadata(case, cached_lookup):
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    extraction["specificationRequestIntent"]["recommended_type"] = "uncertain"
+    case.item.extracted_parameters_json = extraction
+    project = deepcopy(extraction["specificationRequestIntent"]["matched_projects"][0])
+    contract = {"candidates": [{"mondayItemId": "901", "projectReference": "00901",
+        "resolvedProjectReference": "TP00901", "projectTitle": "Warehouse South", "similarity": 0.9}]}
+    if cached_lookup:
+        contract["specificationCandidates"] = {"lookup": {"status": "available", "projects": [project]}}
+    case.item.match_result_json = {"inputRevision": extraction["inputRevision"],
+        "pipelineVersion": extraction["pipelineVersion"], "result": contract}
+    original = deepcopy(case.item.match_result_json)
+    case.gateway.fetch_project = lambda *args: pytest.fail("Display labels triggered an extra project read")
+
+    snapshot = source(case)["reviewSource"]
+
+    assert snapshot["candidates"]["projects"][0] == {
+        **project, "project_reference": "00901", "project_title": "Warehouse South", "similarity_score": None,
+    }
+    assert snapshot["request_type"] is None
+    assert snapshot["selected_project"] is None
+    assert case.item.match_result_json == original
+
+
+def test_selected_project_read_enriches_old_candidate_labels_without_extra_requests(case):
+    case.gateway.project["name"] = "00901"
+    original_reader = case.gateway.fetch_project
+    reads = []
+
+    def fetch_project(item_id):
+        reads.append(item_id)
+        return original_reader(item_id)
+
+    case.gateway.fetch_project = fetch_project
+    snapshot = source(case)["reviewSource"]
+
+    project = snapshot["candidates"]["projects"][0]
+    assert project["project_reference"] == "00901"
+    assert project["project_title"] == "Warehouse South"
+    assert reads == ["901"]
+
+
 @pytest.mark.parametrize("label", FIELD_NAMES)
 @pytest.mark.parametrize("operation,value", [("specify_value", "Reviewer’s exact custom value"), ("specify_blank", "")])
 def test_all_18_fields_allow_authoritative_text_and_intentional_blank(case, label, operation, value):

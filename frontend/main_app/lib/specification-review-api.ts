@@ -26,7 +26,10 @@ export type AutomaticProposal = {
   rationale: string; email_evidence: EmailCitation[]; crm_evidence: CRMFieldRead[];
   derived_from: "Drawing Reference" | null; cad_mapping: CADMapping;
 };
-export type ProjectMatch = { record: MondayRecord; rationale: string; similarity_score: number | null };
+export type ProjectMatch = {
+  record: MondayRecord; project_reference?: string | null; project_title?: string | null;
+  rationale: string; similarity_score: number | null;
+};
 export type DrawingCandidate = {
   record: MondayRecord; project: MondayRecord; literal_reference: string; roof_scope: string | null;
   lifecycle: "active" | "archived" | "deleted" | "unknown";

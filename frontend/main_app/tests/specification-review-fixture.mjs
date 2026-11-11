@@ -9,7 +9,7 @@ export function createFixture(scenario = "new_enquiry", itemId = "101") {
   const citation = { source_id: `email-${itemId}`, excerpt: amendment ? "Please adjust AB17221_25.01 - A to achieve 0.16 W/m²K on roof A." : "Please design a new tapered scheme for Riverside School. The target U-value is 0.18 W/m²K.", location: "Current client request, paragraph 1", scope: "Roof A" };
   const project = { board_id: "200", item_id: "201" };
   const drawing = { board_id: "300", item_id: "301" };
-  const projects = amendment ? [{ record: project, rationale: "Riverside School — exact detected project reference AB17221", similarity_score: null }] : [];
+  const projects = amendment ? [{ record: project, project_reference: "AB17221", project_title: "Riverside School", rationale: "Exact detected project reference", similarity_score: null }] : [];
   const drawings = amendment ? [{ record: drawing, project, literal_reference: "AB17221_25.01 - A", roof_scope: "Roof A", lifecycle: "active", match_kind: "exact_email", rationale: "Full drawing reference appears in the current client request." }] : [];
   if (scenario === "ambiguous") drawings.push({ record: { board_id: "300", item_id: "302" }, project, literal_reference: "AB17221_25.02 - B", roof_scope: "Roof B", lifecycle: "active", match_kind: "latest_in_scope", rationale: "Another current roof exists; confirm which roof the request concerns." });
   const candidates = { status: "available", projects, drawings, issues: scenario === "ambiguous" ? ["Several roofs are plausible. Select the relevant existing drawing."] : [] };

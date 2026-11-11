@@ -9,6 +9,7 @@ from typing import Any
 from ..config import settings
 from .. import monday_client
 from .design_processing_inputs import parse_design_processing_target
+from .monday_metadata_fields import PROJECT_NAME_COLUMN_ID
 from .performance_specification_contract import missing
 from .specification_references import REFERENCE_PARSER_VERSION, recommend_drawing_candidates
 
@@ -167,6 +168,22 @@ def _clean(value):
     return None if missing(value) else re.sub(r"\s+", " ", str(value)).strip()
 
 
+def _project_display_labels(candidate=None, project=None):
+    """Use available project metadata without changing its selection identity."""
+    candidate, project = candidate or {}, project or {}
+    columns = project.get("column_values")
+    title_columns = [
+        column for column in columns
+        if isinstance(column, dict) and column.get("id") == PROJECT_NAME_COLUMN_ID
+    ] if isinstance(columns, list) else []
+    title = _clean(title_columns[0].get("text")) if len(title_columns) == 1 else None
+    return {
+        "project_reference": _clean(candidate.get("projectReference")) or _clean(project.get("name"))
+            or _clean(candidate.get("resolvedProjectReference")),
+        "project_title": _clean(candidate.get("projectTitle")) or title,
+    }
+
+
 def _columns(item):
     columns = item.get("column_values")
     if not isinstance(columns, list) or any(not isinstance(col, dict) or not col.get("id") for col in columns):
@@ -303,6 +320,7 @@ def prepare_specification_candidates(gateway, match_contract, intent, *, project
             record={"board_id": str(project_board_id), "item_id": str(candidate["mondayItemId"])},
             rationale=candidate.get("matchRationale") or "Project title similarity; supporting context only",
             similarity_score=candidate.get("similarity"),
+            **_project_display_labels(candidate),
         ))
     lookup = CandidateLookup(status="available", projects=projects)
     dependencies = {(str(project_board_id), project.record.item_id) for project in projects}
@@ -328,6 +346,10 @@ def prepare_specification_candidates(gateway, match_contract, intent, *, project
                     or str((project.get("board") or {}).get("id")) != str(project_board_id)
                     or project.get("state") != "active" or not isinstance(project.get("subitems"), list)):
                 raise SpecificationSourceError("Project details are incomplete or inactive")
+            matched_project = next(entry for entry in lookup.projects if entry.record.item_id == item_id)
+            for label, value in _project_display_labels(project=project).items():
+                if not getattr(matched_project, label) and value:
+                    setattr(matched_project, label, value)
             project_reference = candidate.get("resolvedProjectReference") or project.get("name")
             printed = parse_project_reference(project_reference)
             relevant = [entry for entry in requested

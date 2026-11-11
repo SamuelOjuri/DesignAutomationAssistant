@@ -33,7 +33,7 @@ export default function FieldEditor({ label, field, operation, disabled = false,
 
   return (
     <fieldset className="min-w-0 rounded-xl border bg-card p-4 sm:p-5" aria-describedby={hintId}>
-      <legend className="px-1 text-base font-semibold">{label}</legend>
+      <legend className="px-1 text-base font-semibold text-primary">{label}</legend>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Current saved value</p>

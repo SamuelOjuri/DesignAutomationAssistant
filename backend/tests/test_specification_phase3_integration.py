@@ -73,6 +73,8 @@ def test_detected_target_prepares_candidates_without_any_holding_item_or_busines
     snapshot = prepare_specification_candidates(gateway, match_contract(), intent, project_board_id=BOARD)
     lookup = CandidateLookup.model_validate(snapshot["lookup"])
     assert lookup.status == "available"
+    assert lookup.projects[0].project_reference == "AB00123"
+    assert lookup.projects[0].project_title == "Existing roof"
     assert gateway.reads == ["1"]
     selection = snapshot["drawingSelections"][0]
     assert selection["selectedItemId"] == "10"  # Relevant existing target wins over newer AA.
@@ -80,6 +82,33 @@ def test_detected_target_prepares_candidates_without_any_holding_item_or_busines
     assert snapshot["accountRecommendations"][0]["value"] == "Client Limited"
     assert ["800", "81"] in snapshot["dependencies"]
     assert all("Target U Value" not in candidate for candidate in lookup.drawings)
+
+
+@pytest.mark.parametrize("raw_reference,resolved_reference,expected", [
+    ("00123", "AB00123", "00123"),
+    (None, "AB00123", "AB00123"),
+])
+def test_project_display_labels_use_matching_metadata_without_detail_reads(raw_reference, resolved_reference, expected):
+    contract = match_contract()
+    contract["candidates"][0].update(projectReference=raw_reference, resolvedProjectReference=resolved_reference)
+    snapshot = prepare_specification_candidates(SimpleNamespace(), contract, {}, project_board_id=BOARD)
+    project = snapshot["lookup"]["projects"][0]
+    assert project["project_reference"] == expected
+    assert project["project_title"] == "Existing roof"
+    assert project["record"] == {"board_id": BOARD, "item_id": "1"}
+
+
+def test_existing_project_detail_read_fills_missing_display_labels():
+    gateway = ReadOnlyGateway()
+    gateway.project["column_values"].append({"id": "text3__1", "text": "Current project title"})
+    contract = match_contract()
+    contract["candidates"][0].pop("projectReference")
+    contract["candidates"][0].pop("projectTitle")
+    snapshot = prepare_specification_candidates(gateway, contract, {}, project_board_id=BOARD)
+    project = snapshot["lookup"]["projects"][0]
+    assert project["project_reference"] == "AB00123"
+    assert project["project_title"] == "Current project title"
+    assert gateway.reads == ["1"]
 
 
 def test_multiple_email_targets_cannot_silently_select_one_roof():

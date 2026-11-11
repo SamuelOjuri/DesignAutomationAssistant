@@ -48,7 +48,7 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None):
     from .performance_specification_sources import (
         SpecificationIneligible, SpecificationSourceError, SpecificationSourceWaiting, SpecificationValueConflict,
         SpecificationReviewRequired, UNMATCHED_DRAWING, UNASSIGNED_DRAWING,
-        _columns, _find_column, _normal, _read_column,
+        _columns, _find_column, _normal, _project_display_labels, _read_column,
     )
     from .specification_request_context import request_context_summary, select_client_request
 
@@ -102,14 +102,22 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None):
     })
     projects = {entry.record.item_id: entry for entry in candidate_lookup.projects}
     for entry in intent.matched_projects:
-        projects.setdefault(entry.record.item_id, entry)
+        existing = projects.setdefault(entry.record.item_id, entry.model_copy())
+        for label in ("project_reference", "project_title"):
+            if not getattr(existing, label) and getattr(entry, label):
+                setattr(existing, label, getattr(entry, label))
     for entry in match_contract.get("candidates", []):
         identity = str(entry.get("mondayItemId") or "")
         if identity.isdigit() and int(identity):
-            projects.setdefault(identity, ProjectMatch(record={
+            matched_project = projects.setdefault(identity, ProjectMatch(record={
                 "board_id": str(settings.design_processing_project_board_id), "item_id": identity},
                 rationale=entry.get("matchRationale") or "Project match; supporting context only",
                 similarity_score=entry.get("similarity")))
+            # Older cached lookup sidecars lack labels. Enrich those entries too,
+            # using the matching metadata already stored for this extraction.
+            for label, value in _project_display_labels(entry).items():
+                if not getattr(matched_project, label) and value:
+                    setattr(matched_project, label, value)
     candidate_lookup.projects = list(projects.values())
     dependencies = set()
     crm_reads, crm_values, crm_errors = [], {}, {}
@@ -201,6 +209,11 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None):
                     record_error(label, "Selected project recommendations are unavailable")
 
     if project is not None:
+        matched_project = projects.get(selected_project.item_id)
+        if matched_project is not None:
+            for label, value in _project_display_labels(project=project).items():
+                if not getattr(matched_project, label) and value:
+                    setattr(matched_project, label, value)
         requested = email_raw.get("Drawing Reference")
         baseline_evidence = []
         if not requested:
