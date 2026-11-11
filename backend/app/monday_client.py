@@ -748,7 +748,7 @@ CRM_VALUE_FRAGMENTS = """
 
 MONDAY_METADATA_QUERY = """
 query ($itemIds: [ID!], $columnIds: [String!]) {
-  items(ids: $itemIds) {
+  items(ids: $itemIds, exclude_nonactive: false) {
     id state name updated_at
     board { id }
     group { id title }
@@ -771,8 +771,11 @@ def fetch_monday_metadata(access_token: str, item_id: str) -> dict[str, Any]:
 
 ASSET_QUERY = """
 query ($itemIds: [ID!]) {
-  items(ids: $itemIds) {
+  items(ids: $itemIds, exclude_nonactive: false) {
     id
+    state
+    board { id }
+    group { id }
     name
     updated_at
     assets {
@@ -817,16 +820,15 @@ def fetch_item_with_assets(access_token: str, item_id: str) -> dict[str, Any]:
         timeout=20,
     )
 
-    items = payload.get("data", {}).get("items") or []
-    if not items:
-        raise HTTPException(status_code=404, detail="monday item not found")
-
-    return items[0]
+    item = _extract_single_read_item(payload, context="item assets")
+    if str(item.get("id")) != str(item_id):
+        raise MondayReadContractError(detail="monday item assets returned an unexpected identity")
+    return item
 
 
 ITEM_METADATA_QUERY = """
 query ($itemIds: [ID!]) {
-    items(ids: $itemIds) {
+    items(ids: $itemIds, exclude_nonactive: false) {
         id
         state
         name
@@ -849,10 +851,9 @@ def fetch_item_metadata(
         {"itemIds": [str(item_id)]},
         timeout=10,
     )
-    items = payload.get("data", {}).get("items") or []
-    if not items:
-        raise HTTPException(status_code=404, detail="monday item not found")
-    item = items[0]
+    item = _extract_single_read_item(payload, context="item metadata")
+    if str(item.get("id")) != str(item_id):
+        raise MondayReadContractError(detail="monday item metadata returned an unexpected identity")
     item["account_id"] = account_id
     return item
 
@@ -1098,6 +1099,54 @@ query ($itemIds: [ID!]) {
     }
 }
 """
+
+
+MONDAY_ITEM_STATUS_QUERY = """
+query ($itemIds: [ID!]!) {
+  items(ids: $itemIds, exclude_nonactive: false, limit: 100) {
+    id state board { id } group { id }
+  }
+}
+"""
+
+
+def fetch_monday_item_statuses(access_token: str, item_ids) -> dict[str, dict[str, Any]]:
+    """Read up to 100 lifecycle identities without loading files or CRM columns.
+
+    Omitted IDs are unavailable only after the *entire* response is validated.
+    Partial GraphQL results, duplicate/foreign IDs and malformed identities never
+    become evidence that an item disappeared.
+    """
+    identities = list(dict.fromkeys(_normalize_positive_decimal_id(value, "item_id") for value in item_ids))
+    if not identities:
+        return {}
+    if len(identities) > 100:
+        raise ValueError("Monday status batches support at most 100 item IDs")
+    payload = monday_graphql_request(access_token, MONDAY_ITEM_STATUS_QUERY, {"itemIds": identities}, timeout=20)
+    if not isinstance(payload, Mapping) or payload.get("errors"):
+        raise MondayReadContractError(detail="monday item status response is incomplete")
+    data = _require_mapping(payload, "data", context="item status")
+    items = data.get("items")
+    if not isinstance(items, list):
+        raise MondayReadContractError(detail="monday item status response is incomplete")
+    found = {}
+    for item in items:
+        if not isinstance(item, dict):
+            raise MondayReadContractError(detail="monday item status is malformed")
+        identity = str(item.get("id") or "")
+        board = item.get("board")
+        group = item.get("group")
+        if (identity not in identities or identity in found
+                or item.get("state") not in {"active", "archived", "deleted"}
+                or not isinstance(board, Mapping) or not str(board.get("id") or "").isascii()
+                or not str(board.get("id") or "").isdecimal()
+                or int(str(board["id"])) <= 0
+                or (item["state"] == "active" and (
+                    not isinstance(group, Mapping) or not isinstance(group.get("id"), str) or not group["id"]
+                ))):
+            raise MondayReadContractError(detail="monday item status identity is malformed")
+        found[identity] = item
+    return found
 
 
 def fetch_design_processing_intake_item(

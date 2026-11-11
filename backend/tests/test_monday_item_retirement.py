@@ -18,6 +18,7 @@ from backend.app.services.auto_sync import apply_auto_sync_policy_for_item
 from backend.app.services.auto_sync_policy import ACTIVE_JOB_STATUSES
 from backend.app.services.design_processing_reconciliation import reconcile_landing_zone_once
 from backend.app.services.monday_item_retirement import retire_deleted_items
+from backend.app.services.monday_item_availability import observe_item
 from backend.tests.test_monday_metadata import case
 
 BOARD = "1882196103"
@@ -100,9 +101,38 @@ def test_purged_item_is_retired_like_a_live_delete_and_scheduled_checks_stop(cas
                        populate_existing=True).last_outcome == "retired"
 
 
+@pytest.mark.parametrize("consumer", ["lifecycle", "design"])
+@pytest.mark.parametrize("status", [401, 403, 429, 502])
+def test_explicit_api_error_cannot_erase_pre_migration_retirement(case, tracked, monkeypatch, consumer, status):
+    from backend.app.models import MondayItemAvailability
+    from backend.app.services.monday_item_availability import availability_decision
+    retire_deleted_items(case.db, ["123"], fetch_item=purged, dry_run=False)
+    # Simulate a retirement performed before migration 0020, as in production.
+    case.db.query(MondayItemAvailability).delete()
+    case.db.commit()
+
+    def fail(*args, **kwargs):
+        raise HTTPException(status, "API read failed")
+
+    if consumer == "lifecycle":
+        monkeypatch.setattr(reconciliation, "fetch_item_metadata", fail)
+        result = lifecycle(case, item_id="123")
+    else:
+        gateway = type("Gateway", (), {"fetch_target": staticmethod(fail)})()
+        result = reconcile_landing_zone_once(case.db, dry_run=False, access_token="token",
+            mode="enabled", now=NOW, gateway=gateway, item_id="123")
+    assert result.errors == 1
+    assert case.db.get(AutoSyncReconciliationCheck, (BOARD, "123", "completed_transition")).last_outcome == "retired"
+    assert case.db.get(DesignProcessingReconciliationCheck, (BOARD, "123")).last_outcome == "retired"
+    assert not availability_decision(case.db, BOARD, "123", access_token="token").allowed
+
+
 def test_item_seen_again_by_a_webhook_returns_to_normal_lifecycle_checks(case, tracked, monkeypatch):
     retire_deleted_items(case.db, ["123"], fetch_item=purged, dry_run=False)
     apply_auto_sync_policy_for_item(case.db, case.item, trigger_type="webhook", desired_source_revision="rev-2")
+    # The authenticated webhook boundary observes the current item using its
+    # processing credential before dispatching the business-specific policy.
+    observe_item(case.db, BOARD, case.item, access_token="token")
     case.db.commit()
     reads = []
     monkeypatch.setattr(reconciliation, "fetch_item_metadata", lambda *a, **k: reads.append(a) or dict(case.item))

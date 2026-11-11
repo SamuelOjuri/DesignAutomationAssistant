@@ -157,10 +157,12 @@ def run_sync_pipeline(
     external_task_key: str,
     access_token: str,
     force: bool = False,
+    *, track_worker_availability: bool = False,
 ) -> SyncResult:
     downloads: dict[str, Any] = {}
     try:
-        return _run_sync_pipeline(db, external_task_key, access_token, force, downloads)
+        return _run_sync_pipeline(db, external_task_key, access_token, force, downloads,
+                                  track_worker_availability=track_worker_availability)
     finally:
         for downloaded in downloads.values():
             try:
@@ -175,14 +177,36 @@ def _run_sync_pipeline(
     access_token: str,
     force: bool,
     downloads: dict[str, Any],
+    *, track_worker_availability: bool = False,
 ) -> SyncResult:
     task = db.get(Task, external_task_key)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
 
     task_item_id = task.item_id
+    registered_board_id = task.board_id
     db.commit()
+    observed_at = datetime.now(timezone.utc)
     item = fetch_item_with_assets(access_token, task_item_id)
+    if track_worker_availability:
+        from .monday_item_availability import observe_item, availability_decision
+        observation = observe_item(db, registered_board_id, item, access_token=access_token, observed_at=observed_at)
+        if any(value is not None and (value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value) > observed_at
+               for value in (observation.last_observed_at, observation.last_event_at, observation.last_attempted_at)):
+            db.commit()
+            raise HTTPException(status_code=409, detail="Monday lifecycle changed during ingestion read")
+        if str((item.get("board") or {}).get("id")) != registered_board_id:
+            from .monday_item_lifecycle import cancel_out_of_board_work
+            cancel_out_of_board_work(db, registered_board_id, task_item_id)
+            db.commit()
+            raise HTTPException(status_code=409, detail="Monday item left the registered board")
+        # Manual durable syncs retain their admission semantics even when broad
+        # auto-sync is disabled or the item is outside its active groups.
+        eligible = item.get("state") == "active"
+        decision = availability_decision(db, registered_board_id, task_item_id, access_token=access_token)
+        db.commit()
+        if not eligible or not decision.allowed:
+            raise HTTPException(status_code=409, detail="Monday item is outside active ingestion scope")
     snapshot_version = compute_snapshot_version(item)
 
     snapshot = (

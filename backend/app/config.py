@@ -77,6 +77,21 @@ class Settings(BaseSettings):
     auto_sync_purge_enabled: bool = False
     monday_ingestion_access_token: Optional[str] = None
     monday_api_version: str = "2025-04"
+    # Shared backend item availability; never a cache of human authorization.
+    monday_item_availability_retry_seconds: list[int] = Field(
+        default_factory=lambda: [3600, 21600, 86400, 604800], min_length=1, max_length=16,
+    )
+    monday_item_availability_inactive_recheck_seconds: int = Field(default=604800, ge=60)
+    monday_item_availability_probe_lease_seconds: int = Field(default=120, ge=1, le=3600)
+
+    @field_validator("monday_item_availability_retry_seconds")
+    @classmethod
+    def _validate_item_availability_retries(cls, values):
+        if any(isinstance(value, bool) or value < 1 for value in values) or any(
+            before >= after for before, after in zip(values, values[1:])
+        ):
+            raise ValueError("monday_item_availability_retry_seconds must be positive increasing seconds")
+        return values
 
     # Independent Landing Zone-only specification processing/publication.
     performance_specification_enabled: bool = False

@@ -41,6 +41,10 @@ from .specification_policy import (
     specification_publication_allowed,
 )
 from .auto_sync_policy import RETIRED_SOURCE_OUTCOME
+from ..monday_client import MondayItemUnavailable
+from .monday_item_availability import (
+    availability_decision, availability_read_predicate, observe_item, observe_unavailable,
+)
 from .specification_review_artifacts import build_review_artifact_metadata
 from .performance_specification_pdf import render_performance_specification_pdf
 from .performance_specification_sources import (
@@ -52,6 +56,68 @@ from .performance_specification_sources import (
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 900
+
+
+def _target_identity(target):
+    return {"id": str(target.item_id), "state": target.item_state,
+            "board": {"id": str(target.board_id)}, "group": {"id": target.group_id}}
+
+
+def _newer_observation(row, started):
+    return any(value is not None and _aware(value) > started for value in (
+        row.last_observed_at, row.last_event_at, row.last_attempted_at))
+
+
+class _ObservedGateway:
+    """Retain fresh source/publication reads while sharing their observations."""
+
+    def __init__(self, db, gateway, board_id):
+        self.db, self.gateway, self.board_id = db, gateway, board_id
+        self.access_token = getattr(gateway, "access_token", None)
+
+    def __getattr__(self, name):
+        return getattr(self.gateway, name)
+
+    def fetch_target(self, item_id):
+        decision = availability_decision(self.db, self.board_id, item_id, access_token=self.access_token)
+        self.db.commit()
+        if not decision.allowed:
+            raise SpecificationReadDeferred(decision)
+        started = utc_now()
+        try:
+            target = self.gateway.fetch_target(item_id)
+        except MondayItemUnavailable:
+            observe_unavailable(self.db, self.board_id, item_id,
+                                access_token=self.access_token, observed_at=started)
+            self.db.commit()
+            raise
+        if str(target.item_id) != str(item_id):
+            raise SpecificationSourceError("Specification source returned a different item")
+        observation = observe_item(self.db, self.board_id, _target_identity(target),
+                                   access_token=self.access_token, observed_at=started)
+        superseded = _newer_observation(observation, started)
+        self.db.commit()
+        if superseded:
+            raise SupersededSpecification("Monday lifecycle changed during the source read")
+        return target
+
+    def fetch_holding(self, item_id):
+        started = utc_now()
+        item = self.gateway.fetch_holding(item_id)
+        if str(item.get("id")) != str(item_id):
+            raise SpecificationSourceError("Specification holding source returned a different item")
+        observation = observe_item(self.db, self.board_id, item, access_token=self.access_token, observed_at=started)
+        superseded = _newer_observation(observation, started)
+        self.db.commit()
+        if superseded:
+            raise SupersededSpecification("Monday lifecycle changed during the holding read")
+        return item
+
+
+class SpecificationReadDeferred(RuntimeError):
+    def __init__(self, decision):
+        self.decision = decision
+        super().__init__(decision.reason or "Monday item check deferred")
 
 
 def utc_now():
@@ -113,6 +179,9 @@ def enqueue_specification(db, board_id, item_id, *, group_id=None, immediate=Fal
             cancel_specification(db, board_id, item_id, reason=reason)
             return None
     if not specification_processing_allowed(item_id):
+        return None
+    decision = availability_decision(db, board_id, item_id)
+    if not decision.allowed:
         return None
     db.flush()
     if db.query(DesignProcessingItem.id).filter_by(board_id=board_id, item_id=item_id).first() is None:
@@ -234,7 +303,8 @@ def discover_specifications(db, limit=100, *, gateway=None):
                 spec.checked_at.is_(None), spec.checked_at <= stale_before,
                 check.last_checked_at > spec.checked_at),
         )),
-    ).filter(DesignProcessingItem.item_id.in_(settings.performance_specification_allowlist_item_ids)
+    ).filter(availability_read_predicate(DesignProcessingItem.board_id, DesignProcessingItem.item_id))
+    candidates = candidates.filter(DesignProcessingItem.item_id.in_(settings.performance_specification_allowlist_item_ids)
              if settings.performance_specification_mode == "allowlist" else True
     ).order_by(spec.checked_at.asc().nulls_first(), DesignProcessingItem.item_id).limit(limit).all()
     db.commit()  # Never hold a database transaction across the live read.
@@ -243,17 +313,57 @@ def discover_specifications(db, limit=100, *, gateway=None):
     if gateway is None:
         from .auto_sync import get_monday_ingestion_access_token
         gateway = MondaySpecificationGateway(get_monday_ingestion_access_token())
+    # Production discovery needs lifecycle identity only; load email/assets in
+    # the claimed refresh. Tests/custom gateways retain their injectable reader.
+    statuses = None
+    if isinstance(gateway, MondaySpecificationGateway):
+        from .monday_item_probes import probe_items
+        statuses = probe_items(db, str(settings.design_processing_board_id),
+                               [item_id for _, item_id in candidates], access_token=gateway.access_token)
     recovered = 0
     for board_id, item_id in candidates:
         if not specification_processing_allowed(item_id):
             continue
+        if statuses is not None and (item_id not in statuses or statuses[item_id] is None):
+            continue
+        if statuses is not None:
+            from .monday_item_probes import probe_status_is_current
+            raw = statuses[item_id]
+            if not probe_status_is_current(db, board_id, item_id, raw,
+                                           access_token=getattr(gateway, "access_token", None)):
+                db.commit()
+                continue
+            reason = specification_scope_exclusion(board_id=raw["board"]["id"],
+                group_id=(raw.get("group") or {}).get("id"), item_state=raw["state"])
+            if reason is not None:
+                _ensure_record(db, board_id, item_id)
+                cancel_specification(db, board_id, item_id, reason=reason)
+                db.commit()
+                continue
+        decision = availability_decision(db, board_id, item_id, access_token=getattr(gateway, "access_token", None))
+        if not decision.allowed:
+            continue
         try:
-            target = gateway.fetch_target(item_id)
+            started = utc_now()
+            if statuses is not None:
+                raw = statuses[item_id]
+                from types import SimpleNamespace
+                target = SimpleNamespace(item_id=str(raw["id"]), board_id=str(raw["board"]["id"]),
+                                         group_id=(raw.get("group") or {}).get("id"), item_state=raw["state"])
+            else:
+                db.commit()
+                target = gateway.fetch_target(item_id)
             if not specification_processing_allowed(item_id):
                 continue
             reason = specification_scope_exclusion(target)
             if str(target.item_id) != item_id:
                 raise SpecificationSourceError("Specification discovery returned a different item")
+            if statuses is None:
+                observation = observe_item(db, board_id, _target_identity(target),
+                                          access_token=getattr(gateway, "access_token", None), observed_at=started)
+                if _newer_observation(observation, started):
+                    db.commit()
+                    continue
             record = _ensure_record(db, board_id, item_id)
             record.checked_at = now  # Discovery visit, including excluded/error rows, rotates fairly.
             if reason is not None:
@@ -268,6 +378,9 @@ def discover_specifications(db, limit=100, *, gateway=None):
             # Unavailable is not evidence of archive/delete. Retain the PDF and
             # decisions, record the failed observation, and let later checks retry.
             record = _ensure_record(db, board_id, item_id)
+            if isinstance(exc, MondayItemUnavailable):
+                observe_unavailable(db, board_id, item_id,
+                                    access_token=getattr(gateway, "access_token", None), observed_at=started)
             record.checked_at = now
             record.last_error = f"Discovery: {type(exc).__name__}"
             db.commit()
@@ -283,6 +396,7 @@ def claim_specification(db):
         PerformanceSpecification.board_id == str(settings.design_processing_board_id),
         PerformanceSpecification.scheduled_for <= now,
         or_(PerformanceSpecification.lease_until.is_(None), PerformanceSpecification.lease_until <= now),
+        availability_read_predicate(PerformanceSpecification.board_id, PerformanceSpecification.item_id),
     ).filter(PerformanceSpecification.item_id.in_(settings.performance_specification_allowlist_item_ids)
              if settings.performance_specification_mode == "allowlist" else True
     ).order_by(PerformanceSpecification.scheduled_for, PerformanceSpecification.item_id)
@@ -313,6 +427,10 @@ def _check_claim(db, claim):
     if not specification_processing_allowed(item_id):
         db.rollback()
         raise SupersededSpecification("Specification processing disabled")
+    decision = availability_decision(db, board_id, item_id)
+    if not decision.allowed:
+        db.rollback()
+        raise SpecificationReadDeferred(decision)
     record.lease_until = utc_now() + timedelta(seconds=LEASE_SECONDS)
     db.commit()
     return record
@@ -456,6 +574,7 @@ def _finish(db, claim, source, publication, *, revision=None):
 def execute_specification(db, claim, *, gateway, client, storage):
     board_id, item_id, token, generation = claim
     source = None
+    gateway = _ObservedGateway(db, gateway, board_id)
     try:
         record, source = _source(db, claim, gateway)
         model_version = f"{SPECIFICATION_VERSION}:{client.model}:thinking-{client.thinking_level}"
@@ -532,7 +651,22 @@ def execute_specification(db, claim, *, gateway, client, storage):
             db.rollback()
             return "superseded"
         record.lease_token = record.lease_until = None
-        if isinstance(exc, SpecificationIneligible):
+        if isinstance(exc, SpecificationReadDeferred):
+            if exc.decision.next_check_at is None:
+                cancel_specification(db, board_id, item_id, reason=exc.decision.reason)
+            else:
+                record.scheduled_for = exc.decision.next_check_at
+            record.last_error = exc.decision.reason
+            outcome = "deferred"
+        elif isinstance(exc, MondayItemUnavailable):
+            # The gateway persisted the shared negative observation before the
+            # source operation rolled back. Do not burn rendering retry attempts.
+            decision = availability_decision(db, board_id, item_id, access_token=gateway.access_token)
+            record.scheduled_for = decision.next_check_at or utc_now() + timedelta(
+                seconds=settings.performance_specification_recheck_seconds)
+            record.last_error = "MondayItemUnavailable"
+            outcome = "deferred"
+        elif isinstance(exc, SpecificationIneligible):
             cancel_specification(db, board_id, item_id, reason=str(exc))
             record.last_error = None
             outcome = "excluded"

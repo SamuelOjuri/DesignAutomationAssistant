@@ -11,12 +11,14 @@ import threading
 import time
 from typing import Iterable, Optional
 
+from fastapi import HTTPException
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import SessionLocal
 from ..models import DesignProcessingItem, DesignProcessingJob
+from ..monday_client import MondayItemUnavailable
 from .auto_sync import get_monday_ingestion_access_token, utc_now
 from .db_retry import is_postgres_deadlock, run_transaction_with_retry
 from .design_processing_artifacts import (
@@ -59,6 +61,9 @@ from .design_processing_target import (
 )
 from .legacy_enquiry.llm import LegacyGeminiClient
 from .gemini_requests import runtime_diagnostics
+from .monday_item_availability import (
+    availability_decision, availability_read_predicate, observe_item, observe_unavailable,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -173,6 +178,100 @@ def _load_item_for_job(
     ).one()
 
 
+class _ObservedDesignGateway:
+    """Keep real target reads intact and retain their latest lifecycle evidence.
+
+    Publication still performs every fresh target validation. Observations are
+    persisted by the worker after its short workflow transaction, including when
+    a failed validation rolls that transaction back.
+    """
+
+    def __init__(self, gateway, *, clock=utc_now):
+        self.gateway, self.clock, self.observation = gateway, clock, None
+
+    def __getattr__(self, name):
+        return getattr(self.gateway, name)
+
+    def fetch_target(self, item_id):
+        started_at = self.clock()
+        try:
+            snapshot = self.gateway.fetch_target(item_id)
+        except MondayItemUnavailable:
+            self.observation = (str(item_id), None, started_at)
+            raise
+        if str(snapshot.item_id) == str(item_id):
+            self.observation = (str(item_id), snapshot, started_at)
+        return snapshot
+
+
+def _observe_design_read(db, gateway, *, board_id, access_token, reject_stale=True):
+    if gateway.observation is None:
+        return None
+    item_id, snapshot, started_at = gateway.observation
+    if snapshot is None:
+        row = observe_unavailable(db, board_id, item_id, access_token=access_token,
+                                  observed_at=started_at)
+    else:
+        row = observe_item(db, board_id, {
+            "id": snapshot.item_id, "state": snapshot.item_state,
+            "board": {"id": snapshot.board_id}, "group": {"id": snapshot.group_id},
+        }, access_token=access_token, observed_at=started_at)
+    gateway.observation = None
+    watermark = max((stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None else stamp
+                     for stamp in (row.last_observed_at, row.last_event_at, row.last_attempted_at)
+                     if stamp is not None), default=started_at)
+    if watermark > started_at:
+        if reject_stale:
+            raise DesignProcessingTargetMismatch("availability_changed", "Newer item availability was observed")
+        return row
+    if snapshot is not None:
+        from .specification_policy import specification_scope_exclusion
+        if specification_scope_exclusion(snapshot) is not None:
+            from .performance_specification import cancel_specification
+            # The registered board owns the pending PDF, even after Monday
+            # returns the item under a different board.
+            cancel_specification(db, board_id, item_id, reason="item_outside_managed_scope")
+    return row
+
+
+def _hold_unavailable_job(db, item, job, decision, *, now, attempt_count=None):
+    if job.status not in {"scheduled", "retry_wait", "running"}:
+        return "not_claimed"
+    if decision.state not in {"retired", "archived", "deleted", "out_of_board"} or decision.allowed:
+        # Absence to this credential is a probe delay, not an extraction failure.
+        job.status = "retry_wait"
+        job.scheduled_for = job.next_retry_at = decision.next_check_at or now + timedelta(hours=1)
+        job.locked_at = job.locked_by = job.heartbeat_at = None
+        job.last_error = decision.reason
+        job.updated_at = now
+        if attempt_count is not None:
+            job.attempt_count = attempt_count
+        item.state = "analyzed" if job.execution_kind == "publication" else "scheduled"
+        item.updated_at = now
+        return "deferred"
+    cancel_job(item, job, reason=decision.reason, now=now, item_state="ineligible")
+    from .performance_specification import cancel_specification
+    cancel_specification(db, item.board_id, item.item_id, reason=decision.reason)
+    return "cancelled"
+
+
+def _defer_missing_target(db, job_id, gateway, *, board_id, item_id, access_token,
+                          now, attempt_count, worker_id):
+    db.rollback()
+    _observe_design_read(db, gateway, board_id=board_id, access_token=access_token, reject_stale=False)
+    decision = availability_decision(db, board_id, item_id, access_token=access_token, now=now)
+    item, job = lock_design_processing_item_and_job(db, job_id)
+    if job is None or item is None:
+        db.commit()
+        return "missing"
+    if job.status != "running" or job.locked_by != worker_id:
+        db.commit()
+        return "not_claimed"
+    result = _hold_unavailable_job(db, item, job, decision, now=now, attempt_count=attempt_count)
+    db.commit()
+    return result
+
+
 def claim_due_analysis_jobs(
     db: Session,
     *,
@@ -181,6 +280,7 @@ def claim_due_analysis_jobs(
     now: Optional[datetime] = None,
     mode: DesignProcessingMode = "enabled",
     allowlist_item_ids: Iterable[str] = (),
+    access_token: Optional[str] = None,
 ) -> list[DesignProcessingJob]:
     if limit < 1:
         raise ValueError("limit must be at least 1")
@@ -211,6 +311,8 @@ def claim_due_analysis_jobs(
                 ),
             ),
             _analysis_or_readiness_filter(),
+            availability_read_predicate(DesignProcessingJob.board_id, DesignProcessingJob.item_id,
+                                        access_token=access_token, now=claimed_at),
         )
         .filter(DesignProcessingJob.item_id.in_([str(value) for value in allowlist_item_ids]) if mode == "allowlist" else True)
         .order_by(
@@ -236,6 +338,7 @@ def claim_due_design_processing_jobs(
     now: Optional[datetime] = None,
     mode: DesignProcessingMode = "enabled",
     allowlist_item_ids: Iterable[str] = (),
+    access_token: Optional[str] = None,
 ) -> list[DesignProcessingJob]:
     if limit < 1:
         raise ValueError("limit must be at least 1")
@@ -258,6 +361,8 @@ def claim_due_design_processing_jobs(
                     ),
                 ),
             ),
+            availability_read_predicate(DesignProcessingJob.board_id, DesignProcessingJob.item_id,
+                                        access_token=access_token, now=claimed_at),
         )
         .filter(DesignProcessingJob.item_id.in_([str(value) for value in allowlist_item_ids]) if mode == "allowlist" else True)
         .order_by(
@@ -895,6 +1000,8 @@ def execute_claimed_analysis_job(
     if job.status != "running" or job.locked_by != worker_id:
         return "not_claimed"
     item = _load_item_for_job(db, job)
+    registered_board_id, registered_item_id = str(item.board_id), str(item.item_id)
+    attempts_before = job.attempt_count
     def policy_allows(execution_kind: str) -> bool:
         if execution_policy is not None:
             return execution_policy(execution_kind, item.item_id)
@@ -926,6 +1033,13 @@ def execute_claimed_analysis_job(
         db.commit()
         return "cancelled"
 
+    decision = availability_decision(db, registered_board_id, registered_item_id,
+                                     access_token=access_token, now=execution_now)
+    if not decision.allowed:
+        outcome = _hold_unavailable_job(db, item, job, decision, now=execution_now)
+        db.commit()
+        return outcome
+    gateway = _ObservedDesignGateway(gateway, clock=lambda: now or utc_now())
     try:
         if execution_identity(job) is None:
             refreshed = refresh_current_target(
@@ -937,6 +1051,13 @@ def execute_claimed_analysis_job(
                 now=execution_now,
                 active_job=job,
             )
+            _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token)
+            current_availability = availability_decision(db, registered_board_id, registered_item_id,
+                access_token=access_token, now=execution_now)
+            if not current_availability.allowed:
+                outcome = _hold_unavailable_job(db, item, job, current_availability, now=execution_now)
+                db.commit()
+                return outcome
             if refreshed.readiness == "ineligible":
                 cancel_job(
                     item,
@@ -1059,18 +1180,41 @@ def execute_claimed_analysis_job(
             )
 
         try:
-            return run_transaction_with_retry(
+            outcome = run_transaction_with_retry(
                 db,
                 run_pipeline,
                 operation_name=f"execute design-processing job {job_id}",
                 retry_if=is_postgres_deadlock,
             )
+            _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token)
+            db.commit()
+            return outcome
         finally:
             _stop_heartbeat(stop_event, heartbeat_thread)
+    except MondayItemUnavailable:
+        return _defer_missing_target(db, job_id, gateway, board_id=registered_board_id,
+            item_id=registered_item_id, access_token=access_token, now=now or utc_now(),
+            attempt_count=attempts_before, worker_id=worker_id)
     except DesignProcessingTargetMismatch as mismatch:
         db.rollback()
+        _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token)
+        decision = availability_decision(db, registered_board_id, registered_item_id,
+                                         access_token=access_token, now=now or utc_now())
+        if not decision.allowed:
+            current_item, current_job = lock_design_processing_item_and_job(db, job_id)
+            if current_job is None or current_item is None:
+                db.commit()
+                return "missing"
+            if current_job.status != "running" or current_job.locked_by != worker_id:
+                db.commit()
+                return "not_claimed"
+            outcome = _hold_unavailable_job(db, current_item, current_job,
+                decision, now=now or utc_now(), attempt_count=attempts_before)
+            db.commit()
+            return outcome
+        db.commit()
         try:
-            return run_transaction_with_retry(
+            outcome = run_transaction_with_retry(
                 db,
                 lambda: _cancel_or_replace_mismatched_job(
                     db,
@@ -1084,6 +1228,13 @@ def execute_claimed_analysis_job(
                 operation_name=f"reconcile design-processing job {job_id}",
                 retry_if=is_postgres_deadlock,
             )
+            _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token)
+            db.commit()
+            return outcome
+        except MondayItemUnavailable:
+            return _defer_missing_target(db, job_id, gateway, board_id=registered_board_id,
+                item_id=registered_item_id, access_token=access_token, now=now or utc_now(),
+                attempt_count=attempts_before, worker_id=worker_id)
         except Exception as recovery_exc:
             db.rollback()
             logger.exception(
@@ -1099,10 +1250,16 @@ def execute_claimed_analysis_job(
     except Exception as exc:
         db.rollback()
         _raise_if_shutting_down(exc)
+        _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token)
+        db.commit()
         # An external call can fail at the same time that the item is completed.
         # Prefer cancellation to scheduling another attempt when that is known.
         try:
+            if isinstance(exc, HTTPException):
+                raise exc  # Auth/API errors do not justify another target lookup.
             current = gateway.fetch_target(str(job.item_id))
+            _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token)
+            db.commit()
             exclusion = design_scope_exclusion(
                 current, expected_board_id=str(settings.design_processing_board_id),
                 landing_group_id=str(settings.design_processing_landing_group_id),
@@ -1112,6 +1269,10 @@ def execute_claimed_analysis_job(
                     db, job_id, worker_id=worker_id, gateway=gateway,
                     mode=mode, execution_policy=execution_policy, now=utc_now(),
                 )
+        except MondayItemUnavailable:
+            return _defer_missing_target(db, job_id, gateway, board_id=registered_board_id,
+                item_id=registered_item_id, access_token=access_token, now=now or utc_now(),
+                attempt_count=attempts_before, worker_id=worker_id)
         except Exception:
             db.rollback()
             logger.warning("Could not check current eligibility after job %s failed", job_id)
@@ -1204,6 +1365,7 @@ def run_worker_once(
             limit=claim_limit,
             mode=configured_mode,
             allowlist_item_ids=settings.design_processing_allowlist_item_ids,
+            access_token=token,
         )
         attempts_at_claim.update((job.id, job.attempt_count) for job in jobs)
         for job in jobs:

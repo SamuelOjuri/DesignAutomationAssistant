@@ -22,7 +22,10 @@ from tenacity import wait_none
 from backend.app.db import Base
 from backend.app.models import Task, TaskSnapshot, TaskChunk, TaskFile
 
-sys.modules.setdefault("extract_msg", ModuleType("extract_msg"))
+try:
+    import extract_msg
+except ImportError:
+    sys.modules.setdefault("extract_msg", ModuleType("extract_msg"))
 
 from backend.app.services import storage_ingest, sync_pipeline, sync_asset_reuse
 

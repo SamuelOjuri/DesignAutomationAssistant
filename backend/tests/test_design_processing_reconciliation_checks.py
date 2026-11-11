@@ -300,7 +300,7 @@ def test_webhook_processing_is_not_blocked_by_reconciliation_delay(db_session):
 
 
 def settled_item(db, monkeypatch, *, published=True):
-    item = seed(db, "settled", state="ready_for_review" if published else "analyzed")
+    item = seed(db, "3990000001", state="ready_for_review" if published else "analyzed")
     version = settings.design_processing_pipeline_version
     item.latest_desired_input_revision = item.latest_analyzed_input_revision = "revision-a"
     item.latest_desired_pipeline_version = item.latest_analyzed_pipeline_version = version

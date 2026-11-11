@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..models import MondayWebhookDispatch, MondayWebhookEvent
-from ..monday_client import TransientMondayAPIError, fetch_current_source_revision_inputs
+from ..monday_client import MondayItemUnavailable, TransientMondayAPIError, fetch_current_source_revision_inputs
 from ..services.auto_sync import (
     QueueResult,
     apply_auto_sync_policy_for_item,
@@ -37,6 +37,10 @@ from ..services.design_processing_inputs import (
 from ..services.design_processing_observability import log_design_processing_event
 from ..services.design_processing_queue import queue_design_processing_snapshot
 from ..services.specification_policy import specification_processing_enabled, specification_processing_allowed
+from ..services.monday_item_availability import (
+    availability_decision, lifecycle_probe_allowed, observe_item, observe_unavailable, request_retry,
+)
+from ..services.monday_item_lifecycle import cancel_out_of_board_work
 
 router = APIRouter(prefix="/api/monday/webhooks", tags=["monday"])
 logger = logging.getLogger(__name__)
@@ -59,6 +63,19 @@ DESIGN_NAME_EVENT_TYPES = frozenset(
     {"change_name", "change_item_name", "change_pulse_name"}
 )
 WEBHOOK_DISPATCH_CONSUMERS = ("auto_sync", "design_processing")
+LIFECYCLE_EVENT_TYPES = frozenset({
+    "item_archived", "item_deleted", "item_restored", "archive_pulse", "delete_pulse", "restore_pulse",
+    "archive_item", "delete_item", "restore_item", "move_item_to_board", "move_pulse_to_board",
+}) | DESIGN_MOVE_EVENT_TYPES | DESIGN_CREATE_EVENT_TYPES
+RESTORATION_HINT_TYPES = frozenset({"item_restored", "restore_pulse", "restore_item", "move_item_to_board", "move_pulse_to_board"}) | DESIGN_MOVE_EVENT_TYPES | DESIGN_CREATE_EVENT_TYPES
+
+
+class _DeferredWebhookRead(Exception):
+    pass
+
+
+def _as_aware_time(value):
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -72,6 +89,33 @@ class NormalizedWebhookEvent:
     group_id: Optional[str]
     event_type: Optional[str]
     column_id: Optional[str]
+    event_at: Optional[datetime] = None
+
+
+def _event_timestamp(event):
+    raw = next((event[key] for key in ("triggerTime", "trigger_time", "timestamp", "eventAt", "event_at", "createdAt", "created_at")
+                if event.get(key) is not None), None)
+    try:
+        if isinstance(raw, bool):
+            return None
+        if isinstance(raw, (int, float)) or (isinstance(raw, str) and raw.isascii() and raw.isdecimal()):
+            numeric = float(raw)
+            value = datetime.fromtimestamp(numeric / 1000 if numeric > 100_000_000_000 else numeric, timezone.utc)
+        elif isinstance(raw, str):
+            value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if value.tzinfo is None:
+                return None
+            value = value.astimezone(timezone.utc)
+        else:
+            return None
+        return value if value <= utc_now() + timedelta(minutes=5) else None
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def _availability_identity(board_id, item_id):
+    return all(value is not None and str(value).isascii() and str(value).isdecimal() and int(str(value)) > 0
+               for value in (board_id, item_id))
 
 
 def _json_hash(payload: dict[str, Any]) -> str:
@@ -146,6 +190,7 @@ def normalize_webhook_payload(payload: dict[str, Any]) -> NormalizedWebhookEvent
         group_id=group_id,
         event_type=event_type,
         column_id=column_id,
+        event_at=_event_timestamp(event),
     )
 
 
@@ -471,6 +516,11 @@ def _dispatch_auto_sync(
 ) -> None:
     policy = policy_from_settings()
     now = utc_now()
+    if item is not None and normalized.board_id == policy.board_id and str((item.get("board") or {}).get("id")) != policy.board_id:
+        cancel_out_of_board_work(db, policy.board_id, str(normalized.item_id), now=now)
+        _complete_dispatch(dispatch, outcome="excluded", job_id=None,
+            result_json={"reason": "board_not_managed"}, now=now)
+        return
     ignored_specification_change = normalized.column_id in DESIGN_OUTPUT_COLUMN_IDS or (
         normalized.board_id == str(settings.design_processing_board_id)
         and normalized.column_id in SPECIFICATION_IGNORED_HOLDING_COLUMN_IDS
@@ -611,6 +661,11 @@ def _dispatch_design_processing(
     normalized: NormalizedWebhookEvent,
 ) -> None:
     now = utc_now()
+    if item is not None and normalized.board_id == str(settings.design_processing_board_id) and str((item.get("board") or {}).get("id")) != str(settings.design_processing_board_id):
+        cancel_out_of_board_work(db, normalized.board_id, str(normalized.item_id), now=now)
+        _complete_dispatch(dispatch, outcome="excluded", job_id=None,
+            result_json={"reason": "board_not_managed"}, now=now)
+        return
     if settings.design_processing_mode == "off":
         _complete_dispatch(
             dispatch,
@@ -858,19 +913,71 @@ def monday_webhook(
 
     item: Optional[dict[str, Any]] = None
     snapshot_error: Optional[Exception] = None
+    snapshot_deferred: Optional[str] = None
     if any(_dispatch_requires_snapshot(dispatch.consumer, normalized) for dispatch in claimable_dispatches):
         try:
             access_token = get_monday_ingestion_access_token()
+            observed_at = utc_now()
+            valid_identity = _availability_identity(normalized.board_id, normalized.item_id)
+            if valid_identity:
+                decision = availability_decision(db, normalized.board_id, normalized.item_id,
+                    access_token=access_token, now=observed_at)
+                lifecycle = _normalized_event_type(normalized) in LIFECYCLE_EVENT_TYPES
+                verified_retry_hint = False
+                if lifecycle and normalized.event_at is not None:
+                    if decision.state == "retired":
+                        accepted = _normalized_event_type(normalized) in RESTORATION_HINT_TYPES and lifecycle_probe_allowed(
+                            db, normalized.board_id, normalized.item_id, normalized.event_at,
+                            access_token=access_token, observed_at=observed_at)
+                        verified_retry_hint = bool(accepted)
+                    else:
+                        accepted = request_retry(db, normalized.board_id, normalized.item_id,
+                            access_token=access_token, observed_at=observed_at, event_at=normalized.event_at)
+                    if not accepted:
+                        snapshot_deferred = "stale_or_retired_lifecycle_event"
+                if not decision.allowed and snapshot_deferred is None:
+                    # An authenticated lifecycle notification can ask for a fresh
+                    # read. Its event name never supplies a synthetic deleted or
+                    # restored item. Confirmed retirement stays terminal.
+                    if not (lifecycle and decision.state != "retired") and not verified_retry_hint:
+                        snapshot_deferred = decision.reason or "item_read_deferred"
+                db.commit()  # No availability locks across the remote read.
+            if snapshot_deferred is not None:
+                raise _DeferredWebhookRead(snapshot_deferred)
             item = fetch_current_source_revision_inputs(
                 access_token,
                 normalized.item_id,
             )
+            if str(item.get("id")) != str(normalized.item_id):
+                raise DesignProcessingInputError("Monday returned an unexpected webhook item identity")
+            if valid_identity:
+                observation = observe_item(db, normalized.board_id, item, access_token=access_token, observed_at=observed_at)
+                if any(value is not None and _as_aware_time(value) > observed_at for value in (
+                    observation.last_observed_at, observation.last_event_at, observation.last_attempted_at,
+                )):
+                    snapshot_deferred = "superseded_item_observation"
+                    item = None
+                db.commit()
+        except _DeferredWebhookRead:
+            pass
+        except MondayItemUnavailable:
+            if _availability_identity(normalized.board_id, normalized.item_id):
+                observe_unavailable(db, normalized.board_id, normalized.item_id,
+                    access_token=access_token, observed_at=observed_at)
+                db.commit()
+            snapshot_deferred = "item_unavailable"
         except Exception as exc:
+            db.rollback()
             snapshot_error = exc
 
     retryable_failure = False
     for dispatch in claimable_dispatches:
         try:
+            if snapshot_deferred is not None and _dispatch_requires_snapshot(dispatch.consumer, normalized):
+                _complete_dispatch(dispatch, outcome="ignored", job_id=None,
+                    result_json={"reason": snapshot_deferred}, now=utc_now())
+                db.commit()
+                continue
             if snapshot_error is not None and _dispatch_requires_snapshot(dispatch.consumer, normalized):
                 raise snapshot_error
             _process_dispatch(

@@ -162,6 +162,16 @@ deadline; retained project data should remain intact. These commands read Monday
 update only the application database. Keep subsequent lifecycle sweeps running so
 restoration can be detected. This code change does not itself update production rows.
 
+### Shared worker availability
+
+Migration `0020_monday_item_availability` adds processing-identity availability
+observations shared by lifecycle reconciliation, specification, design, metadata
+and ingestion workers. Missing sources use increasing common backoff, while
+confirmed retirement suppresses normal individual reads. Follow
+[Monday worker availability](MondayWorkerAvailability.md) when deploying this
+release or requesting an explicit retry; retained metadata and documents remain
+intact.
+
 ### Retiring deletions Monday has purged
 
 Monday keeps deleted items in its trash only temporarily. A deletion missed during

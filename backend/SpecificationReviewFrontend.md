@@ -175,6 +175,10 @@ was enabled. Operators must deliberately select the new specification mode.
 
 ## Deployed setup and rollout
 
+The [Phase 8 deployment runbook](SpecificationReviewDeployment.md) gives the
+complete release sequence using the existing Netlify API base and Netlify Monday
+OAuth callback, including live acceptance, diagnostics, expansion and rollback.
+
 These are deployment instructions, not changes made to a local `.env` or a live
 service. Phase 7 source implementation and local verification are complete;
 actual Monday registration, explicitly allowlisted deployed acceptance and
@@ -254,7 +258,7 @@ production enablement remain Phase 8.
 
    Restart the review API, publisher and specification enqueuers/reconcilers with
    matching values. Existing shadow renders are revisited on their scheduled
-   checks. To publish a selected already registered item immediately, run this
+   checks. To enqueue a prompt check for a selected already registered item, run this
    from the repository root with the same allowlist settings (use `python` in
    the deployed Linux environment):
 
@@ -263,7 +267,9 @@ production enablement remain Phase 8.
    ```
 
    Unchanged shadow artifacts and translations are reused. This command cannot
-   create missing extraction. Verify unlisted items cannot process,
+   create missing extraction and can process another admitted due item after
+   enqueueing the selected item; the specification allowlist bounds its work.
+   Verify unlisted items cannot process,
    edit, publish or approve specifications. Do not populate or change the design
    allowlist merely to limit specifications.
 

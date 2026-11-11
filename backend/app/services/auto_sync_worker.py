@@ -18,6 +18,8 @@ from ..db import SessionLocal
 from ..models import AutoSyncJob, Task, TaskSnapshot
 from .auto_sync import coalesce_auto_sync_job, get_monday_ingestion_access_token, has_completed_snapshot, utc_now
 from .auto_sync_policy import INACTIVE_SOURCE_STATES
+from .monday_item_availability import availability_decision, availability_read_predicate, observe_unavailable
+from ..monday_client import MondayItemUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ PipelineRunner = Callable[[Session, str, str, bool], Any]
 def _run_sync_pipeline(db: Session, external_task_key: str, access_token: str, force: bool) -> Any:
     from .sync_pipeline import run_sync_pipeline
 
-    return run_sync_pipeline(db, external_task_key, access_token, force)
+    return run_sync_pipeline(db, external_task_key, access_token, force, track_worker_availability=True)
 
 
 @dataclass(frozen=True)
@@ -242,12 +244,14 @@ def claim_due_jobs(
     worker_id: str,
     limit: int = 1,
     now: Optional[datetime] = None,
+    access_token: Optional[str] = None,
 ) -> list[AutoSyncJob]:
     now = now or utc_now()
     query = (
         db.query(AutoSyncJob)
         .populate_existing()
         .filter(
+            availability_read_predicate(AutoSyncJob.board_id, AutoSyncJob.item_id, access_token, now),
             or_(
                 and_(AutoSyncJob.status.in_(("pending", "scheduled")), AutoSyncJob.scheduled_for <= now),
                 and_(
@@ -512,6 +516,24 @@ def execute_claimed_job(
         return "not_claimed"
 
     task = _task_for_job(db, job)
+    decision = availability_decision(db, job.board_id, job.item_id,
+                                    access_token=access_token, now=now) if (
+        str(job.board_id).isascii() and str(job.board_id).isdecimal()
+        and str(job.item_id).isascii() and str(job.item_id).isdecimal()) else None
+    if decision is not None and not decision.allowed:
+        if decision.state in {"retired", "deleted", "archived", "out_of_board"}:
+            _finish_job(job, status="cancelled", error=decision.reason, now=now)
+            outcome = "skipped"
+        else:
+            job.status = "retry_wait"
+            job.next_retry_at = job.scheduled_for = decision.next_check_at or now + timedelta(minutes=5)
+            job.locked_at = job.locked_by = job.heartbeat_at = None
+            job.attempt_count = max(0, job.attempt_count - 1)
+            if task is not None:
+                task.sync_status = "queued"
+            outcome = "retry_wait"
+        db.commit()
+        return outcome
     if task is None:
         job, task = _lock_claimed_job_and_task(db, job_id, worker_id=worker_id)
         if job is None:
@@ -590,6 +612,7 @@ def execute_claimed_job(
     )
     try:
         token = access_token or get_monday_ingestion_access_token()
+        lookup_started = utc_now()
         result = pipeline_runner(db, external_task_key, token, execution_force)
         _stop_job_heartbeat(heartbeat_stop, heartbeat_thread)
         finished_at = utc_now()
@@ -613,6 +636,21 @@ def execute_claimed_job(
         _stop_job_heartbeat(heartbeat_stop, heartbeat_thread)
         failed_at = utc_now()
         error = str(exc)[:1000]
+        if isinstance(exc, MondayItemUnavailable) and _rollback_session_safely(db):
+            job, task = _lock_claimed_job_and_task(db, job_id, worker_id=worker_id)
+            if job is not None and job.status == "running" and job.locked_by == worker_id:
+                observe_unavailable(db, job.board_id, job.item_id, access_token=access_token,
+                                    observed_at=lookup_started)
+                decision = availability_decision(db, job.board_id, job.item_id, access_token=access_token)
+                job.status = "retry_wait"
+                job.next_retry_at = job.scheduled_for = decision.next_check_at or failed_at + timedelta(minutes=5)
+                job.locked_at = job.locked_by = job.heartbeat_at = None
+                job.attempt_count = max(0, job.attempt_count - 1)
+                job.last_error = "MondayItemUnavailable"
+                if task is not None:
+                    task.sync_status = "queued"
+                db.commit()
+                return "retry_wait"
         if not _rollback_session_safely(db):
             status = _record_claimed_job_failure_in_new_session(
                 job_id_for_retry,
@@ -655,7 +693,7 @@ def run_due_jobs_once(
 ) -> WorkerRunResult:
     worker_id = worker_id or default_worker_id()
     recovered = recover_stuck_jobs(db, lease_timeout_seconds=lease_timeout_seconds)
-    claimed_jobs = claim_due_jobs(db, worker_id=worker_id, limit=limit)
+    claimed_jobs = claim_due_jobs(db, worker_id=worker_id, limit=limit, access_token=access_token)
 
     counts = {"completed": 0, "skipped": 0, "retry_wait": 0, "failed": 0}
     for job in claimed_jobs:

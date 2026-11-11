@@ -12,7 +12,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from ..models import MondayMetadataLink, Task, TaskMondayMetadata
-from ..monday_client import fetch_current_account_id, fetch_monday_metadata
+from ..monday_client import fetch_current_account_id, fetch_monday_metadata, MondayItemUnavailable
+from .monday_item_availability import availability_decision, availability_read_predicate, observe_item, observe_unavailable
 from .auto_sync_policy import INACTIVE_SOURCE_STATES, policy_from_settings
 from .monday_metadata_fields import (
     COLUMN_IDS, COLUMN_TITLES, LINKED_BOARD_IDS, MetadataReadError,
@@ -148,7 +149,7 @@ def refresh_metadata_from_item(
     return True
 
 
-def claim_refresh(db: Session, *, account_id: str) -> tuple[str, str, int] | None:
+def claim_refresh(db: Session, *, account_id: str, access_token=None) -> tuple[str, str, int] | None:
     now = utc_now()
     policy = policy_from_settings()
     query = db.query(TaskMondayMetadata).join(Task, Task.external_task_key == TaskMondayMetadata.external_task_key).filter(
@@ -158,6 +159,7 @@ def claim_refresh(db: Session, *, account_id: str) -> tuple[str, str, int] | Non
         Task.account_id == account_id, Task.board_id == policy.board_id,
         Task.auto_sync_state == "active", Task.auto_sync_enabled.is_(True),
         Task.source_group_id.in_(policy.active_group_ids),
+        availability_read_predicate(Task.board_id, Task.item_id, access_token, now),
     ).order_by(TaskMondayMetadata.scheduled_for, TaskMondayMetadata.external_task_key)
     if db.get_bind().dialect.name == "postgresql":
         query = query.with_for_update(skip_locked=True, of=TaskMondayMetadata)
@@ -179,11 +181,38 @@ def execute_refresh(db: Session, claim: tuple[str, str, int], access_token: str)
     if task is None:
         return "missing"
     item_id, board_id = task.item_id, task.board_id
+    guarded = (board_id.isascii() and board_id.isdecimal() and item_id.isascii() and item_id.isdecimal())
+    decision = availability_decision(db, board_id, item_id, access_token) if guarded else None
+    if decision is not None and not decision.allowed:
+        record = _locked_record(db, task_key).one_or_none()
+        if record is not None and record.lease_token == lease_token:
+            record.lease_token = record.lease_until = None
+            if decision.state in {"retired", "deleted", "archived", "out_of_board"}:
+                cancel_metadata(db, task)
+            else:
+                record.scheduled_for = decision.next_check_at or utc_now() + timedelta(minutes=5)
+            db.commit()
+        return "deferred"
     db.commit()
+    started = utc_now()
     try:
         item = fetch_monday_metadata(access_token, item_id)
-        if str(item.get("id")) != item_id or str((item.get("board") or {}).get("id")) != board_id:
+        if str(item.get("id")) != item_id:
             raise MetadataReadError("Monday returned an unexpected task identity")
+        if guarded:
+            observation = observe_item(db, board_id, item, access_token, observed_at=started)
+            if any(value is not None and aware(value) > started for value in (
+                    observation.last_observed_at, observation.last_event_at, observation.last_attempted_at)):
+                record = _locked_record(db, task_key).one_or_none()
+                if record is not None and record.lease_token == lease_token:
+                    record.lease_token = record.lease_until = None
+                db.commit()
+                return "superseded"
+        if str((item.get("board") or {}).get("id")) != board_id:
+            from .monday_item_lifecycle import cancel_out_of_board_work
+            cancel_out_of_board_work(db, board_id, item_id)
+            db.commit()
+            return "ineligible"
         group_id = (item.get("group") or {}).get("id")
         if item.get("state") not in {"active", "archived", "deleted"} or (item["state"] == "active" and not group_id):
             raise MetadataReadError("Monday task lifecycle is unavailable")
@@ -244,6 +273,8 @@ def execute_refresh(db: Session, claim: tuple[str, str, int], access_token: str)
         return "completed" if eligible else "ineligible"
     except Exception as exc:
         db.rollback()
+        if guarded and isinstance(exc, MondayItemUnavailable):
+            observe_unavailable(db, board_id, item_id, access_token, observed_at=started)
         record = _locked_record(db, task_key).one_or_none()
         if record is None or record.lease_token != lease_token:
             db.rollback()
@@ -251,10 +282,14 @@ def execute_refresh(db: Session, claim: tuple[str, str, int], access_token: str)
         record.lease_token = None
         record.lease_until = None
         if record.requested_generation == generation:
-            record.attempt_count += 1
+            if guarded and isinstance(exc, MondayItemUnavailable):
+                decision = availability_decision(db, board_id, item_id, access_token)
+                record.scheduled_for = decision.next_check_at or utc_now() + timedelta(minutes=5)
+            else:
+                record.attempt_count += 1
+                record.scheduled_for = utc_now() + timedelta(seconds=min(3600, 30 * 2 ** min(record.attempt_count, 7)))
             # Bounded backoff, durable retries; reconciliation and new edits can
             # request another check without deleting the last good values.
-            record.scheduled_for = utc_now() + timedelta(seconds=min(3600, 30 * 2 ** min(record.attempt_count, 7)))
             record.last_error = "Monday details could not be refreshed. Retrying."
         db.commit()
         logger.warning("Monday metadata refresh failed task=%s error_type=%s", task_key, type(exc).__name__)
@@ -273,6 +308,7 @@ def run_metadata_once(db: Session, access_token: str, *, limit: int = 20) -> lis
         Task.auto_sync_enabled.is_(True), Task.source_group_id.in_(policy.active_group_ids),
         TaskMondayMetadata.requested_generation > TaskMondayMetadata.completed_generation,
         TaskMondayMetadata.scheduled_for <= now,
+        availability_read_predicate(Task.board_id, Task.item_id, access_token, now),
         or_(TaskMondayMetadata.lease_until.is_(None), TaskMondayMetadata.lease_until <= now),
     ).first()
     db.commit()
@@ -281,7 +317,7 @@ def run_metadata_once(db: Session, access_token: str, *, limit: int = 20) -> lis
     account_id = fetch_current_account_id(access_token)
     results = []
     for _ in range(limit):
-        claim = claim_refresh(db, account_id=account_id)
+        claim = claim_refresh(db, account_id=account_id, access_token=access_token)
         if claim is None:
             break
         results.append(execute_refresh(db, claim, access_token))

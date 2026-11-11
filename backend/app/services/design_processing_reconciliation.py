@@ -28,6 +28,7 @@ from .design_processing_target import (
     DesignProcessingReadGateway,
     MondayDesignProcessingReadGateway,
 )
+from .monday_item_availability import availability_decision, observe_item, observe_unavailable
 
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,7 @@ def _broad_reconciliation_candidates(
             if summary.item_id in seen:
                 continue
             seen.add(summary.item_id)
+            candidate_groups[summary.item_id] = eligible_group_id
             created_at = _parse_created_at(summary.created_at, item_id=summary.item_id)
             if created_at < activation_timestamp:
                 skipped.append(
@@ -186,6 +188,7 @@ def reconcile_landing_zone_once(
 
     prefiltered_results: list[DesignProcessingReconciliationItemResult] = []
     deferred_results: list[DesignProcessingReconciliationItemResult] = []
+    candidate_groups: dict[str, str] = {}
     if item_id is not None:
         candidates = [MondayGroupItem(item_id=str(item_id), created_at=None)]
     else:
@@ -229,7 +232,8 @@ def reconcile_landing_zone_once(
         candidates_by_id = {candidate.item_id: candidate for candidate in candidates}
         for item in tracked:
             check = checks.get(item.item_id)
-            if check is not None and check.last_outcome == RETIRED_SOURCE_OUTCOME:
+            if (check is not None and check.last_outcome == RETIRED_SOURCE_OUTCOME
+                    and item.item_id not in candidate_groups):
                 continue  # Confirmed deleted on Monday; nothing remains to observe.
             specification_recovery = False
             if specification_processing_allowed(item.item_id) and check is not None:
@@ -263,6 +267,16 @@ def reconcile_landing_zone_once(
                 ))
                 continue
             check = checks.get(candidate.item_id)
+            availability = availability_decision(db, board_id, candidate.item_id,
+                                                  access_token=token, now=reconciliation_now)
+            rediscovered = candidate.item_id in candidate_groups
+            if not availability.allowed and not rediscovered:
+                deferred_results.append(DesignProcessingReconciliationItemResult(
+                    item_id=candidate.item_id, action="deferred", reason=availability.reason or "unavailable",
+                    group_id=check.last_group_id if check else None,
+                    next_check_at=availability.next_check_at,
+                ))
+                continue
             # The old registration requirement no longer excludes active items.
             # Recheck rediscovered candidates now, while preserving all other
             # delays and the activation boundary for unregistered items.
@@ -298,7 +312,8 @@ def reconcile_landing_zone_once(
             )
             if check is not None and check.next_check_at is not None and (
                 _stored_utc(check.next_check_at) > reconciliation_now
-            ) and not (obsolete_admission_exclusion or settled_changed):
+            ) and not (obsolete_admission_exclusion or settled_changed
+                       or (rediscovered and not availability.allowed)):
                 deferred_results.append(DesignProcessingReconciliationItemResult(
                     item_id=candidate.item_id, action="deferred", reason=check.last_reason,
                     group_id=check.last_group_id, next_check_at=_stored_utc(check.next_check_at),
@@ -323,6 +338,18 @@ def reconcile_landing_zone_once(
 
     for summary in candidates:
         try:
+            # Explicit item commands and positive eligible inventory can request
+            # one real confirmation. Absence from inventory never clears a hold.
+            availability = availability_decision(db, board_id, summary.item_id,
+                                                  access_token=token, now=reconciliation_now)
+            if not availability.allowed and item_id is None and summary.item_id not in candidate_groups:
+                deferred_results.append(DesignProcessingReconciliationItemResult(
+                    item_id=summary.item_id, action="deferred", reason=availability.reason or "unavailable",
+                    next_check_at=availability.next_check_at,
+                ))
+                results.append(deferred_results[-1])
+                continue
+            probe_started_at = now or utc_now()
             try:
                 snapshot = read_gateway.fetch_target(summary.item_id)
             except MondayItemUnavailable:
@@ -330,16 +357,18 @@ def reconcile_landing_zone_once(
                 # Authentication, malformed responses, throttling and other API
                 # errors still take the error path and fail the cron run.
                 checked_at = now or utc_now()
-                next_check_at = checked_at + timedelta(
-                    seconds=settings.design_processing_unavailable_recheck_seconds,
-                )
+                next_check_at = checked_at + timedelta(seconds=settings.design_processing_unavailable_recheck_seconds)
                 previous = db.get(DesignProcessingReconciliationCheck, (board_id, summary.item_id))
-                if not dry_run and (previous is None or previous.last_outcome != RETIRED_SOURCE_OUTCOME):
-                    _record_check(
-                        db, board_id=board_id, item_id=summary.item_id,
-                        outcome="unavailable", reason="item_unavailable_to_worker",
-                        now=checked_at, next_check_at=next_check_at,
-                    )
+                if not dry_run:
+                    observed = observe_unavailable(db, board_id, summary.item_id,
+                        access_token=token, observed_at=probe_started_at)
+                    next_check_at = observed.next_check_at
+                    if previous is None or previous.last_outcome != RETIRED_SOURCE_OUTCOME:
+                        _record_check(
+                            db, board_id=board_id, item_id=summary.item_id,
+                            outcome="unavailable", reason="item_unavailable_to_worker",
+                            now=checked_at, next_check_at=next_check_at,
+                        )
                     db.commit()
                 unavailable += 1
                 results.append(DesignProcessingReconciliationItemResult(
@@ -356,6 +385,21 @@ def reconcile_landing_zone_once(
             checked_at = now or utc_now()
             savepoint = db.begin_nested() if dry_run else None
             try:
+                if not dry_run:
+                    observed = observe_item(db, board_id, {"id": snapshot.item_id, "state": snapshot.item_state,
+                        "board": {"id": snapshot.board_id}, "group": {"id": snapshot.group_id}},
+                        access_token=token, observed_at=probe_started_at)
+                    watermark = max((_stored_utc(stamp) for stamp in (
+                        observed.last_observed_at, observed.last_event_at, observed.last_attempted_at,
+                    ) if stamp is not None), default=probe_started_at)
+                    if watermark > probe_started_at:
+                        db.commit()
+                        deferred_results.append(DesignProcessingReconciliationItemResult(
+                            item_id=summary.item_id, action="deferred", reason="newer_availability_observation",
+                            next_check_at=observed.next_check_at,
+                        ))
+                        results.append(deferred_results[-1])
+                        continue
                 queue_result = queue_design_processing_snapshot(
                     db,
                     snapshot,
@@ -370,10 +414,11 @@ def reconcile_landing_zone_once(
                 )
                 if not dry_run:
                     from .performance_specification import cancel_specification, enqueue_specification
-                    if snapshot.item_state != "active":
-                        cancel_specification(db, snapshot.board_id, snapshot.item_id)
+                    from .specification_policy import specification_scope_exclusion
+                    if specification_scope_exclusion(snapshot) is not None:
+                        cancel_specification(db, board_id, snapshot.item_id)
                     else:
-                        enqueue_specification(db, snapshot.board_id, snapshot.item_id,
+                        enqueue_specification(db, board_id, snapshot.item_id,
                                               group_id=snapshot.group_id, reconcile=True)
                 if queue_result.item is not None:
                     queue_result.item.updated_at = checked_at
@@ -437,10 +482,12 @@ def reconcile_landing_zone_once(
             )
             if not dry_run:
                 try:
-                    _record_check(
-                        db, board_id=board_id, item_id=summary.item_id,
-                        outcome="error", reason=str(exc)[:2000], now=now or utc_now(),
-                    )
+                    previous = db.get(DesignProcessingReconciliationCheck, (board_id, summary.item_id))
+                    if previous is None or previous.last_outcome != RETIRED_SOURCE_OUTCOME:
+                        _record_check(
+                            db, board_id=board_id, item_id=summary.item_id,
+                            outcome="error", reason=str(exc)[:2000], now=now or utc_now(),
+                        )
                     db.commit()
                 except Exception:
                     db.rollback()

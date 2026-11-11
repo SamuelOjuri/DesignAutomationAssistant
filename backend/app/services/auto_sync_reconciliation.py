@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import logging
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, literal, or_, select, union_all
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -17,6 +18,7 @@ from ..db import SessionLocal
 from ..models import AutoSyncJob, AutoSyncReconciliationCheck, Task, TaskMondayMetadata, TaskSnapshot
 from ..monday_client import (
     MondayGroupItem,
+    MondayItemUnavailable,
     fetch_current_account_id,
     fetch_current_source_revision_inputs,
     fetch_item_metadata,
@@ -35,6 +37,36 @@ from .auto_sync_policy import (
     ACTIVE_JOB_STATUSES, INACTIVE_SOURCE_STATES, RETIRED_SOURCE_OUTCOME, AutoSyncPolicy, policy_from_settings,
 )
 from .monday_metadata import enqueue_metadata, refresh_metadata_from_item
+from .monday_item_availability import (
+    availability_decision, availability_read_predicate, observe_item, observe_unavailable,
+)
+from .monday_item_lifecycle import cancel_out_of_board_work
+
+# Production preflights use lightweight batched status reads. Injected source
+# readers remain the test/application seam and must never cause hidden API calls.
+_DEFAULT_SOURCE_READER = fetch_current_source_revision_inputs
+_DEFAULT_LIFECYCLE_READER = fetch_item_metadata
+
+
+def _availability_identity(board_id, item_id):
+    return all(str(value).isascii() and str(value).isdecimal() and int(str(value)) > 0
+               for value in (board_id, item_id))
+
+
+def _observation_superseded(observation, observed_at):
+    return any(value is not None and _as_aware_utc(value) > observed_at for value in (
+        observation.last_observed_at, observation.last_event_at, observation.last_attempted_at,
+    ))
+
+
+def _preflight_is_current(db, board_id, item, token):
+    from .monday_item_probes import probe_status_is_current
+    return probe_status_is_current(db, board_id, item["id"], item, access_token=token)
+
+
+def _preflight_missing_is_current(db, board_id, item_id, token):
+    from .monday_item_probes import probe_status_is_current
+    return probe_status_is_current(db, board_id, item_id, None, access_token=token)
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +117,8 @@ def _fair_item_ids_by_group(
     scope: str = "active",
     account_id: Optional[str] = None,
     force: bool = False,
+    access_token: Optional[str] = None,
+    rediscovered: bool = False,
 ) -> list[tuple[str, str]]:
     checks = {
         check.item_id: check
@@ -94,6 +128,17 @@ def _fair_item_ids_by_group(
     for group_id in group_ids:
         for item_id in item_ids_by_group.get(group_id, []):
             candidates.setdefault(str(item_id), group_id)
+    # Filter before the bounded fair batch, including IDs without a Task yet.
+    # Small UNION chunks also stay below SQLite's compound-select limit.
+    allowed_ids: set[str] = set()
+    candidate_ids = list(candidates)
+    for offset in range(0, len(candidate_ids), 200):
+        selections = [select(literal(identity).label("item_id")) for identity in candidate_ids[offset:offset + 200]]
+        source = (union_all(*selections) if len(selections) > 1 else selections[0]).subquery()
+        allowed_ids.update(identity for (identity,) in db.query(source.c.item_id).filter(
+            availability_read_predicate(literal(board_id), source.c.item_id, access_token=access_token, now=utc_now(), rediscovered=rediscovered),
+        ).all())
+    candidates = {identity: group for identity, group in candidates.items() if identity in allowed_ids}
     cutoff = utc_now() - timedelta(seconds=settings.auto_sync_reconciliation_active_interval_seconds)
     if not force:
         # Check local health in one query, rather than a snapshot/job lookup for
@@ -284,24 +329,91 @@ def reconcile_active_items_once(
         else list_item_ids_in_groups(token, policy.board_id, group_ids, limit=page_size)
     )
     selected_items = _fair_item_ids_by_group(
-        db, item_ids_by_group, group_ids, batch_limit, board_id=policy.board_id, account_id=account_id, force=force,
+        db, item_ids_by_group, group_ids, batch_limit, board_id=policy.board_id, account_id=account_id, force=force, access_token=token,
+        rediscovered=fetch_current_source_revision_inputs is _DEFAULT_SOURCE_READER,
     )
+    preflight = None
+    preflight_error = None
+    if not dry_run and selected_items and fetch_current_source_revision_inputs is _DEFAULT_SOURCE_READER:
+        from .monday_item_probes import probe_items
+        try:
+            preflight = probe_items(db, board_id=policy.board_id, item_ids=[identity for _, identity in selected_items],
+                access_token=token, rediscovered_ids=[identity for _, identity in selected_items])
+        except Exception as exc:
+            db.rollback()
+            preflight_error = exc
 
     item_results: list[ReconciliationItemResult] = []
     queued = 0
     skipped = 0
     errors = 0
+    source_unavailable = 0
 
     for expected_group_id, item_id in selected_items:
         try:
+            if preflight_error is not None:
+                raise preflight_error
+            if preflight is not None and item_id not in preflight:
+                skipped += 1
+                continue
+            if preflight is not None and preflight[item_id] is None and not _preflight_missing_is_current(db, policy.board_id, item_id, token):
+                db.commit()
+                skipped += 1
+                continue
+            access = availability_decision(db, policy.board_id, item_id, access_token=token, now=utc_now()) if _availability_identity(policy.board_id, item_id) else None
+            if preflight is None and access is not None and not access.allowed:
+                skipped += 1
+                continue
             # Fence metadata publication against events arriving during the read.
             metadata_record = db.get(TaskMondayMetadata, f"{account_id}:{policy.board_id}:{item_id}", populate_existing=True)
             metadata_generation = metadata_record.requested_generation if metadata_record is not None else 0
-            item = fetch_current_source_revision_inputs(token, item_id, account_id=account_id)
-            desired_source_revision = compute_desired_source_revision(item)
+            observed_at = utc_now()
+            used_preflight = False
+            try:
+                if preflight is not None and preflight[item_id] is None:
+                    raise MondayItemUnavailable()
+                status_item = preflight.get(item_id) if preflight is not None else None
+                if status_item is not None and (status_item.get("state") != "active"
+                    or str((status_item.get("board") or {}).get("id")) != policy.board_id):
+                    item = {**status_item, "account_id": account_id}
+                    used_preflight = True
+                else:
+                    item = fetch_current_source_revision_inputs(token, item_id, account_id=account_id)
+            except MondayItemUnavailable:
+                if not dry_run:
+                    if preflight is None and _availability_identity(policy.board_id, item_id):
+                        observe_unavailable(db, policy.board_id, item_id, access_token=token, observed_at=observed_at)
+                    _record_check(db, board_id=policy.board_id, item_id=item_id, scope="active", outcome="source_unavailable", reason="source_unavailable")
+                    db.commit()
+                skipped += 1
+                source_unavailable += 1
+                item_results.append(ReconciliationItemResult(item_id=item_id, group_id=expected_group_id,
+                    external_task_key=f"{account_id}:{policy.board_id}:{item_id}", action="source_unavailable", reason="source_unavailable"))
+                continue
             metadata = item_metadata_from_monday_item(item, fallback_account_id=account_id)
-            if metadata.item_id != item_id or metadata.board_id != policy.board_id or metadata.account_id != account_id:
+            if metadata.item_id != item_id or metadata.account_id != account_id:
                 raise ValueError("Monday returned an unexpected reconciliation item identity")
+            if not str(metadata.board_id).isascii() or not str(metadata.board_id).isdecimal():
+                raise ValueError("Monday returned an unexpected reconciliation board identity")
+            if not dry_run and _availability_identity(policy.board_id, item_id):
+                observation = None if used_preflight else observe_item(db, policy.board_id, item, access_token=token, observed_at=observed_at)
+                if (used_preflight and not _preflight_is_current(db, policy.board_id, item, token)) or (
+                    observation is not None and _observation_superseded(observation, observed_at)):
+                    db.commit()
+                    skipped += 1
+                    continue
+            if metadata.board_id != policy.board_id:
+                if not dry_run:
+                    cancel_out_of_board_work(db, policy.board_id, item_id)
+                    for scope in ("active", "completed_transition"):
+                        _record_check(db, board_id=policy.board_id, item_id=item_id, scope=scope,
+                            outcome="excluded", reason="board_not_managed")
+                    db.commit()
+                skipped += 1
+                item_results.append(ReconciliationItemResult(item_id=item_id, group_id=metadata.group_id,
+                    external_task_key=f"{account_id}:{policy.board_id}:{item_id}", action="would_mark_excluded" if dry_run else "excluded", reason="board_not_managed"))
+                continue
+            desired_source_revision = compute_desired_source_revision(item)
             decision = policy.classify_item(metadata.board_id, metadata.group_id, metadata.source_state)
             task = db.get(Task, metadata.external_task_key)
             reconciliation_reason = _active_reconciliation_reason(
@@ -447,6 +559,7 @@ def reconcile_active_items_once(
         queued=queued,
         skipped=skipped,
         errors=errors,
+        source_unavailable=source_unavailable,
         items=tuple(item_results),
         **_coverage(
             db, board_id=policy.board_id, scope="active", dry_run=dry_run,
@@ -482,7 +595,8 @@ def detect_completed_transitions_once(
             Task.board_id == policy.board_id,
             # Include queued/unindexed tasks so archival cancels their work, and
             # revisit inactive sources so restoration survives missed webhooks.
-            Task.auto_sync_state.in_(("active", *INACTIVE_SOURCE_STATES)),
+            or_(Task.auto_sync_state.in_(("active", *INACTIVE_SOURCE_STATES)),
+                and_(Task.auto_sync_state == "excluded", AutoSyncReconciliationCheck.last_reason == "board_not_managed")),
         )
         .order_by(AutoSyncReconciliationCheck.last_attempted_at.asc().nullsfirst(), Task.item_id.asc())
     )
@@ -531,7 +645,20 @@ def detect_completed_transitions_once(
                 policy.board_id, source_unavailable_deferred,
                 settings.auto_sync_reconciliation_unavailable_interval_seconds, dry_run,
             )
+    if item_id is None and external_task_key is None:
+        # Keep coverage/legacy deferral counters about the tracked candidates,
+        # while excluding shared suppression before consuming the work batch.
+        query = query.filter(availability_read_predicate(Task.board_id, Task.item_id, access_token=token, now=utc_now()))
     tasks = query.limit(batch_limit).all()
+    preflight = None
+    preflight_error = None
+    if not dry_run and tasks and item_id is None and external_task_key is None and fetch_item_metadata is _DEFAULT_LIFECYCLE_READER:
+        from .monday_item_probes import probe_items
+        try:
+            preflight = probe_items(db, board_id=policy.board_id, item_ids=[task.item_id for task in tasks], access_token=token)
+        except Exception as exc:
+            db.rollback()
+            preflight_error = exc
 
     item_results: list[ReconciliationItemResult] = []
     completed_retained = 0
@@ -543,8 +670,21 @@ def detect_completed_transitions_once(
 
     for task in tasks:
         try:
+            if preflight_error is not None:
+                raise preflight_error.with_traceback(None)
+            if preflight is not None:
+                if task.item_id not in preflight:
+                    skipped += 1
+                    continue
+                if preflight[task.item_id] is None and not _preflight_missing_is_current(db, policy.board_id, task.item_id, token):
+                    db.commit()
+                    skipped += 1
+                    continue
+            observed_at = utc_now()
             try:
-                item = fetch_item_metadata(token, task.item_id, account_id=task.account_id)
+                if preflight is not None and preflight[task.item_id] is None:
+                    raise MondayItemUnavailable()
+                item = deepcopy(preflight[task.item_id]) if preflight is not None else fetch_item_metadata(token, task.item_id, account_id=task.account_id)
             except HTTPException as exc:
                 if exc.status_code != 404 or exc.detail != "monday item not found":
                     raise
@@ -552,6 +692,8 @@ def detect_completed_transitions_once(
                 retired = (task.auto_sync_state == "deleted" and check is not None
                            and check.last_outcome == RETIRED_SOURCE_OUTCOME)
                 if not dry_run and not retired:
+                    if preflight is None and isinstance(exc, MondayItemUnavailable) and _availability_identity(policy.board_id, task.item_id):
+                        observe_unavailable(db, policy.board_id, task.item_id, access_token=token, observed_at=observed_at)
                     _record_check(
                         db, board_id=policy.board_id, item_id=task.item_id, scope="completed_transition",
                         outcome="source_unavailable", reason="source_unavailable",
@@ -578,8 +720,27 @@ def detect_completed_transitions_once(
                 continue
             item["account_id"] = task.account_id
             metadata = item_metadata_from_monday_item(item, fallback_account_id=task.account_id)
-            if metadata.item_id != task.item_id or metadata.board_id != task.board_id:
+            if metadata.item_id != task.item_id:
                 raise ValueError("Monday returned an unexpected reconciliation item identity")
+            if not str(metadata.board_id).isascii() or not str(metadata.board_id).isdecimal():
+                raise ValueError("Monday returned an unexpected reconciliation board identity")
+            if not dry_run and _availability_identity(task.board_id, task.item_id):
+                observation = None if preflight is not None else observe_item(db, task.board_id, item, access_token=token, observed_at=observed_at)
+                if (preflight is not None and not _preflight_is_current(db, task.board_id, item, token)) or (
+                    observation is not None and _observation_superseded(observation, observed_at)):
+                    db.commit()
+                    skipped += 1
+                    continue
+            if metadata.board_id != task.board_id:
+                if not dry_run:
+                    cancel_out_of_board_work(db, task.board_id, task.item_id)
+                    _record_check(db, board_id=task.board_id, item_id=task.item_id, scope="completed_transition",
+                        outcome="excluded", reason="board_not_managed")
+                    db.commit()
+                skipped += 1
+                item_results.append(ReconciliationItemResult(item_id=task.item_id, group_id=metadata.group_id,
+                    external_task_key=task.external_task_key, action="would_mark_excluded" if dry_run else "excluded", reason="board_not_managed"))
+                continue
             decision = policy.classify_item(metadata.board_id, metadata.group_id, metadata.source_state)
 
             if decision.lifecycle_state in INACTIVE_SOURCE_STATES:
@@ -613,7 +774,7 @@ def detect_completed_transitions_once(
                         fallback_account_id=task.account_id,
                     )
             elif decision.lifecycle_state == "active":
-                if task.auto_sync_state in INACTIVE_SOURCE_STATES and decision.should_queue_sync:
+                if task.auto_sync_state in (*INACTIVE_SOURCE_STATES, "excluded") and decision.should_queue_sync:
                     action = "would_reactivate" if dry_run else "reactivated"
                     if not dry_run:
                         apply_auto_sync_policy_for_item(
@@ -622,7 +783,7 @@ def detect_completed_transitions_once(
                             refresh_reason="restore",
                         )
                     reactivated += 1
-                elif task.auto_sync_state in INACTIVE_SOURCE_STATES:
+                elif task.auto_sync_state in (*INACTIVE_SOURCE_STATES, "excluded"):
                     action = "reactivation_disabled"
                 else:
                     action = "still_active"
@@ -661,10 +822,13 @@ def detect_completed_transitions_once(
                 action="error", reason="check_failed",
             )
             if not dry_run:
-                _record_check(
-                    db, board_id=policy.board_id, item_id=task.item_id, scope="completed_transition",
-                    outcome="error", reason=type(exc).__name__,
-                )
+                previous = db.get(AutoSyncReconciliationCheck,
+                                  (policy.board_id, task.item_id, "completed_transition"))
+                if previous is None or previous.last_outcome != RETIRED_SOURCE_OUTCOME:
+                    _record_check(
+                        db, board_id=policy.board_id, item_id=task.item_id, scope="completed_transition",
+                        outcome="error", reason=type(exc).__name__,
+                    )
                 db.commit()
             item_results.append(
                 ReconciliationItemResult(

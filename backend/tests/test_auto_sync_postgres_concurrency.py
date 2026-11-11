@@ -8,8 +8,9 @@ import time
 import uuid
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
+from backend.app.db import Base
 
 from backend.app.models import AutoSyncJob, Task
 from backend.app.services.auto_sync import apply_auto_sync_policy_for_item
@@ -32,10 +33,24 @@ def postgres_session_factory():
         test_engine = create_engine(
             database_url,
             pool_pre_ping=True,
-            connect_args={"options": f"-csearch_path={schema},public"},
         )
-        Task.__table__.create(test_engine)
-        AutoSyncJob.__table__.create(test_engine)
+        # Transaction poolers can discard startup search_path options. Set and
+        # verify the isolated schema before any DDL; never create/drop public data.
+        def configure_connection(dbapi_connection, _record, _proxy):
+            previous = dbapi_connection.autocommit
+            dbapi_connection.autocommit = True
+            try:
+                with dbapi_connection.cursor() as cursor:
+                    cursor.execute(f'SET search_path TO "{schema}", public')
+            finally:
+                dbapi_connection.autocommit = previous
+        event.listen(test_engine, "checkout", configure_connection)
+        with test_engine.begin() as connection:
+            if connection.execute(text("SELECT current_schema()")).scalar_one() != schema:
+                raise RuntimeError("PostgreSQL test schema was not selected")
+            # A public table can otherwise satisfy has_table() through the
+            # search path and cause SQLAlchemy to skip creating its local copy.
+            Base.metadata.create_all(connection, checkfirst=False)
         yield sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
     finally:
         if test_engine is not None:

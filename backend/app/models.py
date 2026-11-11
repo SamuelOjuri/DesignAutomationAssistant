@@ -406,6 +406,38 @@ class DesignProcessingReconciliationCheck(Base):
     next_check_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class MondayItemAvailability(Base):
+    """Shared processing-identity observations, separate from workflow history."""
+
+    __tablename__ = "monday_item_availability"
+    __table_args__ = (
+        CheckConstraint("state IN ('unknown', 'available', 'unavailable', 'archived', 'deleted', 'out_of_board', 'retired')",
+                        name="ck_monday_item_availability_state"),
+        CheckConstraint("consecutive_misses >= 0", name="ck_monday_item_availability_misses"),
+        CheckConstraint("(probe_token IS NULL) = (probe_until IS NULL)", name="ck_monday_item_availability_probe"),
+        Index("ix_monday_item_availability_due", "processing_identity", "next_check_at"),
+    )
+
+    board_id = Column(String, primary_key=True)
+    item_id = Column(String, primary_key=True)
+    processing_identity = Column(String(64), primary_key=True)
+    state = Column(String, nullable=False, default="unknown", server_default="unknown")
+    reason = Column(String, nullable=True)
+    actual_board_id = Column(String, nullable=True)
+    actual_group_id = Column(String, nullable=True)
+    actual_item_state = Column(String, nullable=True)
+    consecutive_misses = Column(Integer, nullable=False, default=0, server_default="0")
+    last_attempted_at = Column(DateTime(timezone=True), nullable=True)
+    last_observed_at = Column(DateTime(timezone=True), nullable=True)
+    last_event_at = Column(DateTime(timezone=True), nullable=True)
+    next_check_at = Column(DateTime(timezone=True), nullable=True)
+    retired_at = Column(DateTime(timezone=True), nullable=True)
+    probe_token = Column(String(64), nullable=True)
+    probe_until = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class DesignProcessingItem(Base):
     __tablename__ = "design_processing_items"
     __table_args__ = (

@@ -80,7 +80,7 @@ def postgres_worker_database():
             alembic_config.attributes["version_table_schema"] = schema
             command.upgrade(
                 alembic_config,
-                "0010_design_processing_queue",
+                "0020_monday_item_availability",
             )
         Session = sessionmaker(
             bind=test_engine,

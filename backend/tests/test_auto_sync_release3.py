@@ -114,7 +114,7 @@ def test_reconciliation_cli_fails_when_any_item_failed(monkeypatch, scope):
 def test_completed_transition_source_unavailable_preserves_data(
     db_session, monkeypatch, caplog, dry_run, previous_success,
 ):
-    task = _task("missing-item", revision="rev-1")
+    task = _task("9001", revision="rev-1")
     snapshot = TaskSnapshot(
         id=uuid.uuid4(), external_task_key=task.external_task_key,
         snapshot_version="rev-1", task_context_json={"id": task.item_id},
@@ -756,13 +756,12 @@ def test_completed_transition_sweep_uses_stored_accounts_without_account_queries
     checked = []
 
     def graphql(token, query, variables, **kwargs):
-        assert query == monday_client.ITEM_METADATA_QUERY
-        item_id = variables["itemIds"][0]
-        checked.append(item_id)
+        assert query == monday_client.MONDAY_ITEM_STATUS_QUERY
+        checked.extend(variables["itemIds"])
         return {"data": {"items": [{
             "id": item_id, "state": "active", "board": {"id": "1882196103"},
             "group": {"id": "topics"},
-        }]}}
+        } for item_id in variables["itemIds"]]}}
 
     monkeypatch.setattr(monday_client, "monday_graphql_request", graphql)
     result = detect_completed_transitions_once(
@@ -862,9 +861,12 @@ def test_completed_transition_source_unavailable_does_not_hide_errors(
         db_session, dry_run=dry_run, access_token="service-token", policy=_policy(),
     )
 
-    assert result.source_unavailable == result.errors == result.skipped == 1
+    # A failed batch establishes no per-item absence. Individual dry-run reads
+    # still establish the first miss before the unrelated second-item failure.
+    assert result.source_unavailable == result.skipped == (1 if dry_run else 0)
+    assert result.errors == (1 if dry_run else 2)
     assert result.scanned == 2
-    assert [item.action for item in result.items] == ["source_unavailable", "error"]
+    assert [item.action for item in result.items] == (["source_unavailable", "error"] if dry_run else ["error", "error"])
     assert result.never_checked == 2
     if dry_run:
         assert db_session.query(AutoSyncReconciliationCheck).count() == 0

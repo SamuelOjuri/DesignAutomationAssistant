@@ -23,6 +23,7 @@ def source(case, monkeypatch):
     monkeypatch.setattr(settings, "auto_sync_reconciliation_unavailable_interval_seconds", 3600)
     now = datetime(2026, 10, 22, 12, tzinfo=timezone.utc)
     monkeypatch.setattr(reconciliation, "utc_now", lambda: now)
+    monkeypatch.setattr(metadata, "utc_now", lambda: now)
     revision = compute_desired_source_revision(case.item)
     case.task.last_indexed_source_revision = case.task.latest_snapshot_version = revision
     case.db.add(TaskSnapshot(

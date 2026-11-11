@@ -81,7 +81,7 @@ def test_combined_reconciliation_shares_live_discovery_without_writing_in_dry_ru
     monkeypatch.setattr(settings, "auto_sync_completed_group_id", "completed")
     monkeypatch.setattr(settings, "auto_sync_enabled", True)
     monkeypatch.setattr(settings, "design_processing_mode", "shadow")
-    monkeypatch.setattr(settings, "design_processing_board_id", "other" if separate_boards else fixtures.BOARD_ID)
+    monkeypatch.setattr(settings, "design_processing_board_id", "1882196104" if separate_boards else fixtures.BOARD_ID)
     monkeypatch.setattr(settings, "design_processing_landing_group_id", fixtures.LANDING_GROUP_ID)
     monkeypatch.setattr(settings, "design_processing_activation_timestamp", fixtures.NOW - timedelta(days=1))
     calls = []

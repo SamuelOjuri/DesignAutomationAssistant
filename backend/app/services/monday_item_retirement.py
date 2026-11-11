@@ -33,6 +33,7 @@ from .auto_sync_reconciliation import _record_check as record_lifecycle_check
 from .design_processing_reconciliation import _record_check as record_design_check
 from .design_processing_state import cancel_job
 from .performance_specification import cancel_specification
+from .monday_item_availability import observe_item, record_retired
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ def retire_deleted_items(
     *,
     fetch_item: Callable[[str], dict[str, Any]],
     dry_run: bool = True,
+    access_token: Optional[str] = None,
 ) -> list[ItemRetirementResult]:
     """Retire each item only if Monday returns no item at all, even inactive."""
     results = []
@@ -60,7 +62,7 @@ def retire_deleted_items(
         try:
             if not item_id.isdecimal():
                 raise ValueError("item ID must be a positive decimal Monday ID")
-            results.append(_retire_item(db, item_id, fetch_item=fetch_item, dry_run=dry_run))
+            results.append(_retire_item(db, item_id, fetch_item=fetch_item, dry_run=dry_run, access_token=access_token))
         except Exception as exc:
             db.rollback()
             logger.exception("Monday item retirement failed item=%s", item_id)
@@ -68,7 +70,7 @@ def retire_deleted_items(
     return results
 
 
-def _retire_item(db, item_id, *, fetch_item, dry_run):
+def _retire_item(db, item_id, *, fetch_item, dry_run, access_token=None):
     policy = policy_from_settings()
     design_board_id = str(settings.design_processing_board_id)
     tasks = db.query(Task).filter_by(board_id=policy.board_id, item_id=item_id).order_by(Task.external_task_key).all()
@@ -80,6 +82,10 @@ def _retire_item(db, item_id, *, fetch_item, dry_run):
     except MondayItemUnavailable:
         visible = None
     if visible is not None:
+        if not dry_run and str(visible.get("id")) == item_id and isinstance(visible.get("board"), dict):
+            observe_item(db, design_board_id if design_item is not None else policy.board_id,
+                visible, access_token=access_token)
+            db.commit()
         return ItemRetirementResult(item_id, "visible_on_monday", "reconciliation_owns_visible_items",
                                     tasks=len(tasks), monday_state=visible.get("state"))
     design_state = design_item.state if design_item is not None else None
@@ -88,6 +94,10 @@ def _retire_item(db, item_id, *, fetch_item, dry_run):
                                     tasks=len(tasks), design_state=design_state)
 
     now = utc_now()
+    # Shared availability is always locked before specification/job state.
+    # This also fences a running probe before cancellation acquires other locks.
+    for board_id in {*(task.board_id for task in tasks), *([design_board_id] if design_item is not None else [])}:
+        record_retired(db, board_id, item_id, access_token=access_token, observed_at=now)
     for task in tasks:
         # The same lifecycle a live delete event applies, with the last stored group.
         result = apply_auto_sync_policy_for_item(
@@ -132,7 +142,7 @@ def main() -> int:
     db = SessionLocal()
     try:
         results = retire_deleted_items(
-            db, args.item_ids, dry_run=args.dry_run,
+            db, args.item_ids, dry_run=args.dry_run, access_token=token,
             fetch_item=lambda item_id: fetch_design_processing_intake_item(token, item_id),
         )
     finally:
