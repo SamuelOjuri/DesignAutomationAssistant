@@ -1,0 +1,84 @@
+{
+  "sdk_http_response": {
+    "headers": {
+      "x-gemini-service-tier": "standard",
+      "content-type": "application/json; charset=UTF-8",
+      "vary": "Origin, X-Origin, Referer",
+      "content-encoding": "gzip",
+      "date": "Wed, 11 Nov 2026 14:20:27 GMT",
+      "server": "scaffolding on HTTPServer2",
+      "x-xss-protection": "0",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "server-timing": "gfet4t7; dur=4201",
+      "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+      "transfer-encoding": "chunked"
+    },
+    "body": null
+  },
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "media_resolution": null,
+            "code_execution_result": null,
+            "executable_code": null,
+            "file_data": null,
+            "function_call": null,
+            "function_response": null,
+            "inline_data": null,
+            "text": "VISUAL CONTEXT\nThe image shows a low-resolution, blurred icon featuring a rounded rectangular orange button with a white right-pointing play triangle in the center, typically representing a video or play function. There is no visible text.",
+            "thought": null,
+            "thought_signature": "EpgICpUIAWkUfRPtf-VaTfPslias5ViXaPnZzIMrZh1CkQ9DVpkdQjG1u9lkV8uMQkhXIMHRmF2Crg6TyMzhiGwhIswCFARooFpgd8qNA1XK7D4KSUNX1vdBsShW58GzRFEHU2MD9SzDI9-EbHYpqwCC1BgQ-nKvO_5zE3HHEgvBfuOx9UKh_3xNQba22Fw7m_4RC38kUE0xWHGko1MvaO3RoUAKe5AWwt97tlpZlJfLttJOk_TCVZiUeaKo06uUdKf9d73mwlmd0N83YqLGJ5j2apT4djaVMvcu2sBH6lmVzNsip3tI82--JbDzRniBP8_WPPjO9JL8PZFyF220FUrqlEn_n31kKouGXTN9yfnqUIXxeYOyj0nNACUuk7fcLzovihlHaC2hhrdl_XJaT1WAX9x29HX2F56736K_Bi_WfcdewQTBlOKJ7t7lLFZ5xhHD9AIH6_CPdvMoPc3u5IxVHigFfDounGMgcnA5b4S_IisK06uwyTDMgynCRQ16Wh5eVlHNMt91P0IXANUgQ9awtCrIM1ULGMRv5p9LCiSXMHAUr8dIfYoLGT2EFyTJVUZw6t6hcHjlOvG5upebg91OD3UJcob4N5dRQo6omTOej-EmNeDmTJYiHP8EV1JTjawcb1DTepEavq-PdzymBPcRpnqzMR9zDvcxef3IXDSDHJKFAis7gNfQPNg1aLdRjS_s03KrPm1ZT0M6CNas1C7onl0WyFPHrk3VKvs9tZsjsUYhfxtqj-R0tbprWd9QsrogXFEkRizZ4cr7DFd0Y47DA-SLTswVk7-b1lBymrJg_zrN9um4W5MKkWmqhigFdKTk8y-J9lEiAigCW2jKhXS_N9iHh4GyLu6cu4CEWXhhDd7FU-Gk6reE3Cr-D-bnRNL19WZfnGfZnt7J5BfAja7AXzVE-6bvgnU2rwAIHo6Je4_OkbRCxs4qbw0w5cbres7sZcOcWzp9GUIhfOacgZT5I-JmDPVHRiLOw0LclsW6gzUi4FSxFzURbF5XRb4UFx7lTM-0f7rkuQMH18vpx3vS4PNVUpGVZwYpkzmJ83iP9ur4BoYRWzQXSkBXkpEx2q-r8NVk6Mr6g9kix8D9A01q8JjIYKSIW3f777w-69eAMiR6pb9ScKC2iGyQZo1vqt9dTo8jFajUUpqL-GTLshtsZ1v2xhVUJ1XHY8c2_J9CD52aqFSNiPw9GOtF6ZpRoTy9V6O3HrSp9yFH6DiiX53-ETNwAfUe0H9CdixPdbsFE7CBTNyKdJM7mZoLjGjznpit1tSDkipv9OoXE669Xj7r6vrDsYeNifZqkNo_AC8jVzjHmTWxp0QarcccttFboNqzkzFLBLfQWkbvpKM1KA_mjgjeHNm7CsyZJasz7cab-3GSyzZaQ1Fk0Q==",
+            "video_metadata": null,
+            "tool_call": null,
+            "tool_response": null,
+            "part_metadata": null,
+            "audio_transcription": null
+          }
+        ],
+        "role": "model"
+      },
+      "citation_metadata": null,
+      "finish_message": null,
+      "token_count": null,
+      "finish_reason": "STOP",
+      "grounding_metadata": null,
+      "avg_logprobs": null,
+      "index": 0,
+      "logprobs_result": null,
+      "safety_ratings": null,
+      "url_context_metadata": null
+    }
+  ],
+  "create_time": null,
+  "model_version": "gemini-3.8-flash",
+  "prompt_feedback": null,
+  "response_id": "p3n0aqH6NuSN28oPvo7WoQI",
+  "usage_metadata": {
+    "cache_tokens_details": null,
+    "cached_content_token_count": null,
+    "candidates_token_count": 47,
+    "candidates_tokens_details": null,
+    "prompt_token_count": 1280,
+    "prompt_tokens_details": [
+      {
+        "modality": "TEXT",
+        "token_count": 195
+      },
+      {
+        "modality": "IMAGE",
+        "token_count": 1085
+      }
+    ],
+    "thoughts_token_count": 206,
+    "tool_use_prompt_token_count": null,
+    "tool_use_prompt_tokens_details": null,
+    "total_token_count": 1533,
+    "traffic_type": null
+  },
+  "model_status": null,
+  "automatic_function_calling_history": [],
+  "parsed": null
+}

@@ -221,19 +221,28 @@ def test_child_reported_failure_keeps_error_and_process_details():
     assert error.value.pid > 0
 
 
-def test_unsupported_source_remediation_survives_extraction_process(tmp_path):
-    path = tmp_path / "roof.bin"
-    path.write_bytes(b"CAD")
+@pytest.mark.parametrize("filename,content,status,error_code", [
+    ("roof.pdf", b"invalid PDF", "failed:SourceDocumentError", "unreadable_pdf"),
+    ("request.txt", b"\xff", "failed:UnicodeDecodeError", None),
+])
+def test_supported_source_parse_failure_survives_extraction_process(tmp_path, filename, content, status, error_code):
+    path = tmp_path / filename
+    path.write_bytes(content)
     downloaded = SimpleNamespace(
-        temp_path=str(path), content_sha256=hashlib.sha256(b"CAD").hexdigest(), size_bytes=3,
-        source=SimpleNamespace(asset_id="1", filename="roof.bin"),
+        temp_path=str(path), content_sha256=hashlib.sha256(content).hexdigest(), size_bytes=len(content),
+        source=SimpleNamespace(asset_id="1", filename=filename),
     )
-    with pytest.raises(execution.IncompleteSourceExtraction, match="readable export") as captured:
+    with pytest.raises(execution.IncompleteSourceExtraction, match=filename) as captured:
         execution._run_in_process(
             execution._analyze_in_child, ([downloaded], None),
             check_current=lambda: None, poll_seconds=0.01,
         )
-    assert captured.value.manifest[0]["error"]["code"] == "unsupported_source_format"
+    [record] = captured.value.manifest
+    assert record["status"] == status and record["text"] == ""
+    assert record["sourceId"] == "asset:1"
+    assert record["contentSha256"] == hashlib.sha256(content).hexdigest()
+    if error_code:
+        assert record["error"]["code"] == error_code
 
 
 def test_large_result_can_be_received_before_child_exits():

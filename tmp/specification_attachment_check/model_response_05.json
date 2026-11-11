@@ -1,0 +1,365 @@
+{
+  "sdk_http_response": {
+    "headers": {
+      "x-gemini-service-tier": "standard",
+      "content-type": "application/json; charset=UTF-8",
+      "vary": "Origin, X-Origin, Referer",
+      "content-encoding": "gzip",
+      "date": "Wed, 11 Nov 2026 14:21:13 GMT",
+      "server": "scaffolding on HTTPServer2",
+      "x-xss-protection": "0",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "server-timing": "gfet4t7; dur=45173",
+      "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+      "transfer-encoding": "chunked"
+    },
+    "body": null
+  },
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "media_resolution": null,
+            "code_execution_result": null,
+            "executable_code": null,
+            "file_data": null,
+            "function_call": null,
+            "function_response": null,
+            "inline_data": null,
+            "text": "{\n  \"email_subject\": \"RE: Urgent - B260681 St. Cleres School\",\n  \"post_code\": null,\n  \"drawing_title\": \"St Clare's School\",\n  \"drawing_reference\": null,\n  \"revision\": null,\n  \"date_received\": \"11/11/2026\",\n  \"hour_received\": \"10:59\",\n  \"company\": \"Bauder Ltd\",\n  \"contact\": \"Aaron Harvey\",\n  \"surveyor\": null,\n  \"target_u_value\": null,\n  \"target_min_u_value\": null,\n  \"fall_of_tapered\": \"1 in 60\",\n  \"tapered_insulation\": \"BauderPIR FA G16\",\n  \"decking\": \"Bauder - Concrete\",\n  \"scale\": \"1:300\",\n  \"page_size\": \"ISO A3\",\n  \"bauder_contract_number\": \"B260681\",\n  \"membrane\": null,\n  \"vcl\": null,\n  \"bauder_roof_num\": null,\n  \"specification_evidence\": [\n    {\n      \"field\": \"Drawing Title\",\n      \"value\": \"St Clare's School\",\n      \"source_id\": \"asset:2\",\n      \"location\": \"Page 1, Title block\",\n      \"snippet\": \"Contract Name: St Clare's School\",\n      \"scope\": null,\n      \"issuer\": \"Bauder Limited\",\n      \"role\": \"requested\",\n      \"request_role\": \"document\",\n      \"message_date\": null,\n      \"supersedes\": [],\n      \"rationale\": \"Project title specified in the title block of the drawing attached to the revision request.\"\n    },\n    {\n      \"field\": \"Drawing Reference\",\n      \"value\": \"D.S - 09074_26.03\",\n      \"source_id\": \"asset:2\",\n      \"location\": \"Page 1, Title block\",\n      \"snippet\": \"Drawing No: LTF-001\\nRef No: D.S - 09074_26.03\",\n      \"scope\": null,\n      \"issuer\": \"Bauder Limited\",\n      \"role\": \"baseline\",\n      \"request_role\": \"document\",\n      \"message_date\": null,\n      \"supersedes\": [],\n      \"rationale\": \"Reference on Bauder-issued drawing without explicit TaperedPlus provenance; captured as baseline context while leaving scalar drawing reference null.\",\n      \"reference_parts\": [\n        \"LTF-001\",\n        \"B\"\n      ]\n    },\n    {\n      \"field\": \"Revision\",\n      \"value\": \"B\",\n      \"source_id\": \"asset:2\",\n      \"location\": \"Page 1, Revision table\",\n      \"snippet\": \"Rev: B\\nDate: 09/10/26\\nNotes: Updated To New Issue Plan\\nBy: MM\",\n      \"scope\": null,\n      \"issuer\": \"Bauder Limited\",\n      \"role\": \"baseline\",\n      \"request_role\": \"document\",\n      \"message_date\": null,\n      \"supersedes\": [],\n      \"rationale\": \"Revision of the attached baseline Bauder plan.\",\n      \"reference_parts\": [\n        \"LTF-001\",\n        \"B\"\n      ]\n    },\n    {\n      \"field\": \"Date Received\",\n      \"value\": \"11/11/2026\",\n      \"source_id\": \"asset:1:body\",\n      \"location\": \"Email header\",\n      \"snippet\": \"From: Aaron Harvey <a.harvey@bauder.co.uk>\\nSent: 11 November 2026 10:59\",\n      \"scope\": null,\n      \"issuer\": null,\n      \"role\": \"requested\",\n      \"request_role\": \"direct_request\",\n      \"message_date\": \"11 November 2026 10:59\",\n      \"supersedes\": [],\n      \"rationale\": \"Date Aaron Harvey sent the files via WeTransfer to TaperedPlus.\"\n    },\n    {\n      \"field\": \"Company\",\n      \"value\": \"Bauder Ltd\",\n      \"source_id\": \"asset:1:body\",\n      \"location\": \"Email signature\",\n      \"snippet\": \"Bauder Ltd\\n70 Landseer Road, Ipswich, England IP3 0DH\",\n      \"scope\": null,\n      \"issuer\": null,\n      \"role\": \"requested\",\n      \"request_role\": \"direct_request\",\n      \"message_date\": \"11 November 2026 10:59\",\n      \"supersedes\": [],\n      \"rationale\": \"Literal company name in the client sender's email signature.\"\n    },\n    {\n      \"field\": \"Contact\",\n      \"value\": \"Aaron Harvey\",\n      \"source_id\": \"asset:1:body\",\n      \"location\": \"Email header\",\n      \"snippet\": \"From: Aaron Harvey <a.harvey@bauder.co.uk>\",\n      \"scope\": null,\n      \"issuer\": null,\n      \"role\": \"requested\",\n      \"request_role\": \"direct_request\",\n      \"message_date\": \"11 November 2026 10:59\",\n      \"supersedes\": [],\n      \"rationale\": \"Client contact sending the request and drawings to TaperedPlus.\"\n    },\n    {\n      \"field\": \"Decking\",\n      \"value\": \"Bauder - Concrete\",\n      \"source_id\": \"asset:2\",\n      \"location\": \"Page 1, Roof tables\",\n      \"snippet\": \"Roof Name Area: NB1 Roof B\\nDeck Type: Bauder - Concrete\",\n      \"scope\": \"NB1 Roof B\",\n      \"issuer\": \"Bauder Limited\",\n      \"role\": \"requested\",\n      \"request_role\": \"document\",\n      \"message_date\": null,\n      \"supersedes\": [],\n      \"rationale\": \"Deck type specified across roofs in the scheme drawing.\"\n    },\n    {\n      \"field\": \"Tapered Insulation\",\n      \"value\": \"BauderPIR FA G16\",\n      \"source_id\": \"asset:2\",\n      \"location\": \"Page 1, Title block\",\n      \"snippet\": \"MULTI-LAYER BauderPIR FA G16 TAPER SCHEME\",\n      \"scope\": null,\n      \"issuer\": \"Bauder Limited\",\n      \"role\": \"requested\",\n      \"request_role\": \"document\",\n      \"message_date\": null,\n      \"supersedes\": [],\n      \"rationale\": \"Insulation product specified on the drawing.\"\n    },\n    {\n      \"field\": \"Scale\",\n      \"value\": \"1:300\",\n      \"source_id\": \"asset:2\",\n      \"location\": \"Page 1, Title block\",\n      \"snippet\": \"Scale: 1:300 @ ISO A3\",\n      \"scope\": null,\n      \"issuer\": \"Bauder Limited\",\n      \"role\": \"requested\",\n      \"request_role\": \"document\",\n      \"message_date\": null,\n      \"supersedes\": [],\n      \"rationale\": \"Scale explicitly noted in the drawing title block.\"\n    },\n    {\n      \"field\": \"Page Size\",\n      \"value\": \"ISO A3\",\n      \"source_id\": \"asset:2\",\n      \"location\": \"Page 1, Title block\",\n      \"snippet\": \"Scale: 1:300 @ ISO A3\",\n      \"scope\": null,\n      \"issuer\": \"Bauder Limited\",\n      \"role\": \"requested\",\n      \"request_role\": \"document\",\n      \"message_date\": null,\n      \"supersedes\": [],\n      \"rationale\": \"Drawing sheet size explicitly stated in the title block.\"\n    },\n    {\n      \"field\": \"Bauder Contract Number\",\n      \"value\": \"B260681\",\n      \"source_id\": \"asset:1:body\",\n      \"location\": \"Email subject\",\n      \"snippet\": \"Subject: RE: Urgent - B260681 St. Cleres School\",\n      \"scope\": null,\n      \"issuer\": null,\n      \"role\": \"requested\",\n      \"request_role\": \"direct_request\",\n      \"message_date\": \"11 November 2026 10:59\",\n      \"supersedes\": [],\n      \"rationale\": \"Bauder contract number stated in the email subject line.\"\n    },\n    {\n      \"field\": \"Bauder Contract Number\",\n      \"value\": \"B269681\",\n      \"source_id\": \"asset:2\",\n      \"location\": \"Page 1, Title block\",\n      \"snippet\": \"Contract No: B269681\",\n      \"scope\": null,\n      \"issuer\": \"Bauder Limited\",\n      \"role\": \"baseline\",\n      \"request_role\": \"document\",\n      \"message_date\": null,\n      \"supersedes\": [],\n      \"rationale\": \"Contract number printed in the baseline drawing title block.\"\n    }\n  ],\n  \"specification_assessed_fields\": [\n    \"Scale\",\n    \"Page Size\",\n    \"Drawing Reference\",\n    \"Drawing Title\",\n    \"Revision\",\n    \"Date Received\",\n    \"Company\",\n    \"Contact\",\n    \"Surveyor\",\n    \"Target U Value\",\n    \"Target Min U Value\",\n    \"Tapered Insulation\",\n    \"Decking\",\n    \"Bauder Contract Number\",\n    \"Bauder Roof Num\",\n    \"Membrane\",\n    \"VCL\",\n    \"Incoming Information\"\n  ],\n  \"specification_request_notes\": [\n    {\n      \"source_id\": \"asset:1:body\",\n      \"snippet\": \"NB1 Roof B – Additional outlets, and 40mm sump depth\\nNB2 Roof B – Check outlets on new plan, but now require tapered gutter with 200mm in main field. 40mm sump depth.\",\n      \"scope\": null,\n      \"category\": \"constraint\"\n    },\n    {\n      \"source_id\": \"asset:1:body\",\n      \"snippet\": \"https://we.tl/t-4yTHpr7zgKLf96FO\",\n      \"scope\": null,\n      \"category\": \"source_link\"\n    },\n    {\n      \"source_id\": \"asset:2\",\n      \"snippet\": \"Multi Layered Tapered Build Up Section - 1 in 60\",\n      \"scope\": null,\n      \"category\": \"constraint\"\n    }\n  ],\n  \"specification_request_intent\": {\n    \"schema_version\": 1,\n    \"recommended_type\": \"amendment\",\n    \"explanation\": \"The client is chasing and providing files for a requested revision to an existing scheme (B260681 / St. Cleres School), asking to check new roof plans and revise NB1 Roof B and NB2 Roof B.\",\n    \"evidence\": [\n      {\n        \"source_id\": \"asset:1:body\",\n        \"excerpt\": \"Could you provide an update for this scheme please? A revision was requested on 22nd October, and I’ve chased a couple of times already, but I haven’t received anything further.\",\n        \"location\": \"Email body (10 November 2026 11:45)\",\n        \"scope\": null\n      },\n      {\n        \"source_id\": \"asset:1:body\",\n        \"excerpt\": \"NB1 Roof B – Additional outlets, and 40mm sump depth\\nNB2 Roof B – Check outlets on new plan, but now require tapered gutter with 200mm in main field. 40mm sump depth.\",\n        \"location\": \"Email body (10 November 2026 12:10)\",\n        \"scope\": null\n      }\n    ],\n    \"detected_references\": [\n      {\n        \"kind\": \"project\",\n        \"literal\": \"B260681\",\n        \"evidence\": {\n          \"source_id\": \"asset:1:body\",\n          \"excerpt\": \"Subject: RE: Urgent - B260681 St. Cleres School\",\n          \"location\": \"Email header\",\n          \"scope\": null\n        },\n        \"role\": \"current_request\"\n      },\n      {\n        \"kind\": \"drawing\",\n        \"literal\": \"LTF-001(RevB)\",\n        \"evidence\": {\n          \"source_id\": \"asset:2\",\n          \"excerpt\": \"Drawing No: LTF-001\",\n          \"location\": \"Page 1, Title block\",\n          \"scope\": null\n        },\n        \"role\": \"document\"\n      }\n    ],\n    \"matched_projects\": [],\n    \"ambiguity_reasons\": []\n  }\n}",
+            "thought": null,
+            "thought_signature": "ErdFCrRFAWkUfRONUb0arNlk0l3WEDxGUA2pcyZBefRbbMocxqe6UcsDnRGB_wbXNG0Oq3K8g2_JFdIxrg-x3TBWvdt3DT_nUTNExVveKvWFhEMVWGDKqqb8RDLMTKI8SkNON7fF-WLpcpNHR8zLzVXRW_J60rcVRt5cm2yXfY0dT2-wXIc4so8BhIxhdVsehMCt_glX0gZPRbGuH3HM5RbXsaeT8TnOKtSYKhHlk_NYvPGptqovGWuGdleTP-bdQVf6c0qSexgyhZXSI28b9-r98DNL_uuXR7JllGQYhYKayNZRtocuu-pRysqgtPqyYA8_H9MIAtG7IEJBfgELVSvyly9Oi2IvjAYI1w89v4kjJiJo19qkPez9IoIHxux6vRa4aYSXe0IPL7rUaP2rRwFpS4w5PCFAJ8oAvg-CJZU3_YtTup9TWHr0CrcCoCsqzURS7nrHxByGkrduhW4qiHOmLpPKqyR8BPU8iB98uPwkvQocEcAMayuyIQPK3JPM-higptRVWWqjpOQjkodt0gyiNc1DKnS97Y_0xq5eCwqKea5Yx2_JBrTXJP6Tr74aXyVW-FawOKUNcwdxYRhj_-qyEXyNMQQR1WhPf2A7g9JOFGg1SE0QO3Hoh6TPWHpG8KA-J2_dMO8dMr_DQx9ya4Y_XV9rw7wHzpNyvGrslbU6HxkiBX2Zb4WTPycoCR1AP6tIgxLqCdzTUx3JflEqwOVj4xQGtx8ahbPQDFYy3UlvxDRfX7Nkb03uznNbZEsE4oEkVtn0r78K9CDuNoK3zWusl6gE6xPBVv7O8n2fQTpw6z49yrZnmofn4Tog34bMboLHTtgMCgkVJi4OseOBf5LlDpk1y_8WBG7cUnk3rdtvIdykifJ7meru-pQfaxMaH0hBHesLyWl_VZqGwmnh8M7IuhFCvcHj32aQizGorKlT6gv_CxKyHcKzQNWBeFftlHHBN4rggl529uXOLCk23806rHVsodxdX1XU0LDjOA0x7_64u_6JbvCHryoRpgv4CdmcmwM9P_usJY08Ji9VVSJrAtQG0IY-Mbxbo3qOIbldsj_5-31x9XtSnsB7NyLflDrbg_WLg5FdgpysgbAKMq9UgriROIhPIFo_R-9arnvs-iWO7nWmasTViUzGs1zaYZ34Ko7aKLnHaMGBhd85deAi86xrPdIF1iI2yg8EeA_3keQYzRb12GtLE44EJHeRM72LnVym9Go91os62RWnnR4Nih2PExRbDARe-bwtFrvjrUQMZc_s-iJAqu64wm_GfewZpOg9JL2mCFZA0UCi1jopb-TlXWSAkmazaE66Grm0rXeIBg0sa3SVyiFKUmU_3CYXVNPLlNXAdGOXhMLXhwoz-b3Fveav2ybU3OP5jY0u1OoD_sEGP9ZSs9TF3-noTSO-ypLqPjmBzs5rBuJ1JHHbq6GisbrXC0kROFDhEiUWXIOjJlNcGO1h07y9ZI_ujWw_ci8aCefZmwaFkQNgV_f69bLWSaNXXSFEQEtOu9ns6Vjm9ZvJ2Wzl57XknG0U0wF-9w_A38gwBvwNbTRpH2AOdjGjD-vxNQpypIbHDyLSVxppgirGC8X1hpB6RBYlhG5wbMhKSMTWP9B-G4-YQR53-uJRBtsivGNVV0qcUY6aAUWTrHhfO1PeHAjCYDb6S9kxh7SBjyDQqupSBmxy9sxTzz7jfZ8Hiw5A4DlXqXS9gTUk6-5j_SaNm9YuwNCyg9z3wrvn6APNS-a_KlBUo9-whhkYAkzQ-DeIu_qfWulA85_0-rKn5D6a7md9cF4vwvLA0cXU7mkGNu-tiVFGGEBAW8LUkQZPAFg7ybfF0UcScOkT5FN_7LATO2wDNjmgrQ7mjvqSLjDl2IXPPEIb0Gmw-bL-gtcF97e-mRFTt387IO8rmgyhEBvM_Xvf41N6dmhtn9dXAgIvj2BYn7D6KoS0eSgOPD-nL6wuMNWx1kZxOOOyoK7clYd5joYVoldZ4j1lOb0SkvAbpLoq6nWghmmi_rQVG4XfdbUZGmJN9ia3wln4k0WLbJ0nDrsoM6rjGH8JSnIWHrimgH7nkTLNRPzI-41d-kbI_u7MCzBQjTQ10iMoA7fv7nlHgcWvjGDOz0cNdf65ivxhz-ZmvXMvC7PLyyc8OfGZ_QIr4erbFm9WRj364-KAKN8JlXDauQAKqO-a_Z8ww9pvp6h5rrhLmPC04ThEJX0Q92I56wHr3IeRo89DZ-5pPfJhnHNe80jfx0PkYS2Gbr6YnF9kV7WD-Z0nJmgCLPbOwGG8bViNoEpbRFKZLy05HWADuY1ggeEx5plIwiaCAFPLFc7Lfh_vElYSaUrwjFDixQkQXyj90BQRJgaMERxyZ5RRu9gCiyQU3v9RdI4LztDgDgLsjyQHprfn5zh-fRDULdvBng-ERcp_z-MBEVOI_tFFcpHHx0KUcUMiyjCl3K5niX_C2ffzSBqKRk1L_B_gwgGcXHi7sqMvTOLXiGaiDHOnx3WMg6MFbpF-XG-zws9c4iI7mnkGRru9hodQQCFRFCLkXN1VS6h4pWpi3a75m-UhFkdZkkMMuBs1NrxuefMtqi6Cap2joJo9aZr-CuCP0UbSNZmwgRFyxL_HKKZRmSMduYL1tH41nzM8R56_rZmLQiimUjGPB9TxXyerTD-6UQC3eCOo54xTNV1JnbO7eBjLRKoSztg88QG5NCYgokEbcHsLTnM1z4XlbtfvKJirbrszDZEYx15X01eczKocbZja7L4nCfqauMqXkzbG_ZAxZsP2-Fu-fd5sIPr-3yLFcY4uEIDEh9zpMwY7a9JKxh1krW1NWyCDgE_5dEPstH7t9lEWIyB0sspx3c_nfZti9znh9KzSmk6CR6CnuKwoypxC3apOn-VU3lNfexFP1-J_iDea4V6NgIc0COhwDshpd1LJ6zOxLg8ZB-Tn6_lWCX_9WNtaQSS7t_WuHGtBo3HRm0Qrw6jWN9igs4opuR_TGkijmAjDwgdgJugg7TMkPEDkRnnrumhjvesxOwDyLFnLRcZ8UhqkN1QatkcgkChcPx6nbyEACMdDqEbYlrPxN4OyFdccOYgPfh2Ce2Cpmc3Xwujdj9Cu8QufqS0yX4biUjBvIX8a4g_kbr8OXKXXbX9qd9FUj87BQ3pzq2m99KQOMRK_cfZIeyCp0EOrUG4IZcS7UDjCRol05iMPzJt5Us042qScoBXOyEGq6jxiF9R1fIDvKTSs0EdKDULRtzk79lPxfqu0OXd-rU3T8-_hzKUf6Ss_QoXZVrdiDMnXJvcYY1Cvxozr02BQSsp8CBd3NdDt68NoBllY4V-WUQN18D9t7cKbvYQnF8xBtDohkHU-YZor1pPXg5OtE5nVKflYxC84fXrCQtBc_TA-FCSzgyBLIX1ndQ1jlDH9IAzEhki2iUizgw14NUohwd2J60EkqloVKHlk041gBc1RxFbXVxHUlcU0GwygWo5kQRTdbYDV94PisIw_2bL5M0ZZAOQmvFmDRgfoppolSMLSvXHoLhGTlgZ4Cq0mBilHaLka_qrSwM83UTs5oieCFBak5H6KNej5wB8D_lMlu7jBj54As-LGBFasHOhYbMEZl-GXHFVIaDQ6QyDZozK6FGILiTksVG8K2-HBvixjXUljagPrld81QcK5ufIuw5V6RotRSeOdzeRLi9vbP2TV0Ggabn9DpOA731LqKixQ8x8R3ZB-FWvdtrCkRfTQCMADObL7e6n6GbrU1favKmXTtxahFXzFK3aTLp8BtpOSFcfIdzrgAwkNt-F4j_ZUIDPfEW_OX_TIiJ7YuPJeh4d5wuSYzk4z7a_6pZ_CVVBoJUDwemEA9lpXqCCcnRki2DhVLw5z6a2EH7tAv-WDZZ1nlvvNASjAghCHJ0cAyeHwjBVYWp_Yuh1S0jTs8ustLy1AWh6ZkT8ALsMSK2laam9Xt_lXjOxKLNL-xJNtnleTeIwZhfD6Jz7-x8w5hZJUvsAoAw5t6xkfljd7Fs5hXZ0LQngqmG6RiexENFhE8K8Sfr-yTyQRSDmCKdGHeBOK5NVrNYa9nSMEWNMuXO_HmvWYA9LeEQLrQyCIidqwSb_fXfTDbtFfX-9sLvSvtJTFh9FgDVbaZd6_XANeymYDyfh0jniOHqqZnI-09RDDeeYbiJRjVY3m-lSWsNDjnejWz8XMU_-qtDAaFp6IeBcarSUIcCYG7Yd6oHBLG9z5FkDtkqHbOHNtZ99-cGGcBYMEVsI4l8wNG7RYWZGMhpaL1fPFipNgOUew512W3-lfE1FjAkfyDOEubIf7UKNKEfPhGSGQkYj92VdXBISrlGq0KwlyKgcKOyU4nFF5o1BJ1FmgGU6A_U_OKAk_7tZ5Jhe7N_2mku29L-FGhyNtRqn1doNWi8Ea3G1Txi2DIEqzatsOXvax4Rj3MmESyzrUN1f87qva6WDBM6cyEbGUJlH9Lg9SRPWxkxUVdiJHP5kKFjIznIA3Lu5fHjqUeyPmCKqnSDtCS47nfByqjHL6-YzB3mj1w-sMiloLGFls8JamS1aT7xMHNzPI_XqdktNqxNr65WTgA5rXNf0lqexKTNp47H9Iqx6mYK7oy29tvI5XOw9V6NNq4sqd6RdZCh3vVQF38BGTuZW579Gp0idGvUpi9Fg-JRHLQFaKLb1mtEYSiZ8OKoiHaevMlxEiEAyshdwCh-OWJI4Ie1z8EXE4iCZ3HD-S3lU2TyQc4avuGthWM6LiizyAjko5Ck9oy0MbxYAD7sk127Utp0WdA1sgAFbgeTqT9mm7zlmSwYrK-iqPiprP2xByqC2gdm9lC4FTt37RTRDqYzdv2LiWl4AfevsxOyy9o0U-oi4uMWrU5x9jUyWf6TIUjNbOgljKCftvhFF71astWSR0ZhIPIajrRWz8R0cJWujl0EhkwCG30Wc8LsEDJqlSwfu13UBpungR9MEgDgcAw_WKyV2G0fy7QVJclYile56dIsOVuaOFWd4NLG16cB0NGzdBQBJWfQ8FkOO5Wi_tb2_ocMj2xb5gkKtBmz6g9nG29UinoMiLFaiGbkZ_3KHNONTpGZ6efmVEUCigPFyd49PeQgaE-zFIlE9mcpEjWCv2C7jVR0LraVsS9gkL2lJVmwDSMlh6LjcsEnMoqlpV5LjO4Mp9RX9WNFb2hW4jbVZ9ryoX0HQMwAudO3YcVPE1obuzepVGpepA8BRP_BryISjKwr4sAtdE3c__PvGJpGxWAxDV9jN8kLK_of1YlXMLaHsqPqSCHs_XrdYlhbs8vJl0KzCR9mJ1vB1QGmTmz62sYerQ_sgBvH_8sbAMIE7lOzYy-aiFAaV3N9KeqBBVANUc0Gl6zqDwJ4UNolpfelCZY4oUm7cvVjFN60C5clC2GbDJscV-zO8a64lm4VZONKtC2YtKroKRsEUEtNH7EuEme0q9iga4FUAprOp8xjBaQ_vLw-83EVYrfUndRQEPe5137l2pVOkj60nIIhCn2TCAm5ml9xxotaeeJEfc9SPS2apOYvv7pxB0m6jV5NOalhxRVQXxrl7DaTixn5Yw8V91RUsPGl6cclR-rk4Yazrhvpl72655tnDZrIiEWhegNOl916XNltEIXVTHNmsUsRSI4Cq-5_Sz-kDG4hJAb1c9UPWA-RdbvccMo9ykWGvhNvOzmtlXPdyQQ84Ktj9V20NrdVNAZoa66bII3bbTq1ap8C4cDC8USfuBvzAG8zGT6ppl2iS5lm4dk1tQBVIYxW4HSLrsqdi0U5w33IZcgFRk1dzHtTMYajHqQHNFBIXjkBBj-leFk5I4IprqhF1x4ev6qXVuc80KiUxQvU8LB_3H19oymCcjroMlInUOqVLx9ebC-2pV9uYIfFPfQ7p0onjWAYC7ub4l59M9-Xj9hfSSpObREvhmI2dEF584dN7wCfEnlH92vJvdekNrVDayFbwBWd7Q8fDze_9_UaFFk1tChV4SnRMWIPLJhXRLxi9q8ej2T2Tf01jWfk_XFlGqrtz9mTi-CEJONU8a9L94JDCs4xzY_jGFjbymoX-vzP6ctdRYVVHtEr4prWgpfz9tI8t0NUHyLLZPvvnEbw6_RqSVTB1GqwdmNRXSXNRzFgJzJcNDfgWs2IjfFt6UnAwqyFXF4TBbUjefyK2JWItHiYiFyVZE9gm-v7URmsBUiKxDMlBstfcFzzk8yWW7NfJnUJ9spUfwNG9V0n-tZWqqbNMDcouggteGcilyYhTTmEesqOf5VKMTucbyGPqJkyZIpGNW2fkRnrM7GDDn0TEgTE6K1mkNXWkZBtsXJ7_gW4JFR0VAyburz6rOOimqFDI7D6P1Wt_uij__nkn6ay75FeG0R9bC9CoVD-wrDicu3_gBsFFUoZiAdq5G4ZRQEpOI0BQ1IHTYTWERge3QN1J7IcYXHHYF3g-eHxcLmulBEbeCm16LAIdB7H9zBBw0j0DTlkPboGE40fhi_nI1hBxAoZbkJS2ejYDFAtSgwf-s_1BdbfwgxfrrzCRY-yencduy0UKKzEVrUWYC1R1_yJMfgxArY_K4mt0U8re801emvqqEZCgUdpYSOgSYCggcN_ZJzErmCVOi-XSVZd4jLINmMkpogReRXB4y-mRF1znDihH9BX7WO7JIz6bv11Jp4iWLy9YwwzvIGbTl_RlZ10RL_IEBCHlUpPVeUef55p42sd5GSM2PdLRl-U0fnc13Sd0p1gwEYh0fxfC328wdam6KqC2rrTGeYI41L5AEnW1dU4scxSF1ChKgHWIdkrKkB5sBbBjh_8bxQkaiYmzPs_KJb0WK6clFpUlL_nfhFhcVd3eoqzEb32hwrPH163jQn3rKQE3WvrF3WrbGqxL-sMCyEBkbOYrFk-0qjLZJj_hGpijM7tbsQXAAleJFFEfp91mvFZ-YIzOXzU3dAGIjU1qDDawfnuXBTs3wRmdHtBsSgIcS5JaWwZQR26Pkj493PYAL0QEkUog32nhJUHnT79ak9XbOEfneTdoUgzJBO73Y-ITc7hyh7xg7BfGXhL3dBl12k0LK1iaotRvK5M1i7OEtiQnpI2wxEHbP-GPh_RlQuoarEiEPfuHIptJ0bguNQxGcP1_ArQUaNkN3DpKbfH562XhTEMrHTKdVXaxv5ANcR0-698-Ed7KHDCeyS_MFPIGgSLfBkYsEzoK1QSgTuBUUCz-AW6FFEiC_WHCytdaHQ-DF5bq2TZ-11o4tyR8irwNyebffoJdRWIgzRJE8H73wMFusn_puIQzjCXeoCas2Ttw_0GjTw8B1P7e6pyG8M3mTuP3EOWjN95Qmm5Zxpb1tsNFc6vv5yTok_UKWDDI8Ag6FpW3Akk553NzoJEYQOfSlwUrdfavxNm7g5Zs3yWMCvtJvvG7_5awAPpnxdYRNlywroiRzjfmowvClo7cPeL0YiKIK7OqLeZoq13FRP93hVth7RDpcOs17JQqT_TVuw6_AhYRwxkn-4zV8r8vn_r5DLvaoo716Cs5RyMuF6S6Hsc2XysXCrNUoBCeKCg1RXWc80Y71gWtFVZdpuqxwLoCou2HJjygsBtdUbZ56DHRTAOkVJ4S82qUi1l2v2sADympR1pMZSMhK9vYyTuNXlS7QcciPi7SaZcohU45rljV_orFKRrzxMLLtB4KzJthAAHOgL5_BUYYRdZ2BtHIWGNGxzmPxmR2x7aU3v15M0PVL0fnamSR1VpLlZi1KdA-SGsssc5WohW9CGzprv1Gz1A9aBNkoiain6-7EsGXZLkfCEDdqndSzxRNtFid4bjZHghlY64C3wr2lhQejktZGF3arsWgU070Y3iMmW_NR0zXNCzxvXnMcrQ3Ep9l395_k7heUS9tWBOeHQVpmS1idviax9UkKQBX72ji5nICTj977wmeBI7G91fZIHvpCVLfMQkBA2Wc9RiczcTYXrsVv6CWqqmwJuXlxODoLVmQt_7Z-GmPI9keAOMqQr2AuezyrbkMvaV-0F3bJNzMscfYtH_Fp57dsZeloHJdiM0mBWL-QKsPSG7xpdLAH6z8GHG4WwpjZ_ONwHI5kb-YdVjpD8r21sJd-zg42AIcm_Pdyse5WbkfzuZU0jQC8DvfOkZGl0x5vpxAgnf1GVkE2Ydkumo9Ag9KTvYyKfJBjR0SD-AcP5W75kP9Qm-vv6FUrvpksD25lnHKAf1xwSKCNLPy0VHNJIcV_KhswXAUJ1wHagHBHExnZnbHFueRpie6YeAjh0L_kRucgCPbJIKMHfzMr7F5xXgmyryxLk1-yw3nWI36eS7UjdicQC63YACOj__kjpQq--sWjNI_fCmcP8l4aNnr8YJu0qOkbSa9k9J50dTAF5XOwrpcUGtQ-GVMqfNwJmNXRI585hsAlvoDMtEL5OwrHWAMH1uqUc0RfvJSxTCuVrIi5hljmsP01W4gW9rk8cx_5jDcn8gu8A7wkf5m87-CLrv4G9eHOojdjlunrWuIXAxZx9HtSC7xdf5L6H2M7TeakAc4HuDzI2jKzJe2gKzyibQcHinfYW6L5LTFGjZseDEJdkZgce0s-7-RJsPXwwAP0vK9l0Wtpl3v-kUwtMcxBfx1eVjxPsQS_ltOYFAo_w8fZqlOiSJVFRy1NcjV5yH26KJ-4WDoi9uTBLeiPgbtEodTsttKRtKPIiOBcW0pkXA1bgvdVz8kPSXHVqxGfGX5Lux8rIVuHPNktQPCjIUr1kU-EhF8MeRD2RE0-LTGTaLzi_Zt6Cgu4udln-_R_qGT9HmQZDUnu6wpZfRNBd_BrTy5XkWnvo5IU3et3EjLA-2y5nCukEazIv9v2qAdkQs9SNzodLQaN4l4ZUDeJrP77Xn1ZWxh7vLv-mfq1xPfq35B6ApyDLoQ1Tp6cEtAFOVbRrN4afClS05nRx0p_XMCRX0k4GXtUN4y-X8TrRBNZP2NKt1xEAisgu-9my5FA6M3at-GoxqUd__zUOJf2IIcFNIyWRtqsdCXM8C0x2j8yH7xKMPQxX50UGge1pIXa0oNF5V_Is3Ig_dPXnECiTqw2PPK6ca7mNxWgAcohThf15ct_B2BgNm_p8l-uj_W8BdllJRlyfqPPAQEJRbNfTU3hNsLhgwpdHpD4j6e2ShkW9bvq9yQdsbSiU6Q-nn1g55ZeVICIXmdeht-DwxbdrnSddwZO2Ae7k_lNonlsVsI9PZYL02rcCLawh9PYG8Qs9a3qf5eOCpDW-Edhq_o3Ry2y6qC3Rv7kOR3CY5AsGfQd414xnsVxml8ZWSv7zwQgTwD6IL3vitMgTf5Ly3b_IpEmAd-0P0Q5Rnl3wnutCi3Mw84kK27KqeMojpm8Ba2Ua5-HhRqefbSY7Xz8eaN97AF28D_28sdH10OdQ9OTdhRxA4ro4Sm7dNLRKLANbibX7egRoo1_x_55RYeLBmOVb6tri_5I8bNtSI0jBp7CJAkn3uS6QPXT3ZmAvmCcaVcRaV0I_B9eecx1J78Y2ILQeNXTs6S3LSQqIXxU5GbYjimWqItg19djRbCv05klRotVmbE6_490t86Ve4KrR1Lqn7GHPPPC52GVj0Sp962gGAJIEcitEfux9_YBGl4YQCCLlIEv4hgDREW_BkU6gmbbTNeIZ8bkDh7jV9PowJsSeztZc4nlM6XAjjj5P9ZcQFrK-QK4Nl-IT_zRkb7AaQKe3XEIvyfsN5Rsw8IucTWSiJ2jjGqjFMbRZzFW69gO1RZB446urAzEWK51AdDaw14rlWjdUgFWuel3jlxIQ4Vo7S9TEaBnlI-NB-lMtjGstX3NAk8oIbb2G59AYijzWHQmjyCzfBeJtMysmHXKniW4BLUOmtxMFDAghmHIkIAaNzCP3gUkUrDpvzsEYwEIA8m-kvXGxOya8BzuVF0CsjlLYMpQyWq_IcI4fFGfU-gNdVdbUvh23u6cBB24MSo-zfAFzy94CmA4MFOX0-gfOM7E1z1y9_GArrb9v_gqce7WrB0IJiNmk-dbJHw_AL5zcGvYA7dBbxM3jgZaL45-oiC_QrtXvNnSOzOxXm5ZReXYk9dYi-yYrn4FaZVbpWCR8k6Y9FwA6VPRmzMHPlbix-TOjYYtC1LObtrOSNVADc9DufUjPZo1aapdxkYVLIQ_yx6n_Sn_t6xDqRehqDbV6Fi8luMSOpoGCWp1scZyrf84PDyZfdvpOeIXKam8-fH5k1PcIeJ8MngMFJLrO6GsZIaYTxobUNXzu1mZ0e5MuHcKcFWDzDySGcsC4Q6MAqvY6u7116qqjfEWr0N4WLY8R8jL-800uCmkxL2-ximWhM7B8KUU0EofxSKQfVBaPqwKrzbH5073dKF4E_mz7QpYaTp5BEdSZGrK3Bc4Om5oIOMD3sKt4FBq7XCRbRr6lwcbpK8DHrV7DXkMbnrmImcnxLz1fxDMjtIn40QvPoAvFQ4zLDBg8sOw_5G9owmh-4VstBQlwxltAzzbpesXA4iXESE5W5wAiGYzcpXEXfaGSm9A4ygrYkS8VkWSnkq-srVAzjsD6kZNd8soFD892XkMB7FLpDTUn6PXa9nydRj6HiZrfrHHzDODKursSeibcGEJHp-6HaSgZOrPZkw353txQlKyIV6NdifKIz8RbqmXXEqWx1YyqFFsfpayy_hWhyAyQ7WY3YCQCtToSh5pACRshYwEZpnjPle6UEn_jxQ6EQjGrrrePaG3bYfIaTNlmDACM0wL70QlOvB9rUeR8mt4BTr00xA_xRsu45GA0ai6kybZhgw6XWgv2qDagEk0if5cC6Z1lGy5RMcWJcqd27ziMhnotzKb7okez4Z2LpvHU7bOA0QQrwL0wuPjZJVPdYHtHDMPKKNpXqPJ8sKOMy7zZvPS9Lxx3aMYwppi-bKYzCCS0xAT_MXADXcOlz53VWe56yKRmgaG-iSdkjx0Lm2aL18Nr9hoexkE5mczERGi46-aiztmIV9uah55VOQt2wH1G_x-2GSf3B1ZgAFauReinGV62XKR67TQYqd-nefDVvsIGq_Xlq1dNd2gJbOwhIEKUc2nxbAImTjnb2r_vtxh-fkHo9pIlmTnwXvD24x70vqUfep39enAT8LPyEwW0K4y9beie29Y7OoK8LN1wDaoU2d1O1B2Rkb3R4GHsyMvTZs6wo_MAgQhEBS_7FJa-eLXZumAMwys0za86jcLVYMVusGCo1hSKXnsfEMVhQRgZYHYajDaMN9vP1xi5WUYTTe5-radvleXAPWOh6F6HVojKoLHiF7zSUiaP3wyLBzMi72ZQbOZKmZGJudWK01i8ON3He7UEUBl3TlZFwpzSKAiv3hAcHCuVLLfMOL9tJlsi1w4F7w40CxhSdiOHRRVoBePs0ylxEsRNKQWyyIvSPRdDIs0qHr7TswohRC3Nfz0JIyJepuUigDz2TcW-vDUz3x4CP-K6RnoE02gzB39y2NRkpofjgImMtZYpyEeoAjj9fMWhoEW1IOWjVbHePPWWskA4LfM6Y6erpSbmMy-cNuxzuvhHeJfVarwndC1m0MiWt6QXa9tKA9Jc64xiAbND4R83Eb8YPYrdp096xkjMyH9xqWCLVS875dQYdmznCV0yHbAYWzBpBDndV-tlLmwEC20WHyw-r2oayIVV38ndM9d3Z09QgnvwCv98LhCIX-iBBGUe57zQ_jT3UaGQliW2SQ5MS827RUBc1F1MrsjRRoaR_IusyKyJ5jnoyl1nZxM0ij1siPizq57WCAarQ674cyVTvH37-u-XXnHBgNkjY1fgKWtZHasSlnOVqPguQ1VC--Kk2pAF938wpQYLIftubx2sXnhTtNXkhvy_tAMhnDTM90JOKl4wznAw0szPBkfa_6TJovM3E4hkSbS68PpOSpeyyg-8luHZ0WDs_IRNIUPmrSsmqf2oHxV4WfJXvfPkSSxDNSToKIviLgvPlaLzg==",
+            "video_metadata": null,
+            "tool_call": null,
+            "tool_response": null,
+            "part_metadata": null,
+            "audio_transcription": null
+          }
+        ],
+        "role": "model"
+      },
+      "citation_metadata": null,
+      "finish_message": null,
+      "token_count": null,
+      "finish_reason": "STOP",
+      "grounding_metadata": null,
+      "avg_logprobs": null,
+      "index": 0,
+      "logprobs_result": null,
+      "safety_ratings": null,
+      "url_context_metadata": null
+    }
+  ],
+  "create_time": null,
+  "model_version": "gemini-3.8-flash",
+  "prompt_feedback": null,
+  "response_id": "rHn0atWlCrrnnsEPhtWbiQc",
+  "usage_metadata": {
+    "cache_tokens_details": null,
+    "cached_content_token_count": null,
+    "candidates_token_count": 3064,
+    "candidates_tokens_details": null,
+    "prompt_token_count": 20768,
+    "prompt_tokens_details": [
+      {
+        "modality": "TEXT",
+        "token_count": 20768
+      }
+    ],
+    "thoughts_token_count": 2758,
+    "tool_use_prompt_token_count": null,
+    "tool_use_prompt_tokens_details": null,
+    "total_token_count": 26590,
+    "traffic_type": null
+  },
+  "model_status": null,
+  "automatic_function_calling_history": [],
+  "parsed": {
+    "email_subject": "RE: Urgent - B260681 St. Cleres School",
+    "post_code": null,
+    "drawing_title": "St Clare's School",
+    "drawing_reference": null,
+    "revision": null,
+    "date_received": "11/11/2026",
+    "hour_received": "10:59",
+    "company": "Bauder Ltd",
+    "contact": "Aaron Harvey",
+    "surveyor": null,
+    "target_u_value": null,
+    "target_min_u_value": null,
+    "fall_of_tapered": "1 in 60",
+    "tapered_insulation": "BauderPIR FA G16",
+    "decking": "Bauder - Concrete",
+    "scale": "1:300",
+    "page_size": "ISO A3",
+    "bauder_contract_number": "B260681",
+    "membrane": null,
+    "vcl": null,
+    "bauder_roof_num": null,
+    "specification_evidence": [
+      {
+        "field": "Drawing Title",
+        "value": "St Clare's School",
+        "source_id": "asset:2",
+        "location": "Page 1, Title block",
+        "snippet": "Contract Name: St Clare's School",
+        "scope": null,
+        "issuer": "Bauder Limited",
+        "role": "requested",
+        "request_role": "document",
+        "message_date": null,
+        "supersedes": [],
+        "rationale": "Project title specified in the title block of the drawing attached to the revision request."
+      },
+      {
+        "field": "Drawing Reference",
+        "value": "D.S - 09074_26.03",
+        "source_id": "asset:2",
+        "location": "Page 1, Title block",
+        "snippet": "Drawing No: LTF-001\nRef No: D.S - 09074_26.03",
+        "scope": null,
+        "issuer": "Bauder Limited",
+        "role": "baseline",
+        "request_role": "document",
+        "message_date": null,
+        "supersedes": [],
+        "rationale": "Reference on Bauder-issued drawing without explicit TaperedPlus provenance; captured as baseline context while leaving scalar drawing reference null.",
+        "reference_parts": [
+          "LTF-001",
+          "B"
+        ]
+      },
+      {
+        "field": "Revision",
+        "value": "B",
+        "source_id": "asset:2",
+        "location": "Page 1, Revision table",
+        "snippet": "Rev: B\nDate: 09/10/26\nNotes: Updated To New Issue Plan\nBy: MM",
+        "scope": null,
+        "issuer": "Bauder Limited",
+        "role": "baseline",
+        "request_role": "document",
+        "message_date": null,
+        "supersedes": [],
+        "rationale": "Revision of the attached baseline Bauder plan.",
+        "reference_parts": [
+          "LTF-001",
+          "B"
+        ]
+      },
+      {
+        "field": "Date Received",
+        "value": "11/11/2026",
+        "source_id": "asset:1:body",
+        "location": "Email header",
+        "snippet": "From: Aaron Harvey <a.harvey@bauder.co.uk>\nSent: 11 November 2026 10:59",
+        "scope": null,
+        "issuer": null,
+        "role": "requested",
+        "request_role": "direct_request",
+        "message_date": "11 November 2026 10:59",
+        "supersedes": [],
+        "rationale": "Date Aaron Harvey sent the files via WeTransfer to TaperedPlus."
+      },
+      {
+        "field": "Company",
+        "value": "Bauder Ltd",
+        "source_id": "asset:1:body",
+        "location": "Email signature",
+        "snippet": "Bauder Ltd\n70 Landseer Road, Ipswich, England IP3 0DH",
+        "scope": null,
+        "issuer": null,
+        "role": "requested",
+        "request_role": "direct_request",
+        "message_date": "11 November 2026 10:59",
+        "supersedes": [],
+        "rationale": "Literal company name in the client sender's email signature."
+      },
+      {
+        "field": "Contact",
+        "value": "Aaron Harvey",
+        "source_id": "asset:1:body",
+        "location": "Email header",
+        "snippet": "From: Aaron Harvey <a.harvey@bauder.co.uk>",
+        "scope": null,
+        "issuer": null,
+        "role": "requested",
+        "request_role": "direct_request",
+        "message_date": "11 November 2026 10:59",
+        "supersedes": [],
+        "rationale": "Client contact sending the request and drawings to TaperedPlus."
+      },
+      {
+        "field": "Decking",
+        "value": "Bauder - Concrete",
+        "source_id": "asset:2",
+        "location": "Page 1, Roof tables",
+        "snippet": "Roof Name Area: NB1 Roof B\nDeck Type: Bauder - Concrete",
+        "scope": "NB1 Roof B",
+        "issuer": "Bauder Limited",
+        "role": "requested",
+        "request_role": "document",
+        "message_date": null,
+        "supersedes": [],
+        "rationale": "Deck type specified across roofs in the scheme drawing."
+      },
+      {
+        "field": "Tapered Insulation",
+        "value": "BauderPIR FA G16",
+        "source_id": "asset:2",
+        "location": "Page 1, Title block",
+        "snippet": "MULTI-LAYER BauderPIR FA G16 TAPER SCHEME",
+        "scope": null,
+        "issuer": "Bauder Limited",
+        "role": "requested",
+        "request_role": "document",
+        "message_date": null,
+        "supersedes": [],
+        "rationale": "Insulation product specified on the drawing."
+      },
+      {
+        "field": "Scale",
+        "value": "1:300",
+        "source_id": "asset:2",
+        "location": "Page 1, Title block",
+        "snippet": "Scale: 1:300 @ ISO A3",
+        "scope": null,
+        "issuer": "Bauder Limited",
+        "role": "requested",
+        "request_role": "document",
+        "message_date": null,
+        "supersedes": [],
+        "rationale": "Scale explicitly noted in the drawing title block."
+      },
+      {
+        "field": "Page Size",
+        "value": "ISO A3",
+        "source_id": "asset:2",
+        "location": "Page 1, Title block",
+        "snippet": "Scale: 1:300 @ ISO A3",
+        "scope": null,
+        "issuer": "Bauder Limited",
+        "role": "requested",
+        "request_role": "document",
+        "message_date": null,
+        "supersedes": [],
+        "rationale": "Drawing sheet size explicitly stated in the title block."
+      },
+      {
+        "field": "Bauder Contract Number",
+        "value": "B260681",
+        "source_id": "asset:1:body",
+        "location": "Email subject",
+        "snippet": "Subject: RE: Urgent - B260681 St. Cleres School",
+        "scope": null,
+        "issuer": null,
+        "role": "requested",
+        "request_role": "direct_request",
+        "message_date": "11 November 2026 10:59",
+        "supersedes": [],
+        "rationale": "Bauder contract number stated in the email subject line."
+      },
+      {
+        "field": "Bauder Contract Number",
+        "value": "B269681",
+        "source_id": "asset:2",
+        "location": "Page 1, Title block",
+        "snippet": "Contract No: B269681",
+        "scope": null,
+        "issuer": "Bauder Limited",
+        "role": "baseline",
+        "request_role": "document",
+        "message_date": null,
+        "supersedes": [],
+        "rationale": "Contract number printed in the baseline drawing title block."
+      }
+    ],
+    "specification_assessed_fields": [
+      "Scale",
+      "Page Size",
+      "Drawing Reference",
+      "Drawing Title",
+      "Revision",
+      "Date Received",
+      "Company",
+      "Contact",
+      "Surveyor",
+      "Target U Value",
+      "Target Min U Value",
+      "Tapered Insulation",
+      "Decking",
+      "Bauder Contract Number",
+      "Bauder Roof Num",
+      "Membrane",
+      "VCL",
+      "Incoming Information"
+    ],
+    "specification_request_notes": [
+      {
+        "source_id": "asset:1:body",
+        "snippet": "NB1 Roof B – Additional outlets, and 40mm sump depth\nNB2 Roof B – Check outlets on new plan, but now require tapered gutter with 200mm in main field. 40mm sump depth.",
+        "scope": null,
+        "category": "constraint"
+      },
+      {
+        "source_id": "asset:1:body",
+        "snippet": "https://we.tl/t-4yTHpr7zgKLf96FO",
+        "scope": null,
+        "category": "source_link"
+      },
+      {
+        "source_id": "asset:2",
+        "snippet": "Multi Layered Tapered Build Up Section - 1 in 60",
+        "scope": null,
+        "category": "constraint"
+      }
+    ],
+    "specification_request_intent": {
+      "schema_version": 1,
+      "recommended_type": "amendment",
+      "explanation": "The client is chasing and providing files for a requested revision to an existing scheme (B260681 / St. Cleres School), asking to check new roof plans and revise NB1 Roof B and NB2 Roof B.",
+      "evidence": [
+        {
+          "source_id": "asset:1:body",
+          "excerpt": "Could you provide an update for this scheme please? A revision was requested on 22nd October, and I’ve chased a couple of times already, but I haven’t received anything further.",
+          "location": "Email body (10 November 2026 11:45)",
+          "scope": null
+        },
+        {
+          "source_id": "asset:1:body",
+          "excerpt": "NB1 Roof B – Additional outlets, and 40mm sump depth\nNB2 Roof B – Check outlets on new plan, but now require tapered gutter with 200mm in main field. 40mm sump depth.",
+          "location": "Email body (10 November 2026 12:10)",
+          "scope": null
+        }
+      ],
+      "detected_references": [
+        {
+          "kind": "project",
+          "literal": "B260681",
+          "evidence": {
+            "source_id": "asset:1:body",
+            "excerpt": "Subject: RE: Urgent - B260681 St. Cleres School",
+            "location": "Email header",
+            "scope": null
+          },
+          "role": "current_request"
+        },
+        {
+          "kind": "drawing",
+          "literal": "LTF-001(RevB)",
+          "evidence": {
+            "source_id": "asset:2",
+            "excerpt": "Drawing No: LTF-001",
+            "location": "Page 1, Title block",
+            "scope": null
+          },
+          "role": "document"
+        }
+      ],
+      "matched_projects": [],
+      "ambiguity_reasons": []
+    }
+  }
+}

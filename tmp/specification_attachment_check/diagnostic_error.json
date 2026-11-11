@@ -1,0 +1,979 @@
+{
+  "exception_type": "SpecificationEvidenceError",
+  "message": "Specification evidence recovery unresolved: {'Bauder Contract Number': 'Candidate request timestamp could not be verified', 'Company': 'Populated extraction has no verified applicable evidence', 'Contact': 'Populated extraction has no verified applicable evidence'}; evidence_roles={'Bauder Contract Number': {'baseline': 1, 'requested': 3}, 'Company': {'requested': 3}, 'Contact': {'requested': 2}}",
+  "manifest": null,
+  "evidence_failure": {
+    "extraction": {
+      "specificationEvidenceVersion": 3,
+      "specificationAssessedFields": [
+        "Bauder Contract Number",
+        "Bauder Roof Num",
+        "Company",
+        "Contact",
+        "Date Received",
+        "Decking",
+        "Drawing Reference",
+        "Drawing Title",
+        "Incoming Information",
+        "Membrane",
+        "Page Size",
+        "Revision",
+        "Scale",
+        "Surveyor",
+        "Tapered Insulation",
+        "Target Min U Value",
+        "Target U Value",
+        "VCL"
+      ],
+      "specificationEvidence": [
+        {
+          "field": "Drawing Title",
+          "value": "St Clare's School",
+          "source_id": "asset:2",
+          "location": "Page 1, Title block",
+          "snippet": "Contract Name: St Clare's School",
+          "scope": null,
+          "issuer": "Bauder Limited",
+          "role": "requested",
+          "request_role": "document",
+          "message_date": null,
+          "supersedes": [],
+          "rationale": "Project title specified in the title block of the drawing attached to the revision request.",
+          "reference_parts": []
+        },
+        {
+          "field": "Drawing Reference",
+          "value": "D.S - 09074_26.03",
+          "source_id": "asset:2",
+          "location": "Page 1, Title block",
+          "snippet": "Drawing No: LTF-001\nRef No: D.S - 09074_26.03",
+          "scope": null,
+          "issuer": "Bauder Limited",
+          "role": "baseline",
+          "request_role": "document",
+          "message_date": null,
+          "supersedes": [],
+          "rationale": "Reference on Bauder-issued drawing without explicit TaperedPlus provenance; captured as baseline context while leaving scalar drawing reference null.",
+          "reference_parts": [
+            "LTF-001",
+            "B"
+          ]
+        },
+        {
+          "field": "Revision",
+          "value": "B",
+          "source_id": "asset:2",
+          "location": "Page 1, Revision table",
+          "snippet": "Rev: B\nDate: 09/10/26\nNotes: Updated To New Issue Plan\nBy: MM",
+          "scope": null,
+          "issuer": "Bauder Limited",
+          "role": "baseline",
+          "request_role": "document",
+          "message_date": null,
+          "supersedes": [],
+          "rationale": "Revision of the attached baseline Bauder plan.",
+          "reference_parts": [
+            "LTF-001",
+            "B"
+          ]
+        },
+        {
+          "field": "Date Received",
+          "value": "11/11/2026",
+          "source_id": "asset:1:body",
+          "location": "Email header",
+          "snippet": "From: Aaron Harvey <a.harvey@bauder.co.uk>\nSent: 11 November 2026 10:59",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "direct_request",
+          "message_date": "11 November 2026 10:59",
+          "supersedes": [],
+          "rationale": "Date Aaron Harvey sent the files via WeTransfer to TaperedPlus.",
+          "reference_parts": []
+        },
+        {
+          "field": "Company",
+          "value": "Bauder Ltd",
+          "source_id": "asset:1:body",
+          "location": "Email signature",
+          "snippet": "Bauder Ltd\n70 Landseer Road, Ipswich, England IP3 0DH",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "direct_request",
+          "message_date": "11 November 2026 10:59",
+          "supersedes": [],
+          "rationale": "Literal company name in the client sender's email signature.",
+          "reference_parts": []
+        },
+        {
+          "field": "Contact",
+          "value": "Aaron Harvey",
+          "source_id": "asset:1:body",
+          "location": "Email header",
+          "snippet": "From: Aaron Harvey <a.harvey@bauder.co.uk>",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "direct_request",
+          "message_date": "11 November 2026 10:59",
+          "supersedes": [],
+          "rationale": "Client contact sending the request and drawings to TaperedPlus.",
+          "reference_parts": []
+        },
+        {
+          "field": "Decking",
+          "value": "Bauder - Concrete",
+          "source_id": "asset:2",
+          "location": "Page 1, Roof tables",
+          "snippet": "Roof Name Area: NB1 Roof B\nDeck Type: Bauder - Concrete",
+          "scope": "NB1 Roof B",
+          "issuer": "Bauder Limited",
+          "role": "requested",
+          "request_role": "document",
+          "message_date": null,
+          "supersedes": [],
+          "rationale": "Deck type specified across roofs in the scheme drawing.",
+          "reference_parts": []
+        },
+        {
+          "field": "Tapered Insulation",
+          "value": "BauderPIR FA G16",
+          "source_id": "asset:2",
+          "location": "Page 1, Title block",
+          "snippet": "MULTI-LAYER BauderPIR FA G16 TAPER SCHEME",
+          "scope": null,
+          "issuer": "Bauder Limited",
+          "role": "requested",
+          "request_role": "document",
+          "message_date": null,
+          "supersedes": [],
+          "rationale": "Insulation product specified on the drawing.",
+          "reference_parts": []
+        },
+        {
+          "field": "Scale",
+          "value": "1:300",
+          "source_id": "asset:2",
+          "location": "Page 1, Title block",
+          "snippet": "Scale: 1:300 @ ISO A3",
+          "scope": null,
+          "issuer": "Bauder Limited",
+          "role": "requested",
+          "request_role": "document",
+          "message_date": null,
+          "supersedes": [],
+          "rationale": "Scale explicitly noted in the drawing title block.",
+          "reference_parts": []
+        },
+        {
+          "field": "Page Size",
+          "value": "ISO A3",
+          "source_id": "asset:2",
+          "location": "Page 1, Title block",
+          "snippet": "Scale: 1:300 @ ISO A3",
+          "scope": null,
+          "issuer": "Bauder Limited",
+          "role": "requested",
+          "request_role": "document",
+          "message_date": null,
+          "supersedes": [],
+          "rationale": "Drawing sheet size explicitly stated in the title block.",
+          "reference_parts": []
+        },
+        {
+          "field": "Bauder Contract Number",
+          "value": "B260681",
+          "source_id": "asset:1:body",
+          "location": "Email subject",
+          "snippet": "Subject: RE: Urgent - B260681 St. Cleres School",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "direct_request",
+          "message_date": "11 November 2026 10:59",
+          "supersedes": [],
+          "rationale": "Bauder contract number stated in the email subject line.",
+          "reference_parts": []
+        },
+        {
+          "field": "Bauder Contract Number",
+          "value": "B269681",
+          "source_id": "asset:2",
+          "location": "Page 1, Title block",
+          "snippet": "Contract No: B269681",
+          "scope": null,
+          "issuer": "Bauder Limited",
+          "role": "baseline",
+          "request_role": "document",
+          "message_date": null,
+          "supersedes": [],
+          "rationale": "Contract number printed in the baseline drawing title block.",
+          "reference_parts": []
+        },
+        {
+          "field": "Date Received",
+          "value": "11/11/2026",
+          "source_id": "asset:1:body",
+          "location": "Email body",
+          "snippet": "From: Aaron Harvey <a.harvey@bauder.co.uk>\nSent: 11 November 2026 10:59",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "forwarded_request",
+          "message_date": "11 November 2026 10:59",
+          "supersedes": [],
+          "rationale": "Literal sent date from the requesting client's forwarded message header.",
+          "reference_parts": []
+        },
+        {
+          "field": "Company",
+          "value": "Bauder Ltd",
+          "source_id": "asset:1:body",
+          "location": "Email body",
+          "snippet": "Bauder Ltd\n70 Landseer Road, Ipswich, England IP3 0DH",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "forwarded_request",
+          "message_date": "11 November 2026 10:59",
+          "supersedes": [],
+          "rationale": "Literal company name in the client sender's email signature.",
+          "reference_parts": []
+        },
+        {
+          "field": "Company",
+          "value": "BAUDER",
+          "source_id": "asset:1:attachment:1",
+          "location": "[TEXT REGION 1]",
+          "snippet": "BAUDER\nmaking roofs secure.",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "forwarded_request",
+          "message_date": "Wed, 11 Nov 2026 11:59:42 +0000",
+          "supersedes": [],
+          "rationale": "Literal brand identity from signature image logo TEXT REGION.",
+          "reference_parts": []
+        },
+        {
+          "field": "Contact",
+          "value": "Aaron Harvey",
+          "source_id": "asset:1:body",
+          "location": "Email body",
+          "snippet": "From: Aaron Harvey <a.harvey@bauder.co.uk>",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "forwarded_request",
+          "message_date": "11 November 2026 10:59",
+          "supersedes": [],
+          "rationale": "Client contact sending the request and drawings to TaperedPlus.",
+          "reference_parts": []
+        },
+        {
+          "field": "Bauder Contract Number",
+          "value": "B260681",
+          "source_id": "asset:1:body",
+          "location": "Email subject",
+          "snippet": "Subject: RE: Urgent - B260681 St. Cleres School",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "direct_request",
+          "message_date": "Wed, 11 Nov 2026 11:59:42 +0000",
+          "supersedes": [],
+          "rationale": "Bauder contract number stated in the email subject line.",
+          "reference_parts": []
+        },
+        {
+          "field": "Bauder Contract Number",
+          "value": "B260681",
+          "source_id": "asset:1:body",
+          "location": "Forwarded message header",
+          "snippet": "Subject: RE: Urgent - B260681 St. Cleres School",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "forwarded_request",
+          "message_date": "11 November 2026 10:59",
+          "supersedes": [],
+          "rationale": "Bauder contract number in the client's forwarded message subject.",
+          "reference_parts": []
+        },
+        {
+          "field": "Target U Value",
+          "value": "0.11 W/m² K",
+          "source_id": "asset:2",
+          "location": "Page 1, Roof tables",
+          "snippet": "Roof Name Area: NB1 Roof B\nDeck Type: Bauder - Concrete\nMinimum U Value: 0.21 W/m² K\nEffective U Value: 0.11 W/m² K",
+          "scope": "NB1 Roof B",
+          "issuer": "Bauder Limited",
+          "role": "achieved",
+          "request_role": "document",
+          "message_date": null,
+          "supersedes": [],
+          "rationale": "Calculated achieved effective U-value on the baseline drawing, not a requested target.",
+          "reference_parts": []
+        },
+        {
+          "field": "Target Min U Value",
+          "value": "0.21 W/m² K",
+          "source_id": "asset:2",
+          "location": "Page 1, Roof tables",
+          "snippet": "Roof Name Area: NB1 Roof B\nDeck Type: Bauder - Concrete\nMinimum U Value: 0.21 W/m² K\nEffective U Value: 0.11 W/m² K",
+          "scope": "NB1 Roof B",
+          "issuer": "Bauder Limited",
+          "role": "achieved",
+          "request_role": "document",
+          "message_date": null,
+          "supersedes": [],
+          "rationale": "Calculated achieved minimum U-value on the baseline drawing, not a requested target.",
+          "reference_parts": []
+        }
+      ],
+      "specificationRequestNotes": [
+        {
+          "source_id": "asset:1:body",
+          "snippet": "NB1 Roof B – Additional outlets, and 40mm sump depth\nNB2 Roof B – Check outlets on new plan, but now require tapered gutter with 200mm in main field. 40mm sump depth.",
+          "scope": null,
+          "category": "constraint"
+        },
+        {
+          "source_id": "asset:1:body",
+          "snippet": "https://we.tl/t-4yTHpr7zgKLf96FO",
+          "scope": null,
+          "category": "source_link"
+        },
+        {
+          "source_id": "asset:2",
+          "snippet": "Multi Layered Tapered Build Up Section - 1 in 60",
+          "scope": null,
+          "category": "constraint"
+        }
+      ],
+      "performanceParameters": {
+        "Email Subject": "RE: Urgent - B260681 St. Cleres School",
+        "Post Code": null,
+        "Drawing Title": "St Clare's School",
+        "Drawing Reference": null,
+        "Revision": null,
+        "Date Received": "11/11/2026",
+        "Hour Received": "10:59",
+        "Company": "Bauder Ltd",
+        "Contact": "Aaron Harvey",
+        "Surveyor": null,
+        "Target U Value": null,
+        "Target Min U Value": null,
+        "Fall of Tapered": "1 in 60",
+        "Tapered Insulation": "BauderPIR FA G16",
+        "Decking": "Bauder - Concrete",
+        "Scale": "1:300",
+        "Page Size": "ISO A3",
+        "Bauder Contract Number": "B260681",
+        "Membrane": null,
+        "VCL": null,
+        "Bauder Roof Num": null
+      },
+      "sourceManifest": [
+        {
+          "sourceId": "asset:2",
+          "filename": "B260681_St-Clere's-School_Tapered_LTF-001(RevB)_NB1+2-Roofs&Staircores_13.10.26 (1).pdf",
+          "sourceType": "attachment",
+          "contentSha256": "e370bf12417e1f09779328b60f46b87d3d86853d3afa86551dfd3ba801a85074",
+          "sizeBytes": 2351105,
+          "observedAt": null,
+          "status": "read",
+          "text": "Page 1\n\nINSTALLATION NOTES:\n1. This drawing assumes a level deck unless otherwise stated. BAUDER tapered systems are designed for installation on level decks.\n\n2. BAUDER LTD recommend that this scheme should be installed starting from the thickest boards, so that in the event of discrepancies in roof size, the flatboard areas can be modified accordingly.\n\n3. Boards to be close butted and staggered. Upstands to perimeters, rooflights, tank houses etc, to be raised where necessary to incorporate the thickness of the insulation.\n\n4. Mitre Boards are available in all falls. They are denoted on this plan by an \"R\" or a \"V\" to signify Ridge and Valley. The corner of the board marked \"R\" or \"V\" is where the high point of the board should be located.\n\n5. Please note that all offcuts of tapered insulation boards should be used within the scheme. These are not deemed as waste boards by Bauder.\n\nNOTES:\nAlthough this tapered insulation scheme is designed to help shed water from the roof, we cannot guarantee that ponding will be totally eliminated.\n\nPlease note that ponding water may occur around the flatboard gutter area due to a lack of cross falls. However this is not detrimental to the Bauder system\n\nDrainage/Outlet Locations TBC\nRoof Extents TBC\n\nKey:\n= 100mm BauderPIR FA-TE Flatboard - NO Baselayer\n= 60mm BauderPIR FA-TE Flatboard - NO Baselayer\n= Suitable Insulation Infill\n= Tapered Insulation\n---- = Valleys to be cut on site\n\nNOTE:\nALL roof dimensions, rooflights and outlet\npositions to be checked BEFORE the\nTapered scheme is ordered.\no = Outlet\n-> = Direction of Falls in Tapered Insulation\n\nPlan Details:\nNB1 Staircore Roof\nNB1 Roof A\nNB1 Roof B\n200mm Flat Board (Not Included In Thermal Calculation)\n\nNB2 Staircore Roof\nNB2 Roof A\nNB2 Roof B\n200mm Flat Board (Not Included In Thermal Calculation)\n\nMaterial: BauderPIR FA G16\nMulti Layered Tapered Build Up Section - 1 in 60\n(Not To Scale)\n160 mm BauderPIR FA G16 Baselayer\n3: 70 mm\n4: 90 mm\n5: 110 mm\n6: 130 mm\n7: 150 mm\n8: 170 mm\n1: 190 mm\n2: 210 mm\n3: 230 mm\n4: 250 mm\n5: 270 mm\n6: 290 mm\n310 mm\n\nNOTE REGARDING U-VALUES\nThe individual roof areas achieve the 'U' Values stated in the table. These U-Values are calculated according to BS EN ISO 6946:2017(E) Annex 'E' and do not take into account materials below the deck, significant point thermal bridges or linear transmittance unless specified otherwise. Refer to separate Bauder U-Value Calculation and Condensation Risk analysis where available for the complete system build-up and achieved U-Value.\n\nRoof Name Area: NB2 Roof A (Gutter)\nDeck Type: Bauder - Concrete\nMinimum U Value: 0.35 W/m² K\nEffective U Value: 0.14 W/m² K\nApproximate Net Roof Area (m²): 105.16\nApproximate Area of Insulation to be Bonded (m²): 123.65\nTotal Insulation Required Inc Waste (m²): 137.52\n\nRoof Name Area: NB1 Roof A (Gutter)\nDeck Type: Bauder - Concrete\nMinimum U Value: 0.21 W/m² K\nEffective U Value: 0.14 W/m² K\nApproximate Net Roof Area (m²): 97.57\nApproximate Area of Insulation to be Bonded (m²): 110.87\nTotal Insulation Required Inc Waste (m²): 125.28\n\nRoof Name Area: NB2 Staircore Roof\nDeck Type: Bauder - Concrete\nMinimum U Value: 0.21 W/m² K\nEffective U Value: 0.11 W/m² K\nApproximate Net Roof Area (m²): 05.98\nApproximate Area of Insulation to be Bonded (m²): 12.30\nTotal Insulation Required Inc Waste (m²): 17.28\n\nRoof Name Area: NB1 Staircore Roof\nDeck Type: Bauder - Concrete\nMinimum U Value: 0.21 W/m² K\nEffective U Value: 0.12 W/m² K\nApproximate Net Roof Area (m²): 13.34\nApproximate Area of Insulation to be Bonded (m²): 21.33\nTotal Insulation Required Inc Waste (m²): 25.20\n\nRoof Name Area: NB2 Roof B\nDeck Type: Bauder - Concrete\nMinimum U Value: 0.21 W/m² K\nEffective U Value: 0.11 W/m² K\nApproximate Net Roof Area (m²): 411.42\nApproximate Area of Insulation to be Bonded (m²): 650.31\nTotal Insulation Required Inc Waste (m²): 699.84\n\nRoof Name Area: NB1 Roof B\nDeck Type: Bauder - Concrete\nMinimum U Value: 0.21 W/m² K\nEffective U Value: 0.11 W/m² K\nApproximate Net Roof Area (m²): 141.61\nApproximate Area of Insulation to be Bonded (m²): 232.80\nTotal Insulation Required Inc Waste (m²): 248.40\n\nImportant Notice:\nThis scheme is of a\nMULTI-LAYER Design and as\nsuch extra Insulation Adhesive\nwill be Required to Adhere the\nTaper Boards to the Base\nLayer/Overlay Layer.\n\nPRELIMINARY DESIGN - SUBJECT TO CHANGE\nTO BE USED FOR LAYOUT, INSULATION DEPTHS\nAND PRELIMINARY QUOTE INFORMATION ONLY.\nFINAL DESIGN TO BE CONFIRMED BY THE CLIENT PRIOR TO ORDER.\nShould this project be ordered, any amendments necessary that have\nadditional cost implications may be subject to further costs.\n\nRidge situation\nValley situation\n\nIMPORTANT NOTE:\nThe Bauder Upstand Insulation\nin accordance with the Bauder\nSpecification and is to be\nordered separately. This is Not\nincluded within the taper\nscheme and associated\nquotation.\n\nAll Dimensions, positions of Rooflights and Outlets\nare to be checked on site BEFORE the tapered\nscheme is ordered.\n\nRevisions:\nRev: B\nDate: 09/10/26\nNotes: Updated To New Issue Plan\nBy: MM\n\nRev: A\nDate: 12/05/26\nNotes: 200mm Flat Board Removed\nBy: BR\n\nRev: -\nDate: 08/05/26\nNotes: Drawing Issued For Approval & Comment\nBy: BR\n\nBAUDER\n\nUK OFFICE\nBauder Limited\n70 Landseer Road, Ipswich,\nSuffolk IP3 0DH,\nEngland.\nTel: +44 (0)1473 257671\nFax: +44 (0)1473 230761\nEmail: technical@bauder.co.uk\nbauder.co.uk\n\nIRELAND OFFICE\nBauder Limited\nO'Duffy Centre, Cross Lane,\nCarrickmacross, Co. Monaghan,\nIreland.\nTel: +353 (0)42 9692 333\nFax: +353 (0)42 9692 839\nEmail: technical@bauder.ie\nbauder.ie\n\nThis scheme design should be checked against all project related\ndrawings and site requirements. Bauder Ltd should be notified\nimmediately of any discrepancies.\n\nThe placement of an order for this scheme design confirms that you\nare not aware of any design changes to the roof area(s) concerned\nand approve the scheme as designed. Following this approval,\nshould any amendments be necessary or the installation deviates\nfrom the designed scheme, such changes may be subject to further\ncosts and time for replacements.\n\nContract Name: St Clare's School\n\nMULTI-LAYER BauderPIR FA G16 TAPER SCHEME\nContract No: B269681\nDrawing No: LTF-001\nRef No: D.S - 09074_26.03\nDesigned to Drawing No:\nScale: 1:300 @ ISO A3\nDrawn By: MM\nDate: 09/10/2026",
+          "pdfPageDimensionsMm": [
+            [
+              297.0,
+              420.0
+            ]
+          ],
+          "pdfPageSizes": [
+            "A3"
+          ]
+        },
+        {
+          "sourceId": "asset:1:body",
+          "filename": "Email body",
+          "sourceType": "email_body",
+          "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c",
+          "sizeBytes": 16339,
+          "observedAt": "2026-11-11T11:59:42+00:00",
+          "status": "read",
+          "text": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000\n\nThanks Aaron – received. I will get it through the system asap.\r\n\r\nKind Regards,\r\n\r\n[cid:image001.png@01DD71D4.215F6BD0]<https://source.thenbs.com/en/product/taperedpluss-rockdeck-insulation-system-flat-tapered/gChe6uKDJCFGQDDDoTCUEZ/oscG3z7bZzkDEq5DdRyUNR>\r\n\r\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on the below link and on our website\r\nTerms & Conditions | Tapered Plus<https://www.taperedplus.co.uk/terms-conditions/>\r\n\r\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by telephone on 01642 677342 or e-mail sales@taperedplus.co.uk<mailto:sales@taperedplus.co.uk>.  TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\r\n\r\nFrom: Aaron Harvey <a.harvey@bauder.co.uk>\r\nSent: 11 November 2026 10:59\r\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\r\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\r\nSubject: RE: Urgent - B260681 St. Cleres School\r\n\r\nHi Nick,\r\n\r\nI’ve uploaded to WeTransfer to avoid any file size limitations. I didn’t think they would be over the limit.\r\n\r\nhttps://we.tl/t-4yTHpr7zgKLf96FO<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwe.tl%2ft-4yTHpr7zgKLf96FO&c=E,1,5TxqOpbFMjLt_2NztEt_tZZYju2ZlOE8jPwRfRSXUzHNJ0H-TGdIi0AjzFsOQLPNDd9mFCHiwBxa7E7DWNERc4TtNe76QsVNFYpOiM0wYM1idiLMlrM1cUarRg,,&typo=1>\r\n\r\nLet me know if you need anything further.\r\n\r\nThanks,\r\n\r\nAaron Harvey\r\n​​​​​\r\nDesign Technician Co‑ordinator\r\n[cid:image002.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,7qOtb14t2yW3k_5psznGeFJaAsysBI4E75PCfUM-Caz9jboZFfIyJvPtXi_3MAqf72eYz_7vwC9GUrDJlJ5yN4WQewCDHwTveSPh1O9DoDy7h-S9sA,,&typo=1>\r\n\r\n​\r\n[cid:image003.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2fbauder-service&c=E,1,qNUUO0aQExKUYSQ3w54DP78H138GQNCNheMAFG83UbYMgKWYf9Ii3nDjp2asNrmTID-WNMG_TPuQNI0UrcnUxCPo6Phgqp5Bg3LM1dFRBarTN7WS6w,,&typo=1>\r\nBauder Ltd\r\n70 Landseer Road, Ipswich, England IP3 0DH\r\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\r\n[cid:image004.png@01DD71D4.215F6BD0]\r\n +44 1473 267158<tel:+44%201473%20267158>\r\n[cid:image005.png@01DD71D4.215F6BD0]\r\n a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>\r\n[cid:image006.png@01DD71D4.215F6BD0]\r\n www.bauder.co.uk<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,o1nMmosgQFlSMT8oYKUG-f8nU3mRAts0whLUVhemfkuyurn2Gn1UzO50W_jLzI_tHJ0AUsKs63rYHfgquAheP102un2H77r9UxFw89Ib7AKw9CmC_TWSbFdROzo,&typo=1>\r\n[cid:image007.png@01DD71D4.215F6BD0]<https://www.linkedin.com/company/bauderltd/mycompany/>\r\n[cid:image008.png@01DD71D4.215F6BD0]<https://x.com/BauderLtd>\r\n[cid:image009.png@01DD71D4.215F6BD0]<https://www.youtube.com/user/BauderLtd>\r\n\r\n​Bauder Limited is a limited company registered in England and Wales.\r\n​Registered number: 01466215.\r\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\r\n\r\nFrom: Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>\r\nSent: 11 November 2026 10:32\r\nTo: Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>; Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\r\nCc: Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\r\nSubject: RE: Urgent - B260681 St. Cleres School\r\n\r\nHi Aaron,\r\n\r\nI have taken a look through all our emails and I cannot see the below request.\r\n\r\nAre the plans attached to the email large?\r\n\r\nWe have had this happen a couple of times with yourselves…. But we don’t get any indication our side that your email has bounced.\r\n\r\nCould you resend the plans over and I will mark it as a priority.\r\n\r\nKind Regards,\r\n\r\n[cid:image001.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsource.thenbs.com%2fen%2fproduct%2ftaperedpluss-rockdeck-insulation-system-flat-tapered%2fgChe6uKDJCFGQDDDoTCUEZ%2foscG3z7bZzkDEq5DdRyUNR&c=E,1,Kjl0DUW980yquX6NiuF8Qu8h9wWfAwLwW-WsgNKB805ZuVAmSD0_pLxZQOFWC-EhIsyt0cVh7v86z6I0bj01r0BYuI0qPYa87n7_kuh1Kw,,&typo=1>\r\n\r\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on the below link and on our website\r\nTerms & Conditions | Tapered Plus<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.taperedplus.co.uk%2fterms-conditions%2f&c=E,1,7WDdYvnKX5cxrBJVlUEM3pT4XgpHJ6gChebCJ2ezXC_dn28nLqeAHkMWg5xB108_-oJR3rGq-fLGnr_4oVKPbESIRvrDhMHWpupkUs9nVbePISrw&typo=1>\r\n\r\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by telephone on 01642 677342 or e-mail sales@taperedplus.co.uk<mailto:sales@taperedplus.co.uk>.  TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\r\n\r\nFrom: Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>\r\nSent: 10 November 2026 14:56\r\nTo: Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>; Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\r\nCc: Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\r\nSubject: RE: Urgent - B260681 St. Cleres School\r\n\r\nHi Nick,\r\n\r\nCan you confirm receipt of Jonathans email below? He had attached my original request from the 22nd.\r\n\r\nThanks,\r\n\r\nAaron Harvey\r\n​​​​​\r\nDesign Technician Co‑ordinator\r\n[cid:image002.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,blQncAY1j3MdMZVUlqSNOfLDVRO_Zv3-CUA9JVzmdwcPm4gR8FLKFekLNE1drm4cGZUEgITQlW5fyqDg10m5FZWdVWfENjryXl4RVUMb&typo=1>\r\n\r\n​\r\n[cid:image003.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2fbauder-service&c=E,1,xj4IPqJ68J24MoPYkj47BcB94FwCS1iynyLHWjBKrMPkxCBcgQ_x5jOqWytpmaPDBxylobzwAx8c9JEfS8lBZh78y3BSogimWEUspJXy2uLZQiYk3pIbvxk8X2om&typo=1>\r\nBauder Ltd\r\n70 Landseer Road, Ipswich, England IP3 0DH\r\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\r\n[cid:image004.png@01DD71D4.215F6BD0]\r\n +44 1473 267158<tel:+44%201473%20267158>\r\n[cid:image005.png@01DD71D4.215F6BD0]\r\n a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>\r\n[cid:image006.png@01DD71D4.215F6BD0]\r\n www.bauder.co.uk<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,61gdriI7Z4uHsLNr2g9eonSzOw74RJd7kYoQxi0eNbO4HKeZpGEuleRQG0wmGDYbPu2lQNiNlM1e1y4o7O4YX5X8SnAUO5yWIk3zo6NXIv6kAIP4&typo=1>\r\n[cid:image007.png@01DD71D4.215F6BD0]<https://www.linkedin.com/company/bauderltd/mycompany/>\r\n[cid:image008.png@01DD71D4.215F6BD0]<https://x.com/BauderLtd>\r\n[cid:image009.png@01DD71D4.215F6BD0]<https://www.youtube.com/user/BauderLtd>\r\n\r\n​Bauder Limited is a limited company registered in England and Wales.\r\n​Registered number: 01466215.\r\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\r\n\r\nFrom: Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>\r\nSent: 10 November 2026 12:10\r\nTo: Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>; Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\r\nCc: Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\r\nSubject: RE: Urgent - B260681 St. Cleres School\r\n\r\nHi Nick,\r\n\r\nI just checked our system, we had received the Rev B versions all fine, but Aaron sent out a new request on the 22nd October\r\nto check the latest roof plans and to revise the roofs below:\r\n\r\nNB1 Roof B – Additional outlets, and 40mm sump depth\r\nNB2 Roof B – Check outlets on new plan, but now require tapered gutter with 200mm in main field. 40mm sump depth.\r\n\r\nI have attached the email for reference.\r\n\r\nKind regards,\r\n\r\nJonathan Bailey\r\n​​​​​\r\nDesign Technician Coordinator\r\n[cid:image002.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,mj-Zj-8z3dDYIUxOxvLpGQRqPmaRCUOrKcMLdTqjdslk2-P357BK8j3Ml6ZEv7ivaogBvORNSszoCFnbV9-9sHxXDjd7Tp1m-dsF7CJkHKaMSYe8-ddtgnePfxYR&typo=1>\r\n\r\n​\r\n[cid:image003.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2fbauder-service&c=E,1,icsvkHfKTfMlEQuZVdZvorhwWXfiE9A_IkPQdAwGmHk32KDhgzwIHE-0auL9NzSeuStlP1Okjy5zaZb4pNLEubImlnrGlNigyIiY0tOkgmI,&typo=1>\r\nBauder Ltd\r\n70 Landseer Road, Ipswich, England IP3 0DH\r\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\r\n[cid:image004.png@01DD71D4.215F6BD0]\r\n +44 1473 372538<tel:+44%201473%20372538>\r\n[cid:image005.png@01DD71D4.215F6BD0]\r\n j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>\r\n[cid:image006.png@01DD71D4.215F6BD0]\r\n www.bauder.co.uk<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,uOHsWI8vbthRQR61W0oZxy3NEhIabVoxsqUSPBuaopyEmDX3tIg_EtkAN3g7i4xegPNrvVd35Fmeqo3bIbpkRPi8nSQz41EP1Bs8u-xUTuNjEkYAd-Oniwl_eA,,&typo=1>\r\n[cid:image007.png@01DD71D4.215F6BD0]<https://www.linkedin.com/company/bauderltd/mycompany/>\r\n[cid:image008.png@01DD71D4.215F6BD0]<https://x.com/BauderLtd>\r\n[cid:image009.png@01DD71D4.215F6BD0]<https://www.youtube.com/user/BauderLtd>\r\n\r\n​Bauder Limited is a limited company registered in England and Wales.\r\n​Registered number: 01466215.\r\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\r\n\r\nFrom: Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>\r\nSent: 10 November 2026 11:59\r\nTo: Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\r\nCc: Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>; Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\r\nSubject: RE: Urgent - B260681 St. Cleres School\r\n\r\nHi Aaron,\r\n\r\nI just spoke with Jonathan over the phone to ensure you are getting all the files.\r\n\r\nPlease touch base with Jonathan when you return from lunch!\r\n\r\nKind Regards,\r\n\r\n[cid:image001.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsource.thenbs.com%2fen%2fproduct%2ftaperedpluss-rockdeck-insulation-system-flat-tapered%2fgChe6uKDJCFGQDDDoTCUEZ%2foscG3z7bZzkDEq5DdRyUNR&c=E,1,6xxRnVf-p5Xasu8lFbvOz0_gSukNlbqspBE0Lh3quormwpkJ-IFrMzzbUyP2fSxosel75__U4ENNtQVQr4fMgZnODR9iDgb9L9RSAXSSJ-xvCB-b3Hq1EXo,&typo=1>\r\n\r\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on the below link and on our website\r\nTerms & Conditions | Tapered Plus<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.taperedplus.co.uk%2fterms-conditions%2f&c=E,1,vMUJXksc3YTC2IU5jhnfy8zHdgqY5uVTxBdNoU0KumPPlLSn9upyjjbBnnHDtke25Dw3HNwgGTYnzs1tv0qpm_I7sNPHgqIXZ0jLhmoqq6afc-dvauMWy1V06w,,&typo=1>\r\n\r\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by telephone on 01642 677342 or e-mail sales@taperedplus.co.uk<mailto:sales@taperedplus.co.uk>.  TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\r\n\r\nFrom: Aaron Harvey <a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>>\r\nSent: 10 November 2026 11:45\r\nTo: Nick Lane <Nick@Taperedplus.co.uk<mailto:Nick@Taperedplus.co.uk>>; Bauder <Bauder@Taperedplus.co.uk<mailto:Bauder@Taperedplus.co.uk>>; Sales <sales@Taperedplus.co.uk<mailto:sales@Taperedplus.co.uk>>\r\nCc: Jonathan Bailey <j.bailey@bauder.co.uk<mailto:j.bailey@bauder.co.uk>>; Jess Duron <j.duron@bauder.co.uk<mailto:j.duron@bauder.co.uk>>; Guy Whiteing <g.whiteing@bauder.co.uk<mailto:g.whiteing@bauder.co.uk>>\r\nSubject: Urgent - B260681 St. Cleres School\r\nImportance: High\r\n\r\nHi Nick,\r\n\r\nCould you provide an update for this scheme please? A revision was requested on 22nd October, and I’ve chased a couple of times already, but I haven’t received anything further.\r\n\r\nAre you missing any information preventing you from proceeding with the scheme?\r\n\r\nKind Regards,\r\n\r\nAaron Harvey\r\n​​​​​\r\nDesign Technician Co‑ordinator\r\n[cid:image002.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,5QrK1f-MdNWXI0GkRCFzIcfO8v1ESCMHK2YJh7QqBeSrvPTF-WyWj-wLZre-lODhfflTGhchmNTUDaP0J8PY_tLztV8S10n3tkUCoH9qAuwdMRkaYw,,&typo=1>\r\n\r\n​\r\n[cid:image003.png@01DD71D4.215F6BD0]<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2fbauder-service&c=E,1,Y-sNtvUxpACFUhg2m6aAiR6I3zMK3QvblHvjpTxXKRpG4N-M6jYNJw5fTwAaHiMcdRAksBhxydjS0zEgNljVGwfbGfyvPk949moD3bgphcHhJqFMX7K6c4Ufjw4,&typo=1>\r\nBauder Ltd\r\n70 Landseer Road, Ipswich, England IP3 0DH\r\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\r\n[cid:image004.png@01DD71D4.215F6BD0]\r\n +44 1473 267158<tel:+44%201473%20267158>\r\n[cid:image005.png@01DD71D4.215F6BD0]\r\n a.harvey@bauder.co.uk<mailto:a.harvey@bauder.co.uk>\r\n[cid:image006.png@01DD71D4.215F6BD0]\r\n www.bauder.co.uk<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.bauder.co.uk%2f&c=E,1,M7wmdjBJXnaUhmD1jEEHpd4eeoEzRIWbuCbUy3ba7slzMy_RudLAZ-BrcJIRZa0neoZgfv28tkLpVnH8O7ckuWUb6rpf88ycV1QKzY6d5MLH1s_C73SB_mx6&typo=1>\r\n[cid:image007.png@01DD71D4.215F6BD0]<https://www.linkedin.com/company/bauderltd/mycompany/>\r\n[cid:image008.png@01DD71D4.215F6BD0]<https://x.com/BauderLtd>\r\n[cid:image009.png@01DD71D4.215F6BD0]<https://www.youtube.com/user/BauderLtd>\r\n\r\n​Bauder Limited is a limited company registered in England and Wales.\r\n​Registered number: 01466215.\r\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\r\n\r\n\r\n\r\nDisclaimer\r\n\r\nThe information contained in this communication from the sender is confidential. It is intended solely for use by the recipient and others authorised to receive it. If you are not the recipient, you are hereby notified that any disclosure, copying,\r\ndistribution or taking action in relation of the contents of this information is strictly prohibited and may be unlawful.\r\n\r\nThis email has been scanned for viruses and malware, and may have been automatically archived by Mimecast Ltd, an innovator in Software as a Service (SaaS) for business.\r\nProviding a safer and more useful place for your human generated data. Specialising in Security, archiving and compliance.\r\n",
+          "emailHtmlText": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000\n\nThanks Aaron – received. I will get it through the system asap.\r\n\n\r\n\n \n\r\n\n\r\n\nKind Regards,\n\r\n\n \n\r\n\n [Image: cid:image001.png@01DD71D4.215F6BD0] \n\r\n\n \n\r\n\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on\r\n the below link and on our website\n\r\n\nTerms & Conditions | Tapered Plus\n\r\n\n \n\r\n\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the\r\n use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by\r\n telephone on 01642 677342 or e-mail sales@taperedplus.co.uk. \r\n TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\n\r\n\n\r\n\n \n\r\n\n\r\n\n\r\n\nFrom:\r\n Aaron Harvey <a.harvey@bauder.co.uk> \n\r\nSent: 11 November 2026 10:59\n\r\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\n\r\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\r\nSubject: RE: Urgent - B260681 St. Cleres School\n\r\n\n\r\n\n\r\n\n \n\r\n\nHi Nick,\n\r\n\n \n\r\n\nI’ve uploaded to WeTransfer to avoid any file size limitations. I didn’t think they would be over the limit.\r\n\n\r\n\n \n\r\n\nhttps://we.tl/t-4yTHpr7zgKLf96FO\n\r\n\n \n\r\n\nLet me know if you need anything further.\r\n\n\r\n\n \n\r\n\nThanks, \n\r\n\n \n\r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\nAaron Harvey\n\r\n\r\n\n\r\n\r\n\r\n\r\n \r\n\n​​​​​\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\nDesign Technician Co‑ordinator\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image002.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\n\n\r\n​\n\r\n\r\n\n\r\n\n\r\n \r\n\n [Image: cid:image003.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\nBauder Ltd\n\r\n\r\n\n\r\n\n\r\n \r\n\n70 Landseer Road, Ipswich, England IP3 0DH \n\r\n\r\n\n\r\n\n\r\n \r\n\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image004.png@01DD71D4.215F6BD0] \n\r\n\r\n \r\n\n +44 1473 267158\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image005.png@01DD71D4.215F6BD0] \n\r\n\r\n \r\n\n a.harvey@bauder.co.uk\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image006.png@01DD71D4.215F6BD0] \n\r\n\r\n \r\n\n www.bauder.co.uk\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image007.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image008.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image009.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\n\n\r\n​Bauder Limited is a limited company registered in England and Wales.\n\r\n​Registered number: 01466215.\n\r\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\n \n\r\n\n\r\n\nFrom:\r\n Nick Lane <Nick@Taperedplus.co.uk> \n\r\nSent: 11 November 2026 10:32\n\r\nTo: Aaron Harvey <a.harvey@bauder.co.uk>; Jonathan Bailey <j.bailey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>;\r\n Sales <sales@Taperedplus.co.uk>\n\r\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\r\nSubject: RE: Urgent - B260681 St. Cleres School\n\r\n\n\r\n\n \n\r\n\nHi Aaron,\n\r\n\n \n\r\n\nI have taken a look through all our emails and I cannot see the below request.\r\n\n\r\n\n \n\r\n\nAre the plans attached to the email large?\n\r\n\n \n\r\n\nWe have had this happen a couple of times with yourselves…. But we don’t get any indication our side that your email has bounced.\r\n\n\r\n\n \n\r\n\nCould you resend the plans over and I will mark it as a priority.\r\n\n\r\n\n \n\r\n\nKind Regards,\n\r\n\n \n\r\n\n [Image: cid:image001.png@01DD71D4.215F6BD0] \n\r\n\n \n\r\n\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on\r\n the below link and on our website\n\r\n\nTerms\r\n & Conditions | Tapered Plus\n\r\n\n \n\r\n\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the\r\n use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by\r\n telephone on 01642 677342 or e-mail sales@taperedplus.co.uk. \r\n TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\n\r\n\n \n\r\n\n\r\n\nFrom:\r\n Aaron Harvey <a.harvey@bauder.co.uk> \n\r\nSent: 10 November 2026 14:56\n\r\nTo: Jonathan Bailey <j.bailey@bauder.co.uk>; Nick Lane <Nick@Taperedplus.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales\r\n <sales@Taperedplus.co.uk>\n\r\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\r\nSubject: RE: Urgent - B260681 St. Cleres School\n\r\n\n\r\n\n \n\r\n\nHi Nick,\n\r\n\n \n\r\n\nCan you confirm receipt of Jonathans email below? He had attached my original request from the 22nd.\r\n\n\r\n\n \n\r\n\nThanks, \n\r\n\n \n\r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\nAaron Harvey\n\r\n\r\n\n\r\n\r\n\r\n\r\n \r\n\n​​​​​\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\nDesign Technician Co‑ordinator\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image002.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\n\n\r\n​\n\r\n\r\n\n\r\n\n\r\n \r\n\n [Image: cid:image003.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\nBauder Ltd\n\r\n\r\n\n\r\n\n\r\n \r\n\n70 Landseer Road, Ipswich, England IP3 0DH \n\r\n\r\n\n\r\n\n\r\n \r\n\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image004.png@01DD71D4.215F6BD0] \n\r\n\r\n \r\n\n +44 1473 267158\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image005.png@01DD71D4.215F6BD0] \n\r\n\r\n \r\n\n a.harvey@bauder.co.uk\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image006.png@01DD71D4.215F6BD0] \n\r\n\r\n \r\n\n www.bauder.co.uk\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image007.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image008.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image009.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\n\n\r\n​Bauder Limited is a limited company registered in England and Wales.\n\r\n​Registered number: 01466215.\n\r\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\n \n\r\n\n\r\n\nFrom:\r\n Jonathan Bailey <j.bailey@bauder.co.uk>\r\n\n\r\nSent: 10 November 2026 12:10\n\r\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Aaron Harvey <a.harvey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales\r\n <sales@Taperedplus.co.uk>\n\r\nCc: Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\r\nSubject: RE: Urgent - B260681 St. Cleres School\n\r\n\n\r\n\n \n\r\n\nHi Nick,\n\r\n\n \n\r\n\nI just checked our system, we had received the Rev B versions all fine, but Aaron sent out a new request on the 22nd October\n\r\n\nto check the latest roof plans and to revise the roofs below:\n\r\n\n \n\r\n\nNB1 Roof B – Additional outlets, and 40mm sump depth\r\n\n\r\n\nNB2 Roof B – Check outlets on new plan, but now require tapered gutter with 200mm in main field. 40mm sump depth.\r\n\n\r\n\n \n\r\n\nI have attached the email for reference.\n\r\n\n \n\r\n\nKind regards,\n\r\n\n \n\r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\nJonathan Bailey\n\r\n\r\n\n\r\n\r\n\r\n\r\n \r\n\n​​​​​\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\nDesign Technician Coordinator\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image002.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\n\n\r\n​\n\r\n\r\n\n\r\n\n\r\n \r\n\n [Image: cid:image003.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\nBauder Ltd\n\r\n\r\n\n\r\n\n\r\n \r\n\n70 Landseer Road, Ipswich, England IP3 0DH \n\r\n\r\n\n\r\n\n\r\n \r\n\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image004.png@01DD71D4.215F6BD0] \n\r\n\r\n \r\n\n +44 1473 372538\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image005.png@01DD71D4.215F6BD0] \n\r\n\r\n \r\n\n j.bailey@bauder.co.uk\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image006.png@01DD71D4.215F6BD0] \n\r\n\r\n \r\n\n www.bauder.co.uk\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image007.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image008.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image009.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\n\n\r\n​Bauder Limited is a limited company registered in England and Wales.\n\r\n​Registered number: 01466215.\n\r\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\n \n\r\n\n\r\n\nFrom:\r\n Nick Lane <Nick@Taperedplus.co.uk> \n\r\nSent: 10 November 2026 11:59\n\r\nTo: Aaron Harvey <a.harvey@bauder.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\n\r\nCc: Jonathan Bailey <j.bailey@bauder.co.uk>; Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\r\nSubject: RE: Urgent - B260681 St. Cleres School\n\r\n\n\r\n\n \n\r\n\nHi Aaron,\n\r\n\n \n\r\n\nI just spoke with Jonathan over the phone to ensure you are getting all the files.\n\r\n\n \n\r\n\nPlease touch base with Jonathan when you return from lunch!\r\n\n\r\n\n \n\r\n\nKind Regards,\n\r\n\n \n\r\n\n [Image: cid:image001.png@01DD71D4.215F6BD0] \n\r\n\n \n\r\n\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on\r\n the below link and on our website\n\r\n\nTerms\r\n & Conditions | Tapered Plus\n\r\n\n \n\r\n\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the\r\n use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by\r\n telephone on 01642 677342 or e-mail sales@taperedplus.co.uk. \r\n TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\n\r\n\n \n\r\n\n\r\n\nFrom:\r\n Aaron Harvey <a.harvey@bauder.co.uk> \n\r\nSent: 10 November 2026 11:45\n\r\nTo: Nick Lane <Nick@Taperedplus.co.uk>; Bauder <Bauder@Taperedplus.co.uk>; Sales <sales@Taperedplus.co.uk>\n\r\nCc: Jonathan Bailey <j.bailey@bauder.co.uk>; Jess Duron <j.duron@bauder.co.uk>; Guy Whiteing <g.whiteing@bauder.co.uk>\n\r\nSubject: Urgent - B260681 St. Cleres School\n\r\nImportance: High\n\r\n\n\r\n\n \n\r\n\nHi Nick,\n\r\n\n \n\r\n\nCould you provide an update for this scheme please? A revision was requested on 22nd October, and I’ve chased a couple of times already, but I haven’t received anything further.\r\n\n\r\n\n \n\r\n\nAre you missing any information preventing you from proceeding with the scheme?\r\n\n\r\n\n \n\r\n\nKind Regards, \n\r\n\n \n\r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\nAaron Harvey\n\r\n\r\n\n\r\n\r\n\r\n\r\n \r\n\n​​​​​\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\nDesign Technician Co‑ordinator\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image002.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\n\n\r\n​\n\r\n\r\n\n\r\n\n\r\n \r\n\n [Image: cid:image003.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\nBauder Ltd\n\r\n\r\n\n\r\n\n\r\n \r\n\n70 Landseer Road, Ipswich, England IP3 0DH \n\r\n\r\n\n\r\n\n\r\n \r\n\nFifth Floor, Block D, Iveagh Court, Harcourt Road, Dublin 2, DO2 VH94, Ireland\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image004.png@01DD71D4.215F6BD0] \n\r\n\r\n \r\n\n +44 1473 267158\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image005.png@01DD71D4.215F6BD0] \n\r\n\r\n \r\n\n a.harvey@bauder.co.uk\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image006.png@01DD71D4.215F6BD0] \n\r\n\r\n \r\n\n www.bauder.co.uk\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image007.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image008.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n \r\n\r\n\r\n\n\r\n \r\n\n [Image: cid:image009.png@01DD71D4.215F6BD0] \n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\n\r\n \r\n\n\n\r\n​Bauder Limited is a limited company registered in England and Wales.\n\r\n​Registered number: 01466215.\n\r\nRegistered Office: 70 Landseer Road, Ipswich, Suffolk, United Kingdom, IP3 0DH.\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\r\n\n\r\n\r\n\r\n\n \n\r\n\n \n\r\n\nDisclaimer\n\r\n\nThe information contained in this communication from the sender is confidential. It is intended solely for use by the recipient and others authorised to receive it. If you are not\r\n the recipient, you are hereby notified that any disclosure, copying,\n\r\ndistribution or taking action in relation of the contents of this information is strictly prohibited and may be unlawful.\n\r\n\n\r\nThis email has been scanned for viruses and malware, and may have been automatically archived by\r\nMimecast Ltd, an innovator in Software as a Service (SaaS) for business. \n\r\nProviding a safer and more useful place for your human generated data. Specialising in Security, archiving and compliance.",
+          "emailHtmlSha256": "b2f92a8ebd547d73ee8ec506f8cddf189ebc6cec3264b49ff662df4d60059a7d"
+        },
+        {
+          "sourceId": "asset:1:attachment:0",
+          "filename": "image001.png",
+          "sourceType": "attachment",
+          "contentSha256": "f1c75007b373954c9678c8a34a6f5f62705021441dc87f43bbb913824673abd2",
+          "sizeBytes": 2668560,
+          "observedAt": "2026-11-11T11:59:42+00:00",
+          "status": "read",
+          "text": "[TEXT REGION 1]\nNicholas Lane\n[/TEXT REGION 1]\n\n[TEXT REGION 2]\nHEAD OF DESIGN & TECHNICAL\n[/TEXT REGION 2]\n\n[TEXT REGION 3]\nTaperedPlus\n[/TEXT REGION 3]\n\n[TEXT REGION 4]\nCertified\nB\n®\nCorporation\n[/TEXT REGION 4]\n\n[TEXT REGION 5]\n07511 177596\n[/TEXT REGION 5]\n\n[TEXT REGION 6]\nwww.taperedplus.co.uk\n[/TEXT REGION 6]\n\n[TEXT REGION 7]\nnick@taperedplus.co.uk\n[/TEXT REGION 7]\n\n[TEXT REGION 8]\nTaperedPlus House, 8, Halegrove Court, Bowesfield Park, Stockton on Tees, TS18 3DB\n[/TEXT REGION 8]\n\n[TEXT REGION 9]\nROCKDeck®\nHigh performance non-combustible insulation system for use in\nwarm roof applications.\n• Enhanced point load performance.\n• Specifically designed for balconies, terraces, plant rooms and\nroofs with mounted equipment (eg Solar & PV).\n• Carries BS EN 12430 & BS EN 1606 test data.\n[/TEXT REGION 9]\n\n[TEXT REGION 10]\nSpecify ROCKDeck® on your next project!\nFind out more by clicking this signature...\n[/TEXT REGION 10]\n\nVISUAL CONTEXT\nThe image is a professional digital email signature card overlaying a darkened aerial photograph of modern urban residential buildings. The top section contains contact and personal details for Nicholas Lane, with corporate branding for TaperedPlus and a Certified B Corporation badge. The bottom banner features a green-to-white rounded rectangular container highlighting product information for \"ROCKDeck®\" with a 3D cutaway technical diagram of a structural roof insulation and pedestal support system.",
+          "imageTextRegions": [
+            {
+              "id": "1",
+              "text": "Nicholas Lane"
+            },
+            {
+              "id": "2",
+              "text": "HEAD OF DESIGN & TECHNICAL"
+            },
+            {
+              "id": "3",
+              "text": "TaperedPlus"
+            },
+            {
+              "id": "4",
+              "text": "Certified\nB\n®\nCorporation"
+            },
+            {
+              "id": "5",
+              "text": "07511 177596"
+            },
+            {
+              "id": "6",
+              "text": "www.taperedplus.co.uk"
+            },
+            {
+              "id": "7",
+              "text": "nick@taperedplus.co.uk"
+            },
+            {
+              "id": "8",
+              "text": "TaperedPlus House, 8, Halegrove Court, Bowesfield Park, Stockton on Tees, TS18 3DB"
+            },
+            {
+              "id": "9",
+              "text": "ROCKDeck®\nHigh performance non-combustible insulation system for use in\nwarm roof applications.\n• Enhanced point load performance.\n• Specifically designed for balconies, terraces, plant rooms and\nroofs with mounted equipment (eg Solar & PV).\n• Carries BS EN 12430 & BS EN 1606 test data."
+            },
+            {
+              "id": "10",
+              "text": "Specify ROCKDeck® on your next project!\nFind out more by clicking this signature..."
+            }
+          ],
+          "contentId": "image001.png@01DD71D4.215F6BD0",
+          "containingMessage": {
+            "messageIndex": 0,
+            "sender": "nick@taperedplus.co.uk",
+            "recipients": [
+              "a.harvey@bauder.co.uk",
+              "j.bailey@bauder.co.uk",
+              "bauder@taperedplus.co.uk",
+              "sales@taperedplus.co.uk"
+            ],
+            "sentDate": "Wed, 11 Nov 2026 11:59:42 +0000",
+            "sentAt": "2026-11-11T11:59:42+00:00",
+            "requestRole": "direct_request",
+            "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000",
+            "sourceId": "asset:1:body",
+            "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c"
+          }
+        },
+        {
+          "sourceId": "asset:1:attachment:1",
+          "filename": "image002.png",
+          "sourceType": "attachment",
+          "contentSha256": "f61452f04d8f4163cbcb82e4469b92e8b872a2f7ee47db2a7470bafd3cb72022",
+          "sizeBytes": 16620,
+          "observedAt": "2026-11-11T11:59:42+00:00",
+          "status": "read",
+          "text": "[TEXT REGION 1]\nBAUDER\nmaking roofs secure.\n[/TEXT REGION 1]\n\nVISUAL CONTEXT\nThe image displays the logo of Bauder. It features an orange angle bracket forming an inverted \"L\" shape framing the top and left sides of the wordmark. Inside the frame, the word \"BAUDER\" is written in bold, black, uppercase sans-serif letters. Positioned beneath the right side of the main brand name is the tagline \"making roofs secure.\" in a smaller, lowercase black sans-serif typeface, ending with a period. The entire logo is set against a plain white background.",
+          "imageTextRegions": [
+            {
+              "id": "1",
+              "text": "BAUDER\nmaking roofs secure."
+            }
+          ],
+          "contentId": "image002.png@01DD71D4.215F6BD0",
+          "containingMessage": {
+            "messageIndex": 0,
+            "sender": "nick@taperedplus.co.uk",
+            "recipients": [
+              "a.harvey@bauder.co.uk",
+              "j.bailey@bauder.co.uk",
+              "bauder@taperedplus.co.uk",
+              "sales@taperedplus.co.uk"
+            ],
+            "sentDate": "Wed, 11 Nov 2026 11:59:42 +0000",
+            "sentAt": "2026-11-11T11:59:42+00:00",
+            "requestRole": "direct_request",
+            "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000",
+            "sourceId": "asset:1:body",
+            "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c"
+          }
+        },
+        {
+          "sourceId": "asset:1:attachment:2",
+          "filename": "image003.png",
+          "sourceType": "attachment",
+          "contentSha256": "c56e70d7376912fa96e3044760eec4175f25615227522f2343b9735dbd641d2f",
+          "sizeBytes": 12894,
+          "observedAt": "2026-11-11T11:59:42+00:00",
+          "status": "read",
+          "text": "[TEXT REGION 1]\nBe the Net Zero Design Hero\nyour team needs\n[/TEXT REGION 1]\n\n[TEXT REGION 2]\nDiscover more\n[/TEXT REGION 2]\n\n[TEXT REGION 3]\nBauderECO\n[/TEXT REGION 3]\n\n[TEXT REGION 4]\nICE\nAwards\nIrish Construction\nExcellence Awards 2025\nFinalist\n[/TEXT REGION 4]\n\n[TEXT REGION 5]\nBauderECO FF\nFlat roof PIR\ninsulation\n[/TEXT REGION 5]\n\n[TEXT REGION 6]\nREDcert²\n[/TEXT REGION 6]\n\nVISUAL CONTEXT:\nThis image is a horizontal marketing banner divided into an orange section on the left and a white section on the right. \n\n- On the orange background, headline text encourages the viewer to \"Be the Net Zero Design Hero your team needs\", accompanied by a bordered rectangular call-to-action button reading \"Discover more\".\n- In the center foreground, two stacked slabs of rigid foam insulation (BauderECO FF) are shown, bearing green printed branding on top.\n- Above the insulation boards is a white-and-orange badge for the \"ICE Awards Irish Construction Excellence Awards 2025 Finalist\".\n- The right white section contains the bold product title \"BauderECO FF\", product type description \"Flat roof PIR insulation\", and the circular blue and green \"REDcert²\" certification mark.",
+          "imageTextRegions": [
+            {
+              "id": "1",
+              "text": "Be the Net Zero Design Hero\nyour team needs"
+            },
+            {
+              "id": "2",
+              "text": "Discover more"
+            },
+            {
+              "id": "3",
+              "text": "BauderECO"
+            },
+            {
+              "id": "4",
+              "text": "ICE\nAwards\nIrish Construction\nExcellence Awards 2025\nFinalist"
+            },
+            {
+              "id": "5",
+              "text": "BauderECO FF\nFlat roof PIR\ninsulation"
+            },
+            {
+              "id": "6",
+              "text": "REDcert²"
+            }
+          ],
+          "contentId": "image003.png@01DD71D4.215F6BD0",
+          "containingMessage": {
+            "messageIndex": 0,
+            "sender": "nick@taperedplus.co.uk",
+            "recipients": [
+              "a.harvey@bauder.co.uk",
+              "j.bailey@bauder.co.uk",
+              "bauder@taperedplus.co.uk",
+              "sales@taperedplus.co.uk"
+            ],
+            "sentDate": "Wed, 11 Nov 2026 11:59:42 +0000",
+            "sentAt": "2026-11-11T11:59:42+00:00",
+            "requestRole": "direct_request",
+            "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000",
+            "sourceId": "asset:1:body",
+            "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c"
+          }
+        },
+        {
+          "sourceId": "asset:1:attachment:3",
+          "filename": "image004.png",
+          "sourceType": "attachment",
+          "contentSha256": "1957d925838aa9354a011582b89b561e94a8cef3fd9871ab11c3344afe2c9bc3",
+          "sizeBytes": 409,
+          "observedAt": "2026-11-11T11:59:42+00:00",
+          "status": "read",
+          "text": "VISUAL CONTEXT\nThe image displays an extremely blurry, low-resolution orange icon of a traditional telephone receiver or handset tilted diagonally against a plain white background. There is no visible text.",
+          "imageTextRegions": [],
+          "contentId": "image004.png@01DD71D4.215F6BD0",
+          "containingMessage": {
+            "messageIndex": 0,
+            "sender": "nick@taperedplus.co.uk",
+            "recipients": [
+              "a.harvey@bauder.co.uk",
+              "j.bailey@bauder.co.uk",
+              "bauder@taperedplus.co.uk",
+              "sales@taperedplus.co.uk"
+            ],
+            "sentDate": "Wed, 11 Nov 2026 11:59:42 +0000",
+            "sentAt": "2026-11-11T11:59:42+00:00",
+            "requestRole": "direct_request",
+            "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000",
+            "sourceId": "asset:1:body",
+            "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c"
+          }
+        },
+        {
+          "sourceId": "asset:1:attachment:4",
+          "filename": "image005.png",
+          "sourceType": "attachment",
+          "contentSha256": "7f084d9af1a39af10c2a268d4989eff82d6ff603bcc226108e68ed6f9e5d29a4",
+          "sizeBytes": 389,
+          "observedAt": "2026-11-11T11:59:42+00:00",
+          "status": "read",
+          "text": "VISUAL CONTEXT\nThe image is a very low-resolution, blurred icon depicting an orange mail envelope against a white background. It features a rectangular orange body with a downward-pointing, curved white line indicating the envelope flap.",
+          "imageTextRegions": [],
+          "contentId": "image005.png@01DD71D4.215F6BD0",
+          "containingMessage": {
+            "messageIndex": 0,
+            "sender": "nick@taperedplus.co.uk",
+            "recipients": [
+              "a.harvey@bauder.co.uk",
+              "j.bailey@bauder.co.uk",
+              "bauder@taperedplus.co.uk",
+              "sales@taperedplus.co.uk"
+            ],
+            "sentDate": "Wed, 11 Nov 2026 11:59:42 +0000",
+            "sentAt": "2026-11-11T11:59:42+00:00",
+            "requestRole": "direct_request",
+            "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000",
+            "sourceId": "asset:1:body",
+            "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c"
+          }
+        },
+        {
+          "sourceId": "asset:1:attachment:5",
+          "filename": "image006.png",
+          "sourceType": "attachment",
+          "contentSha256": "9dc9c8fddac992d3ed01255d6a000b12975c1b0110f8f8f9e758344fa6470966",
+          "sizeBytes": 519,
+          "observedAt": "2026-11-11T11:59:42+00:00",
+          "status": "read",
+          "text": "VISUAL CONTEXT\nThe image is a low-resolution, blurred orange circular icon on a plain white background. It features a round, vibrant orange sphere shape with lighter, white abstract or geographical patterns inside, resembling a simplified globe or planet emblem.",
+          "imageTextRegions": [],
+          "contentId": "image006.png@01DD71D4.215F6BD0",
+          "containingMessage": {
+            "messageIndex": 0,
+            "sender": "nick@taperedplus.co.uk",
+            "recipients": [
+              "a.harvey@bauder.co.uk",
+              "j.bailey@bauder.co.uk",
+              "bauder@taperedplus.co.uk",
+              "sales@taperedplus.co.uk"
+            ],
+            "sentDate": "Wed, 11 Nov 2026 11:59:42 +0000",
+            "sentAt": "2026-11-11T11:59:42+00:00",
+            "requestRole": "direct_request",
+            "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000",
+            "sourceId": "asset:1:body",
+            "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c"
+          }
+        },
+        {
+          "sourceId": "asset:1:attachment:6",
+          "filename": "image007.png",
+          "sourceType": "attachment",
+          "contentSha256": "73fa7bf2a13b67604def57389f7e0a4bc4e7989697d7177885ae291814e028e8",
+          "sizeBytes": 497,
+          "observedAt": "2026-11-11T11:59:42+00:00",
+          "status": "read",
+          "text": "[TEXT REGION 1]\nin\n[/TEXT REGION 1]\n\nVISUAL CONTEXT\nThe image displays the lowercase letters \"in\" in a bold, sans-serif font colored bright orange against a plain white background. The image has a low resolution and appears noticeably blurred or pixelated.",
+          "imageTextRegions": [
+            {
+              "id": "1",
+              "text": "in"
+            }
+          ],
+          "contentId": "image007.png@01DD71D4.215F6BD0",
+          "containingMessage": {
+            "messageIndex": 0,
+            "sender": "nick@taperedplus.co.uk",
+            "recipients": [
+              "a.harvey@bauder.co.uk",
+              "j.bailey@bauder.co.uk",
+              "bauder@taperedplus.co.uk",
+              "sales@taperedplus.co.uk"
+            ],
+            "sentDate": "Wed, 11 Nov 2026 11:59:42 +0000",
+            "sentAt": "2026-11-11T11:59:42+00:00",
+            "requestRole": "direct_request",
+            "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000",
+            "sourceId": "asset:1:body",
+            "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c"
+          }
+        },
+        {
+          "sourceId": "asset:1:attachment:7",
+          "filename": "image008.png",
+          "sourceType": "attachment",
+          "contentSha256": "dbed4043b0e2c874901a6e574cc7e172f979b384d0e5ebbb88fedb4cf4d6a41b",
+          "sizeBytes": 790,
+          "observedAt": "2026-11-11T11:59:42+00:00",
+          "status": "read",
+          "text": "[TEXT REGION 1]\nX\n[/TEXT REGION 1]\n\nVISUAL CONTEXT\nThe image displays an orange stylized capital letter \"X\" against a plain white background. Its design features one thin diagonal stroke intersecting a hollow, double-lined diagonal stroke, resembling a blackboard bold \"X\" or the platform logo for X (formerly Twitter). The edges of the orange strokes are slightly soft and blurred.",
+          "imageTextRegions": [
+            {
+              "id": "1",
+              "text": "X"
+            }
+          ],
+          "contentId": "image008.png@01DD71D4.215F6BD0",
+          "containingMessage": {
+            "messageIndex": 0,
+            "sender": "nick@taperedplus.co.uk",
+            "recipients": [
+              "a.harvey@bauder.co.uk",
+              "j.bailey@bauder.co.uk",
+              "bauder@taperedplus.co.uk",
+              "sales@taperedplus.co.uk"
+            ],
+            "sentDate": "Wed, 11 Nov 2026 11:59:42 +0000",
+            "sentAt": "2026-11-11T11:59:42+00:00",
+            "requestRole": "direct_request",
+            "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000",
+            "sourceId": "asset:1:body",
+            "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c"
+          }
+        },
+        {
+          "sourceId": "asset:1:attachment:8",
+          "filename": "image009.png",
+          "sourceType": "attachment",
+          "contentSha256": "c327891ffc9f0dd65f4b566a7543993eb6f070ba7f886b4b23913a19276fb377",
+          "sizeBytes": 540,
+          "observedAt": "2026-11-11T11:59:42+00:00",
+          "status": "read",
+          "text": "VISUAL CONTEXT\nThe image shows a low-resolution, blurred icon featuring a rounded rectangular orange button with a white right-pointing play triangle in the center, typically representing a video or play function. There is no visible text.",
+          "imageTextRegions": [],
+          "contentId": "image009.png@01DD71D4.215F6BD0",
+          "containingMessage": {
+            "messageIndex": 0,
+            "sender": "nick@taperedplus.co.uk",
+            "recipients": [
+              "a.harvey@bauder.co.uk",
+              "j.bailey@bauder.co.uk",
+              "bauder@taperedplus.co.uk",
+              "sales@taperedplus.co.uk"
+            ],
+            "sentDate": "Wed, 11 Nov 2026 11:59:42 +0000",
+            "sentAt": "2026-11-11T11:59:42+00:00",
+            "requestRole": "direct_request",
+            "headerSnippet": "From: Nick Lane <Nick@Taperedplus.co.uk>\nTo: Aaron Harvey <a.harvey@bauder.co.uk>, Jonathan Bailey <j.bailey@bauder.co.uk>, Bauder <Bauder@Taperedplus.co.uk>, Sales <sales@Taperedplus.co.uk>\nSubject: RE: Urgent - B260681 St. Cleres School\nDate: Wed, 11 Nov 2026 11:59:42 +0000",
+            "sourceId": "asset:1:body",
+            "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c"
+          }
+        }
+      ],
+      "requestContext": null
+    },
+    "fieldIssues": {
+      "Bauder Contract Number": "Candidate request timestamp could not be verified",
+      "Date Received": "Populated extraction has no verified applicable evidence",
+      "Company": "Populated extraction has no verified applicable evidence",
+      "Contact": "Populated extraction has no verified applicable evidence"
+    },
+    "noteIssues": {},
+    "provenance": {
+      "Date Received": {
+        "source": "Email/Attachment",
+        "status": "conflict",
+        "selected": null,
+        "candidates": [],
+        "excludedCandidates": [
+          {
+            "field": "Date Received",
+            "value": "11/11/2026",
+            "source_id": "asset:1:body",
+            "location": "Email header",
+            "snippet": "From: Aaron Harvey <a.harvey@bauder.co.uk>\nSent: 11 November 2026 10:59",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "direct_request",
+            "message_date": "11 November 2026 10:59",
+            "supersedes": [],
+            "rationale": "Date Aaron Harvey sent the files via WeTransfer to TaperedPlus.",
+            "reference_parts": [],
+            "reason": "Evidence does not belong to the selected client request"
+          },
+          {
+            "field": "Date Received",
+            "value": "11/11/2026",
+            "source_id": "asset:1:body",
+            "location": "Email body",
+            "snippet": "From: Aaron Harvey <a.harvey@bauder.co.uk>\nSent: 11 November 2026 10:59",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "forwarded_request",
+            "message_date": "11 November 2026 10:59",
+            "supersedes": [],
+            "rationale": "Literal sent date from the requesting client's forwarded message header.",
+            "reference_parts": [],
+            "reason": "Evidence does not belong to the selected client request"
+          }
+        ],
+        "rationale": "Most recent applicable request within the confirmed scope; common values may span roofs"
+      },
+      "Company": {
+        "source": "Email/Attachment",
+        "status": "conflict",
+        "selected": null,
+        "candidates": [],
+        "excludedCandidates": [
+          {
+            "field": "Company",
+            "value": "Bauder Ltd",
+            "source_id": "asset:1:body",
+            "location": "Email signature",
+            "snippet": "Bauder Ltd\n70 Landseer Road, Ipswich, England IP3 0DH",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "direct_request",
+            "message_date": "11 November 2026 10:59",
+            "supersedes": [],
+            "rationale": "Literal company name in the client sender's email signature.",
+            "reference_parts": [],
+            "reason": "Evidence does not belong to the selected client request"
+          },
+          {
+            "field": "Company",
+            "value": "Bauder Ltd",
+            "source_id": "asset:1:body",
+            "location": "Email body",
+            "snippet": "Bauder Ltd\n70 Landseer Road, Ipswich, England IP3 0DH",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "forwarded_request",
+            "message_date": "11 November 2026 10:59",
+            "supersedes": [],
+            "rationale": "Literal company name in the client sender's email signature.",
+            "reference_parts": [],
+            "reason": "Evidence does not belong to the selected client request"
+          },
+          {
+            "field": "Company",
+            "value": "BAUDER",
+            "source_id": "asset:1:attachment:1",
+            "location": "[TEXT REGION 1]",
+            "snippet": "BAUDER\nmaking roofs secure.",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "forwarded_request",
+            "message_date": "Wed, 11 Nov 2026 11:59:42 +0000",
+            "supersedes": [],
+            "rationale": "Literal brand identity from signature image logo TEXT REGION.",
+            "reference_parts": [],
+            "reason": "Evidence does not belong to the selected client request"
+          }
+        ],
+        "rationale": "Most recent applicable request within the confirmed scope; common values may span roofs"
+      },
+      "Contact": {
+        "source": "Email/Attachment",
+        "status": "conflict",
+        "selected": null,
+        "candidates": [],
+        "excludedCandidates": [
+          {
+            "field": "Contact",
+            "value": "Aaron Harvey",
+            "source_id": "asset:1:body",
+            "location": "Email header",
+            "snippet": "From: Aaron Harvey <a.harvey@bauder.co.uk>",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "direct_request",
+            "message_date": "11 November 2026 10:59",
+            "supersedes": [],
+            "rationale": "Client contact sending the request and drawings to TaperedPlus.",
+            "reference_parts": [],
+            "reason": "Evidence does not belong to the selected client request"
+          },
+          {
+            "field": "Contact",
+            "value": "Aaron Harvey",
+            "source_id": "asset:1:body",
+            "location": "Email body",
+            "snippet": "From: Aaron Harvey <a.harvey@bauder.co.uk>",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "forwarded_request",
+            "message_date": "11 November 2026 10:59",
+            "supersedes": [],
+            "rationale": "Client contact sending the request and drawings to TaperedPlus.",
+            "reference_parts": [],
+            "reason": "Evidence does not belong to the selected client request"
+          }
+        ],
+        "rationale": "Most recent applicable request within the confirmed scope; common values may span roofs"
+      },
+      "Bauder Contract Number": {
+        "source": "Email/Attachment",
+        "status": "conflict",
+        "selected": {
+          "field": "Bauder Contract Number",
+          "value": "B260681",
+          "source_id": "asset:1:body",
+          "location": "Email subject",
+          "snippet": "Subject: RE: Urgent - B260681 St. Cleres School",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "direct_request",
+          "message_date": "Wed, 11 Nov 2026 11:59:42 +0000",
+          "supersedes": [],
+          "rationale": "Bauder contract number stated in the email subject line.",
+          "reference_parts": [],
+          "observedAt": "2026-11-11T11:59:42+00:00",
+          "sourceObservedAt": "2026-11-11T11:59:42+00:00",
+          "filename": "Email body",
+          "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c"
+        },
+        "candidates": [
+          {
+            "field": "Bauder Contract Number",
+            "value": "B260681",
+            "source_id": "asset:1:body",
+            "location": "Email subject",
+            "snippet": "Subject: RE: Urgent - B260681 St. Cleres School",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "direct_request",
+            "message_date": "Wed, 11 Nov 2026 11:59:42 +0000",
+            "supersedes": [],
+            "rationale": "Bauder contract number stated in the email subject line.",
+            "reference_parts": [],
+            "observedAt": "2026-11-11T11:59:42+00:00",
+            "sourceObservedAt": "2026-11-11T11:59:42+00:00",
+            "filename": "Email body",
+            "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c"
+          },
+          {
+            "field": "Bauder Contract Number",
+            "value": "B260681",
+            "source_id": "asset:1:body",
+            "location": "Forwarded message header",
+            "snippet": "Subject: RE: Urgent - B260681 St. Cleres School",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "forwarded_request",
+            "message_date": "11 November 2026 10:59",
+            "supersedes": [],
+            "rationale": "Bauder contract number in the client's forwarded message subject.",
+            "reference_parts": [],
+            "observedAt": "2026-11-11T10:59:00+00:00",
+            "sourceObservedAt": "2026-11-11T11:59:42+00:00",
+            "filename": "Email body",
+            "contentSha256": "c10ac1fa65fb4461c31b84499677ae87ebf0b481a54bfe98f91163b947ac834c"
+          }
+        ],
+        "rejectedCandidates": [
+          {
+            "field": "Bauder Contract Number",
+            "value": "B260681",
+            "source_id": "asset:1:body",
+            "location": "Email subject",
+            "snippet": "Subject: RE: Urgent - B260681 St. Cleres School",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "direct_request",
+            "message_date": "11 November 2026 10:59",
+            "supersedes": [],
+            "rationale": "Bauder contract number stated in the email subject line.",
+            "reference_parts": [],
+            "reason": "Candidate request timestamp could not be verified",
+            "status": "unverified"
+          }
+        ],
+        "rationale": "Most recent applicable request within the confirmed scope; common values may span roofs"
+      }
+    }
+  }
+}

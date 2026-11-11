@@ -23,7 +23,10 @@ from backend.app.services.legacy_enquiry.source_documents import (
 from backend.app.services.performance_specification_contract import FIELD_NAMES
 from backend.app.services.performance_specification_evidence import resolve_email_evidence
 from backend.app.services.spreadsheet_extraction import extract_spreadsheet_documents
-from backend.app.services.specification_semantics import EVIDENCE_VERSION, PROVIDER_RECITATION_REVIEW_STATUS, SpecificationEvidence
+from backend.app.services.specification_semantics import (
+    EVIDENCE_VERSION, PROVIDER_RECITATION_REVIEW_STATUS, SpecificationEvidence,
+    UNSUPPORTED_SOURCE_SKIP_STATUS,
+)
 from backend.tests.pdf_helpers import pdf_bytes
 
 
@@ -92,39 +95,58 @@ def test_animation_does_not_hide_real_attachment_failures():
     manifest = []
     with pytest.raises(IncompleteSourceExtraction) as captured:
         extract_text_from_email("Request", [{"filename": "signature.gif", "content": image_bytes("GIF", animated=True)},
-                                            {"filename": "drawing.bin", "content": b"binary"}],
+                                            {"filename": "drawing.bin", "content": b"binary"},
+                                            {"filename": "broken.pdf", "content": b"invalid PDF"}],
                                 extractor=SimpleNamespace(max_attachment_workers=2), manifest=manifest)
     assert manifest[1]["status"] == "skipped:animated_image"
-    assert manifest[2]["status"] == "failed:UnsupportedSourceFormat"
-    assert "signature.gif" not in str(captured.value) and "drawing.bin" in str(captured.value)
+    assert manifest[2]["status"] == UNSUPPORTED_SOURCE_SKIP_STATUS
+    assert manifest[3]["status"] == "failed:SourceDocumentError"
+    assert manifest[3]["error"]["code"] == "unreadable_pdf"
+    assert "signature.gif" not in str(captured.value) and "drawing.bin" not in str(captured.value)
+    assert "broken.pdf" in str(captured.value)
 
 
-@pytest.mark.parametrize("filename,remediation", [
-    ("request.bin", "readable export"),
-    ("request.rar", "readable export"),
-])
+@pytest.mark.parametrize("filename", ["request.bin", "request.rar"])
 @pytest.mark.parametrize("supplementary", [False, True])
-def test_unsupported_sources_retain_actionable_diagnostics(tmp_path, filename, remediation, supplementary):
-    client = SimpleNamespace(max_attachment_workers=1)
-    with pytest.raises(IncompleteSourceExtraction) as captured:
-        if supplementary:
-            content = b"unsupported source"
-            path = tmp_path / filename
-            path.write_bytes(content)
-            source = DesignEmailAsset("1", filename, filename.rsplit(".", 1)[1], len(content),
-                                      "2026-10-30T12:00:00Z", "unused", False)
-            downloaded = DownloadedDesignEmailAsset(source, str(path), "unused", hashlib.sha256(content).hexdigest(), len(content))
-            analyze_downloaded_email_assets([downloaded], client=client)
-        else:
-            extract_text_from_email("Contact: Alex", [{"filename": filename, "content": b"unsupported source"}],
-                                    extractor=client)
-    failure = captured.value
-    record = next(source for source in failure.manifest if source["filename"] == filename)
-    assert record["status"] == "failed:UnsupportedSourceFormat"
-    assert record["text"] == ""
-    assert record["error"]["code"] == "unsupported_source_format"
-    assert remediation in str(failure)
-    assert remediation in record["error"]["message"]
+def test_unsupported_sources_are_audited_without_blocking_readable_email(tmp_path, filename, supplementary):
+    content, contexts = b"unsupported private source", []
+    client = SimpleNamespace(max_attachment_workers=1,
+        extract_design_parameters=lambda context: contexts.append(context) or parameters(),
+        query_llm=lambda *args: "Roof")
+    if supplementary:
+        inputs = [("1", "request.eml", b"From: client@example.com\nSubject: Roof\n\nContact: Alex"),
+                  ("2", filename, content)]
+        downloaded = []
+        for asset_id, source_filename, source_content in inputs:
+            path = tmp_path / source_filename
+            path.write_bytes(source_content)
+            source = DesignEmailAsset(asset_id, source_filename, source_filename.rsplit(".", 1)[1],
+                                      len(source_content), "2026-10-30T12:00:00Z", "unused", False)
+            downloaded.append(DownloadedDesignEmailAsset(source, str(path), "unused",
+                hashlib.sha256(source_content).hexdigest(), len(source_content)))
+        result = analyze_downloaded_email_assets(downloaded, client=client)
+        manifest, context, expected_id = result.source_manifest, contexts[0], "asset:2"
+    else:
+        manifest = []
+        context = extract_text_from_email("Contact: Alex", [{"filename": filename, "content": content}],
+            extractor=client, manifest=manifest, source_prefix="mail")
+        expected_id = "mail:attachment:0"
+    record = next(source for source in manifest if source["filename"] == filename)
+    assert record["status"] == UNSUPPORTED_SOURCE_SKIP_STATUS and record["text"] == ""
+    assert record["sourceId"] == expected_id
+    assert record["contentSha256"] == hashlib.sha256(content).hexdigest()
+    assert "error" not in record
+    assert "Contact: Alex" in context and "unsupported private source" not in context
+
+
+def test_unsupported_standalone_source_skips_before_supported_document_size_check(monkeypatch):
+    from backend.app.services.legacy_enquiry import source_documents
+    monkeypatch.setattr(source_documents, "MAX_SOURCE_BYTES", 4)
+    content = b"binary data exceeds supported-document limit"
+    [record] = extract_source_records(content, "drawing.bin", None, source_id="asset:7")
+    assert record["status"] == UNSUPPORTED_SOURCE_SKIP_STATUS
+    assert record["sourceId"] == "asset:7" and record["text"] == ""
+    assert record["contentSha256"] == hashlib.sha256(content).hexdigest()
 
 
 def test_supplementary_animated_image_does_not_block_analysis(tmp_path):

@@ -110,6 +110,64 @@ def test_dwg_is_skipped_and_audited_without_entering_model_context():
     assert "Scale: 1:100" in context and "Contact: Alex" in context
 
 
+def test_archive_above_old_source_limit_skips_unsupported_member_and_reads_supported_text():
+    content = archive_bytes([("export.bin", b"x" * (21 * 1024 * 1024)),
+                             ("request.txt", b"Scale: 1:100")], compression=ZIP_STORED)
+    assert 20 * 1024 * 1024 < len(content) < 40 * 1024 * 1024 == sources.MAX_SOURCE_BYTES
+    records = sources.extract_source_records(content, "request.zip", None, source_id="zip:1")
+    assert [record["status"] for record in records] == [
+        "expanded:archive", "skipped:unsupported_format", "read",
+    ]
+    assert records[1]["sizeBytes"] == 21 * 1024 * 1024
+    assert records[1]["text"] == ""
+    assert records[2]["text"] == "Scale: 1:100"
+
+
+@pytest.mark.parametrize("extension,status", [("bin", "skipped:unsupported_format"), ("dwg", "skipped:dwg")])
+def test_skipped_archive_members_do_not_apply_readable_document_size_limit(monkeypatch, extension, status):
+    # Ignored binary members remain inside the total expansion budget even when
+    # larger than the limit applied to readable documents and nested archives.
+    ignored = b"x" * 2000
+    content = archive_bytes([("export." + extension, ignored), ("request.txt", b"Scale: 1:100")])
+    monkeypatch.setattr(sources, "MAX_SOURCE_BYTES", 1024)
+    records = sources.extract_source_records(content, "request.zip", None, source_id="zip:1")
+    assert [record["status"] for record in records] == ["expanded:archive", status, "read"]
+    assert records[1]["contentSha256"] == hashlib.sha256(ignored).hexdigest()
+    assert records[1]["parentSourceId"] == "zip:1"
+    assert records[1]["sizeBytes"] == len(ignored)
+
+
+def test_unsupported_members_are_skipped_through_nested_archives_and_cannot_supply_evidence():
+    ignored = b"Scale: 1:500"
+    content = archive_bytes([("nested.zip", archive_bytes([("export.bin", ignored)])),
+                             ("request.txt", b"Scale: 1:100")])
+    manifest = []
+    context = extract_text_from_email("Request", [{"filename": "request.zip", "content": content}],
+                                     extractor=None, manifest=manifest, source_prefix="mail")
+    skipped = next(record for record in manifest if record["filename"].endswith("export.bin"))
+    assert skipped["status"] == "skipped:unsupported_format"
+    assert skipped["contentSha256"] == hashlib.sha256(ignored).hexdigest()
+    assert "Scale: 1:100" in context and "Scale: 1:500" not in context
+    extraction = {"specificationEvidenceVersion": EVIDENCE_VERSION,
+        "specificationAssessedFields": list(FIELD_NAMES), "performanceParameters": {},
+        "sourceManifest": manifest, "specificationEvidence": [{
+            "field": "Scale", "value": "1:500", "source_id": skipped["sourceId"],
+            "snippet": "Scale: 1:500", "location": "binary", "scope": None, "issuer": None,
+            "role": "requested", "rationale": "Must not trust skipped binary content",
+        }]}
+    raw, _, issues = resolve_email_evidence(extraction)
+    assert raw["Scale"] is None and "Scale" in issues
+
+
+def test_archive_expansion_budget_still_includes_skipped_formats(monkeypatch):
+    content = archive_bytes([("export.bin", b"x" * 2000), ("request.txt", b"Scale: 1:100")])
+    monkeypatch.setattr(sources, "MAX_ARCHIVE_EXPANDED_BYTES", 1000)
+    records = sources.extract_source_records(content, "request.zip", None, source_id="zip:1")
+    assert len(records) == 1
+    assert records[0]["status"] == "failed:SourceDocumentError"
+    assert records[0]["error"]["code"] == "archive_expansion_limit"
+
+
 @pytest.mark.parametrize("embedded", [True, False])
 def test_zip_and_nested_zip_documents_reach_analysis_with_individual_evidence(tmp_path, embedded):
     pdf = pdf_bytes()

@@ -23,18 +23,22 @@ from ..gemini_requests import GeminiRequestFailure, source_failure_details as ge
 from ..spreadsheet_extraction import extract_spreadsheet_documents, is_spreadsheet
 from ..specification_semantics import (
     ANIMATED_IMAGE_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS, COMPLETE_SOURCE_STATUSES, DWG_SKIP_STATUS,
-    ENCRYPTED_PDF_SKIP_STATUS, PROVIDER_RECITATION_REVIEW_STATUS,
+    ENCRYPTED_PDF_SKIP_STATUS, PROVIDER_RECITATION_REVIEW_STATUS, UNSUPPORTED_SOURCE_SKIP_STATUS,
 )
 from ..specification_image_text import literal_image_regions
 from ..source_text import clean_source_text
 
 
-MAX_SOURCE_BYTES = 20 * 1024 * 1024
+MAX_SOURCE_BYTES = 40 * 1024 * 1024
 MAX_ARCHIVE_EXPANDED_BYTES = 100 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 200
 MAX_ARCHIVE_DEPTH = 3
 MAX_CONTEXT_CHARS = 500_000
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
+DOCUMENT_EXTENSIONS = frozenset({
+    ".pdf", ".docx", ".txt", ".csv", ".tsv", ".json", ".xml", ".html", ".htm",
+    *IMAGE_EXTENSIONS,
+})
 
 
 class AnimatedImageSkipped(Exception):
@@ -59,7 +63,20 @@ class SourceDocumentError(ValueError):
 
 class UnsupportedSourceFormat(SourceDocumentError):
     def __init__(self):
-        super().__init__("unsupported_source_format", "Unsupported source format; replace this extraction source with a readable export.")
+        super().__init__("unsupported_source_format", "Unsupported source format; skipped during extraction.")
+
+
+def _document_skip_status(filename):
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".dwg":
+        return DWG_SKIP_STATUS
+    if suffix not in DOCUMENT_EXTENSIONS and not is_spreadsheet(filename):
+        return UNSUPPORTED_SOURCE_SKIP_STATUS
+    return None
+
+
+def _archive_member_skip_status(filename):
+    return None if Path(filename).suffix.lower() == ".zip" else _document_skip_status(filename)
 
 
 def source_failure_details(exc):
@@ -138,15 +155,19 @@ def html_text(content: str | bytes) -> str:
 
 def extract_document(content: bytes, filename: str, extractor) -> str:
     suffix = Path(filename).suffix.lower()
-    if suffix == ".dwg":
+    skip_status = _document_skip_status(filename)
+    if skip_status == DWG_SKIP_STATUS:
         raise DwgSkipped("DWG drawings are excluded from extraction")
+    if skip_status == UNSUPPORTED_SOURCE_SKIP_STATUS:
+        raise UnsupportedSourceFormat()
     if len(content) > MAX_SOURCE_BYTES:
-        raise SourceDocumentError("source_size_limit", "Source exceeds the 20 MiB extraction size limit; supply a smaller document.")
+        raise SourceDocumentError("source_size_limit", "Source exceeds the 40 MiB extraction size limit; supply a smaller document.")
     if is_spreadsheet(filename):
         with tempfile.TemporaryDirectory(prefix="design-sheet-") as directory:
             path = Path(directory) / ("source" + suffix)
             path.write_bytes(content)
-            documents = extract_spreadsheet_documents(str(path), filename, visible_only=True, preserve_full_cells=True)
+            documents = extract_spreadsheet_documents(str(path), filename, visible_only=True, preserve_full_cells=True,
+                                                      max_file_bytes=MAX_SOURCE_BYTES)
         notices = [doc["notice"] for doc in documents if doc["section"] == "spreadsheet:extraction-notice"]
         if notices:
             raise SourceDocumentError("workbook_incomplete", "Workbook extraction incomplete: " + " ".join(notices)
@@ -244,6 +265,8 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
         record["status"] = ANIMATED_IMAGE_SKIP_STATUS
     except DwgSkipped:
         record["status"] = DWG_SKIP_STATUS
+    except UnsupportedSourceFormat:
+        record["status"] = UNSUPPORTED_SOURCE_SKIP_STATUS
     except EncryptedPdfSkipped:
         record["status"] = ENCRYPTED_PDF_SKIP_STATUS
     except Exception as exc:
@@ -257,7 +280,7 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
 
 def _extract_archive(content, filename, extractor, source_id, observed_at, budget, depth, records):
     if len(content) > MAX_SOURCE_BYTES:
-        raise SourceDocumentError("source_size_limit", "ZIP exceeds the 20 MiB source size limit; split the archive.")
+        raise SourceDocumentError("source_size_limit", "ZIP exceeds the 40 MiB source size limit; split the archive.")
     if depth >= MAX_ARCHIVE_DEPTH:
         raise SourceDocumentError("archive_depth_limit", "ZIP exceeds the three-level nesting limit; flatten the archive.")
     try:
@@ -269,8 +292,9 @@ def _extract_archive(content, filename, extractor, source_id, observed_at, budge
             files = [entry for entry in entries if not entry.is_dir()]
             if not files:
                 raise SourceDocumentError("empty_archive", "ZIP contains no documents; supply an archive with readable documents.")
-            if any(entry.file_size > MAX_SOURCE_BYTES for entry in files):
-                raise SourceDocumentError("archive_member_size_limit", "ZIP contains a file exceeding the 20 MiB source size limit; supply smaller documents.")
+            if any(entry.file_size > MAX_SOURCE_BYTES and _archive_member_skip_status(entry.filename) is None
+                   for entry in files):
+                raise SourceDocumentError("archive_member_size_limit", "ZIP contains a supported file exceeding the 40 MiB source size limit; supply smaller documents.")
             budget.expanded_bytes += sum(entry.file_size for entry in files)
             if budget.expanded_bytes > MAX_ARCHIVE_EXPANDED_BYTES:
                 raise SourceDocumentError("archive_expansion_limit", "ZIP exceeds the 100 MiB total expansion limit including nested archives; split the archive.")
@@ -280,10 +304,14 @@ def _extract_archive(content, filename, extractor, source_id, observed_at, budge
                 if entry.is_dir():
                     continue
                 # Read by ZipInfo, not name: duplicate filenames remain separate
-                # evidence sources. The bound also protects against false headers.
+                # evidence sources. Skipped formats are read only for their audit
+                # hash, bounded by the existing total archive expansion budget.
+                # Their size must not block readable documents in the archive.
+                read_limit = (MAX_SOURCE_BYTES if _archive_member_skip_status(entry.filename) is None
+                              else MAX_ARCHIVE_EXPANDED_BYTES)
                 with archive.open(entry) as member:
-                    member_content = member.read(MAX_SOURCE_BYTES + 1)
-                if len(member_content) > MAX_SOURCE_BYTES or len(member_content) != entry.file_size:
+                    member_content = member.read(read_limit + 1)
+                if len(member_content) > read_limit or len(member_content) != entry.file_size:
                     raise SourceDocumentError("archive_member_size_limit", "ZIP member has an invalid or excessive expanded size; supply a valid, smaller archive.")
                 children = extract_source_records(
                     member_content, f"{filename}!/{entry.filename}", extractor,

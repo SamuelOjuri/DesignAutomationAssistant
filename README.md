@@ -411,6 +411,15 @@ digest, the separately pinned `gemini-3.8-flash` extraction model, and a
 code-owned output revision that changes whenever rendered or extracted output
 semantics change.
 
+The current design pipeline is `output-v19`. Design source files, ZIP archives
+and readable archive members accept up to 40 MiB, including design workbooks; search
+ingestion keeps its separate 20 MiB workbook limit. Unsupported formats are
+audited as `skipped:unsupported_format` and contribute no field evidence.
+Unreadable supported sources still require retry/review. Check the deployed
+reader contract without network calls using
+`python -m backend.scripts.check_design_processing_sources`; expect seven passing
+checks, `max_source_mib: 40` and the unsupported-format skip status.
+
 ## Design Processing Operations
 
 Run auditable operator commands from the workspace root. `--operator-id`

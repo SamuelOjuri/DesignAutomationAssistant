@@ -1,0 +1,84 @@
+{
+  "sdk_http_response": {
+    "headers": {
+      "x-gemini-service-tier": "standard",
+      "content-type": "application/json; charset=UTF-8",
+      "vary": "Origin, X-Origin, Referer",
+      "content-encoding": "gzip",
+      "date": "Wed, 11 Nov 2026 14:20:26 GMT",
+      "server": "scaffolding on HTTPServer2",
+      "x-xss-protection": "0",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "server-timing": "gfet4t7; dur=13928",
+      "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+      "transfer-encoding": "chunked"
+    },
+    "body": null
+  },
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "media_resolution": null,
+            "code_execution_result": null,
+            "executable_code": null,
+            "file_data": null,
+            "function_call": null,
+            "function_response": null,
+            "inline_data": null,
+            "text": "[TEXT REGION 1]\nBe the Net Zero Design Hero\nyour team needs\n[/TEXT REGION 1]\n\n[TEXT REGION 2]\nDiscover more\n[/TEXT REGION 2]\n\n[TEXT REGION 3]\nBauderECO\n[/TEXT REGION 3]\n\n[TEXT REGION 4]\nICE\nAwards\nIrish Construction\nExcellence Awards 2025\nFinalist\n[/TEXT REGION 4]\n\n[TEXT REGION 5]\nBauderECO FF\nFlat roof PIR\ninsulation\n[/TEXT REGION 5]\n\n[TEXT REGION 6]\nREDcert²\n[/TEXT REGION 6]\n\nVISUAL CONTEXT:\nThis image is a horizontal marketing banner divided into an orange section on the left and a white section on the right. \n\n- On the orange background, headline text encourages the viewer to \"Be the Net Zero Design Hero your team needs\", accompanied by a bordered rectangular call-to-action button reading \"Discover more\".\n- In the center foreground, two stacked slabs of rigid foam insulation (BauderECO FF) are shown, bearing green printed branding on top.\n- Above the insulation boards is a white-and-orange badge for the \"ICE Awards Irish Construction Excellence Awards 2025 Finalist\".\n- The right white section contains the bold product title \"BauderECO FF\", product type description \"Flat roof PIR insulation\", and the circular blue and green \"REDcert²\" certification mark.",
+            "thought": null,
+            "thought_signature": "EqYgCqMgAWkUfRNWcC5-DXlEZm10-T96Z1p-Rya7vkY3iYgduPOXYpwigSiQwZX4lCGldMEp80VJOTmGhKytasFVdXnucdjFq42KKnJQaPZqNePLLuyUPGXjWQNuTxiS-XEOqKV2VEVXzBqycSsU1Ny25p1lcJWfGeFDufER3NFRpk8QrDBWX1oxCJVW6CJtwEk94w5DQqWxcxRrC8k_2gL4h-9NzOPwWhCkweNvaZsRwJrwDqHyMZRRJW1WCNmm7j-aJvSmADyb2fB2wvadyTVt1ZHvrAtpoYzV5WoqFiZ4KvsEgjQw1YPEHvby0WzclwWnTuXfSBPSV4kNeNvkDqlnbo31pXwpo0F-zFtis1IpRwZEnmpqcrL6-xuET4ML9MLVBKeNbEGmXWw_y89LRzgmCkU9BLiPuDdEBGTPKy7xWLmUDEtdaMaqC57Yxqnp8GU3JgCgNySAlgVtsGN_GlONmmsPPtimYv7s1AOPcTnirs4QlvjQs_ObTJzhS2bf6AEm4_dW4Pede4RLQB8nNomhEpgEEmq2pNWW2q1ceM9E19ky9gRrwISe82rznzArRAMKxbVmfaqAj2NLs6toAmLYpx3l-sL8q8lE69zQ-mAPtCzBhWSd57Oi5SuO2ZPZhXC6oA3X1C-Rx22Dd4M1iHJgDa_-l7TIT0g63vgxF2X-KYAiggDQ5PNqK8GwP6qwnPvQ2B0NYP5vT-6da1n_Lsc3FFqxcxk8IFW4Xu5MRPclkgqRVDsB02ok0NdjACyGEFiZA70Uqqw9h_U5x2FMIpiU1yZKYzd5KCjs-Cupk5L8US3z8r1jiLZ-TTQX0UED_IGhMhl5qx1VPxGpIdJZNbmoTx-elqxrVFxYzdlIr6Wbh8RV3yMnivmYCaicYABaoS433xoG0QDOCYGbx4tmdlqvEGSfcUI_brXad7cxhFy1j9euA-94gQEqJ3Gre-dA_nPqXhyGDeoO-wcnu2zOw7dnADMc7xRr-VPH-wxCXzJfmYbcYJOnnL9ADvuQjU8a8qMfZgsKuw4m8eb-H2H3KTFf3GFQR9J2OVzH-ruPK-VYNkWKb5n4lfDUfiLk0A_dzoS6XzfkuLodBNf5NvmEqde80a5W5tRYjClj34f-6cA8UGw8bY6m04SiJqUeT840dhXZ6dYgowNoLSM_JKO3Z4IRBWtPwOuHO_cO37hMKYxXWl061Oq3Ef7mCtQAH8u2Cx55gMyLvx2oMhKjglLGxFFTJsDMX3B7AzsdNacCtp-PRTmiDt1MIAg2kIFr4aeMFiElSOi_RkXx3mG4vAQR96EJw1EGiRB81pEpbUV7VJsBXt5rXE4QFdpGQUPjhoc_gB4UL9gEbjZd85UpOBRolCYG1QzB3pXhVLJOxvbSffaXQw1Fa0s8h-D8jLSzf8Ti-I01KxbQzcRTNP_hqqsyqBDPO8B0f33pXDx4CqnzjzUNMiKNvHAixI-aR-lLmlYrMrZdEjY-wFLZTPnWIkA9ZzTs94BoAwTY0XWce6gB9gErDzo3UR-Tg_ak2ch_58MAPy8640HuzgbvazWDlg-qkkFinBNHe2XKK-UQShKudaNj_nzEqtebpDyUbr0je-abit04FCEhJFpJn2kqAhb2FvwpC9QOhi7Ev_YDkExr2uQQnjB6Wjg8jEDFUaCE5lDeGmYmsKXIlphS8Rp25-Xn6Gq7opJckmxdU5fcHDFr1gw2kEHypimH61zDJ0khdUqIdZC8szwfu_QPG6rFB6iBvmk8f_o89bOQwMIY-VA1sdqwAQabfUHYWfG9Kjl9ADAnJcb4mhmVtzNRECfcGdpgP9zAY3cr4sagvQHH7PkU5ZmFAgN3MT9rUnQxPlzPGS3dUt_Et9VIpCk6v853NA3X67hugcSuLXajHPbtZwr4oj0d_Ty5d4jPjJYuswk2Mi7gy14DpfcDqZUYa7gq5TkqCx7po7KfZHPFpDK0Z1nG_vX9nTDdLaPPm8Ak80YRWLxa10f82q9hsQIYxVrig0_2YEmBo4blj1cRkl7jk5ww4fYa5QYc5AGSH82GDFfMmU-eyml0hwPOmlgLM0ga9WTuuWAB_l9qpaDz8ZFY5a3mscF5GFsrz7Gp8xrnK0aHBdL6VmScl55UQUUmDc-p25-dIMg7jeaJUZj1bDWjwtcFM0VBnFkaVRNyUaQvfGbEw8o3hkCy1XgmzcNfqB23Mx9lvKbbDtRFpiHuoyKThomcC0MjPX3S894kGLfpNB_KWEPRrvRUwzTE-XNU33NaY6DLfojb8HdrrzM41wljYynDaQ_vONUHAe53REc7dPb_yqVzeT7keNNLUocUNkVoMFtrl8jry4UMcUTlAHXRDSOdXsKjYUtkHhZLFoTZcBiV_Y_DFMAL6CM4DaMa-UhwjpC7HchLtFSB9tO2ZvoOGyTUVMOyNrS04jo9aJv7UQ-2VM-h_xvI1gCICyQMlVnuKUL1EVESQS5iAKyPBKuK3mE8s7nCo8sKDWwdrPzgH6csexEx-a6Q3q09TC7oyqEqwvpti67HNoLLgyfAW4C51Tr6FiRDBwmrdsYCFD2Y_PEdvxJU84fwP7F2W7ojQduHDV7JzcjD68SYiTzalSERDdQuE2Y5YFWia9eJiunsbYKPtsPRbnWEivAvCCagdBvyAOxtYwG6NuHqMJb7Ql2zyzcEqmqS-OCmMjQLp10WKwisNUu-9wN5CM-O3JaHd6EJ22enfkYvYOXleHcpXm_aJLerfZ282rfCMCXughXgh3Upm6GiWXWhDldczkJefnxjaT7eFGYLDgdsUvSDseeCoMCa3PZ1Ae62XaQsfwWHmO3-TTMDP3y_zPrA_2HJfVqveE9_BL6vb29I2tvUtxRKOMsmibOQO8CnZ_t76Zs479nZxY7QGIUwYQNhRAYOSkjbJLazbnMPkIURmmRSoxMGqJDObplZMtBrOjS94a-wH2gRn0gwpz1j_9uDh9WDvx7G_feb7HiwhvUMFFkErWBsa2F7OBZhdwxcCbe-BaDQnbKmHxnT-eSGqfudKuXRRgGwRi69wUMMUVkLpVNiL2rx1_GrpwbV5pkArvwu6LqxXtpnkNT9Des2IF22sz-MLuoIPrraCl-FjZFSFSEUrbl2DwZbu06dsEoU_sbrWVqYXBC0cELpmv7YSWumNabNz-rt7rmf1o1TCoZGlu2QqwPNnn3NYs8ZBHIo6-LcFLT9Pni2xg9wmXdX_pZ4N-oSbE8CA1mxR_bo3EmfEcReciYgWPf4ASGyV02mXdaYYynI1wfEqrjeWP8gMFv1spXlHoOh5xjboWcZSLAkMjvT8RNN4aG5N9W1RwQBNjt1qzpX8hw3MdeqxMNUt7BL4xJnD6RYv5We7-pAQhsIJgifD0kAWCv6fOZjlTYfPPeK8JUphF-WuIyVvwrvJxcc4b_WYj4YWG74IQV1oeQxKRzxLxrFvHiLBo1eroJW82h5l1JmsYSGRNigrPz4rhpDgW_SHufvWA-qMg6P0GQXQsSm9wm0xKOoEHRzGtARRtwDhIdLz00jOftK0QzdBTDTyTKO6030zMgsJJz_M7DN0RHQZ2nxgsOcb1-WdgdhINZ2_qcDJNDQKug_-FRPwTTMcY0pqFz32Vb-41Fwpk5NWz7YhgY90DAhzbAWOz-rIPBE38dqeub9Q6sLGx7wJJZmsAgJsrVRMMFdhMIk85cEHyKpzbg3oZxL6pkmFj0Lu9aLoJoIAm8xcGbv9oaDGlixSDHW9UA_fUO2QCkribUxUrRXeiOe68evukLMeFqgShtLsauT2x2QKfq8WUY7_Lg7btaxicOPOt_odWyrNdKMglCaVdOc5ki_cKT80px1Em7SJGeevkF4vprYIwY9U6pJVyyO9fE1mEpqwMENPnciYRxTbW4uab3ApLanVgEbaap6ODzjykx8u4awRUBhRG0eOEnOWycUl9m-OZQQUjKJtGKBYQYIOsm3e2RcvBUKw5ZsvVPy7G4wzLcKcw4vNkHCys73p4DfmO-nkclx_2yVXBCNVoz5aGHC0thM6iWTZ6jyScEMhxiKkdYL8KxbSYU-rL92gkSyhEdMRKMxpFk79rrz44p06sy38wj3hkgZ_5Wv7AaPdZ0SdzVA3hX33L-T9wPaGVvgutlG2bx8cGnI5Qyni9epIZ6GSUM5OVHSz3qy0QGTNpulewRKYEJiLThxbxn2N_MAonDvDIBHSAsBBWuPb_6u5YHq2V6JCiYdf4LjbecRER2n1qGoMb-3a7Sg8nqftXABr3tvzWAQWJgUjVuUm6gTcixAT7TKM3-a1mZewplrTO8NirhIEU_YaAjku1MUWt-RBRYv0aupAwBTmu0jKjPFz2YMVy1MFzHyKgZbxNVSG5p6T559agqdqebLaVW1oaT5_vmx9s4wcZiVrkP6rnu9gUxLNIKYho24nWi4gQBRgXBh75m1BsOzeCpl6TbPA8sZlqOVCyU48LHuXk8ZNlkOHqr6DYp-zo9bwvrXd8XChlUkCjVQBfLkcVPOa7ieyKkq_2PHTe9zTuEve0aCWDRdP_5SRzGxlLIWVLnveyN5ElUENF9WcOrrJ-CwoxdOueJugd4Z--Fjx1lCT9Bndq9A5YKuswV3BmBt04T83bqCOuvX5L9SSFeVbVIlfoh6rJ1wnXfq3m071L4ZDWIHfIrbbMjz2e9GeVMc1cFrORqfOaC9NQzT52N-3A2HcIOpNHmHq8Q3MFmUXB7keV753leJpFaocvfgOckzD1Y9sp1DIfAPWE4PcOEWhVEpeSqkTnqee_xR5j5NX8He4uQERbgN53LWyidrd4Z7WcZh2wFVZAxsNk9ntrozKs4ol7SPSsmFDgg0nD_XIM34LLBWyiIiXQ6qvH-0fT5DzDGZGirplvCiXsTi2essufS_ktNE5Ozu0xS8c0jH5G832emw0LTONzQFpkvAVuM9uZUjAcrA3sDUSVhXxL_QoTjQKmNBBZf6QSxVR3oRB_9zACihl-hy0ERnA4d2PoETK_yj22TKP4yaLP5vqnNaT695nWTrck-UkcnWPEn1khizUBV3DhzdOeql67u-JCjaRojYjH-H8EVd0GFUE6Wj_9widJu33bUlt4EqIp0UbvlSBHgzjNkgVYRs4X_1Zmch70rihzCQTdJUgRwrRwuOI5_Fx5ITMJyJw8ftrRGux0p2g60wtKKnzuSIBMJidmZW_wrNYaynTGZ4RzI1TjCnnEIQVZ188108vNW3YSmB209YHm86xQuOkT8wUvJDSmXHvkmj8FLWJV3CrhKUTGNFkK4y4c8NMT0fB-4UnflPTuln2_IMm6Lo9JXGOyScLaf1lNjb-AB3ESUzhupnpK0L2QFqwfgTsZibFIQYm97Wu1xYC-9q5Zri6sa7balctmBarHPoRikd9b6vtEiBYLjxsqdtSb_isoM_6JBUJJF93T1bLANuVsQywcuz6q8VTAH7m5qvgrLYX9plh-hYrGfQJ8k9PwvCbXIoaNSd-s4NNWFsqQnFKF70lm_UdG3buTor1B2CMg7AvdiGGrWn22ttlJAOGJwa",
+            "video_metadata": null,
+            "tool_call": null,
+            "tool_response": null,
+            "part_metadata": null,
+            "audio_transcription": null
+          }
+        ],
+        "role": "model"
+      },
+      "citation_metadata": null,
+      "finish_message": null,
+      "token_count": null,
+      "finish_reason": "STOP",
+      "grounding_metadata": null,
+      "avg_logprobs": null,
+      "index": 0,
+      "logprobs_result": null,
+      "safety_ratings": null,
+      "url_context_metadata": null
+    }
+  ],
+  "create_time": null,
+  "model_version": "gemini-3.8-flash",
+  "prompt_feedback": null,
+  "response_id": "nHn0atvYHYntxN8P8tu7OQ",
+  "usage_metadata": {
+    "cache_tokens_details": null,
+    "cached_content_token_count": null,
+    "candidates_token_count": 325,
+    "candidates_tokens_details": null,
+    "prompt_token_count": 1248,
+    "prompt_tokens_details": [
+      {
+        "modality": "IMAGE",
+        "token_count": 1053
+      },
+      {
+        "modality": "TEXT",
+        "token_count": 195
+      }
+    ],
+    "thoughts_token_count": 1163,
+    "tool_use_prompt_token_count": null,
+    "tool_use_prompt_tokens_details": null,
+    "total_token_count": 2736,
+    "traffic_type": null
+  },
+  "model_status": null,
+  "automatic_function_calling_history": [],
+  "parsed": null
+}

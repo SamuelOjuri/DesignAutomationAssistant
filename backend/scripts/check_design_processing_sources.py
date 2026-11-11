@@ -62,6 +62,7 @@ def check_sources():
     with ZipFile(output, "w") as archive:
         archive.writestr("request.txt", "Scale: 1:100")
         archive.writestr("drawing.dwg", b"CAD")
+        archive.writestr("model.rvt", b"unsupported BIM format")
     archive_content = output.getvalue()
     output = io.BytesIO()
     book = openpyxl.Workbook()
@@ -78,9 +79,12 @@ def check_sources():
     results = []
     for name, content, expected_statuses, required_text in (
         ("drawing.dwg", b"CAD", ["skipped:dwg"], ""),
-        ("request.zip", archive_content, ["expanded:archive", "read", "skipped:dwg"], "Scale: 1:100"),
+        ("request.zip", archive_content,
+         ["expanded:archive", "read", "skipped:dwg", "skipped:unsupported_format"], "Scale: 1:100"),
         ("long-cell.xlsx", workbook_content, ["read"], "Target U-value: 0.25"),
         ("protected.pdf", encrypted_pdf_content, ["skipped:encrypted_pdf"], ""),
+        ("model.rvt", b"unsupported BIM format", ["skipped:unsupported_format"], ""),
+        ("invalid-utf8.txt", b"\xff", ["failed:UnicodeDecodeError"], ""),
     ):
         records = extract_source_records(content, name, None, source_id="diagnostic")
         statuses = [record["status"] for record in records]

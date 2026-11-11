@@ -1,7 +1,7 @@
 # Specification Review source policy and PDF (Phase 4)
 
 Phase 4 connects the typed source and decision contracts to the specification
-publisher. It uses `output-v18`, evidence version 3, source policy
+publisher. It uses `output-v19`, evidence version 3, source policy
 `specification-review-source-v1`, the versioned reference parser, and
 `performance-specification-v5`. Apply migration `0019_specification_review` before
 running this worker. Publishing remains disabled by default. Phase 5 supplies the

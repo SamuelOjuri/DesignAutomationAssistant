@@ -2,7 +2,9 @@
 
 Specification Review Phase 3 adds the versioned intent/reference/candidate
 sidecars described in [references and intent](SpecificationReviewReferencesAndIntent.md).
-The runtime is `output-v18`. The pinned legacy producer provenance below remains
+The runtime is `output-v19`. This revision admits source files and ZIPs up to
+40 MiB and audits unsupported formats as `skipped:unsupported_format`; supported
+formats that cannot be read still require retry/review. The pinned legacy producer provenance below remains
 the historical baseline; the new recommendation behavior is versioned separately.
 
 Specification Review Phase 5 gives the separate performance-specification publisher

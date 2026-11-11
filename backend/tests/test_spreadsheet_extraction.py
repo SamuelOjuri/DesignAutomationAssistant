@@ -148,6 +148,35 @@ def test_limits_are_explicit_and_close_workbook(tmp_path, monkeypatch, limit, va
     path.unlink()
 
 
+def test_larger_file_allowance_is_scoped_to_the_caller(tmp_path, monkeypatch):
+    path = tmp_path / "design-source.xlsx"
+    make_xlsx(path)
+    reported_size = 30 * 1024 * 1024
+    monkeypatch.setattr(excel.os.path, "getsize", lambda _: reported_size)
+
+    def default_read():
+        docs = excel.extract_spreadsheet_documents(str(path), path.name)
+        assert len(docs) == 1
+        assert docs[0]["section"] == "spreadsheet:extraction-notice"
+        assert "file size limit" in docs[0]["notice"]
+
+    default_read()
+    design_docs = excel.extract_spreadsheet_documents(
+        str(path), path.name, max_file_bytes=40 * 1024 * 1024,
+    )
+    assert any("A2=Roof insulation" in doc["text"] for doc in design_docs)
+    assert all(doc["section"] != "spreadsheet:extraction-notice" for doc in design_docs)
+    default_read()
+
+    reported_size = 40 * 1024 * 1024 + 1
+    docs = excel.extract_spreadsheet_documents(
+        str(path), path.name, max_file_bytes=40 * 1024 * 1024,
+    )
+    assert len(docs) == 1
+    assert "file size limit" in docs[0]["notice"]
+    path.unlink()
+
+
 def test_document_limit_preserves_prior_chunks_and_reports_partial_extraction(tmp_path, monkeypatch):
     path = tmp_path / "large.xlsx"
     book = openpyxl.Workbook()

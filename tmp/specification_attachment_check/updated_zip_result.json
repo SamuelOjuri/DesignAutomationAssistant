@@ -1,0 +1,44 @@
+{
+  "reader_stub": true,
+  "model_calls": 0,
+  "archive_bytes": 28156339,
+  "limit_bytes": 41943040,
+  "sources": [
+    {
+      "filename": "wetransfer_srp1411-bba-01-rf-d-a-2108-154roofgaplan-nb1_p03-wip-dwg_2026-11-11_1057.zip",
+      "status": "expanded:archive",
+      "sizeBytes": 28156339,
+      "contentSha256": "1f5cf1f9ae29bbfd96b0e0e6e66c2d3bbfdcd297cf780cb1f2103b1580f02d38"
+    },
+    {
+      "filename": "wetransfer_srp1411-bba-01-rf-d-a-2108-154roofgaplan-nb1_p03-wip-dwg_2026-11-11_1057.zip!/SRP1411-BBA-01-RF-D-A-2108 154RoofGAPlan-NB1_P03 - WIP.dwg",
+      "status": "skipped:dwg",
+      "sizeBytes": 8154511,
+      "contentSha256": "328ab3c120dfbceb7812850c702dc8809dc6452773aa9bdaf89c63ae063911f1"
+    },
+    {
+      "filename": "wetransfer_srp1411-bba-01-rf-d-a-2108-154roofgaplan-nb1_p03-wip-dwg_2026-11-11_1057.zip!/SRP1411-BBA-02-RF-D-A-2107 154RoofGAPlan-NB2_P03 - WIP.dwg",
+      "status": "skipped:dwg",
+      "sizeBytes": 5079910,
+      "contentSha256": "3c7258a82ed5923e05780d9f82ba668a601b164d73500b6bcab504ad76abf3eb"
+    },
+    {
+      "filename": "wetransfer_srp1411-bba-01-rf-d-a-2108-154roofgaplan-nb1_p03-wip-dwg_2026-11-11_1057.zip!/SRP1411-BBA-02-RF-D-A-2108 154RoofGAPlan-NB2_P03 - WIP.dwg",
+      "status": "skipped:dwg",
+      "sizeBytes": 3140262,
+      "contentSha256": "896a275838711ba75293f87fec014519f93a53d30a3d84bc46bb452302ce8463"
+    },
+    {
+      "filename": "wetransfer_srp1411-bba-01-rf-d-a-2108-154roofgaplan-nb1_p03-wip-dwg_2026-11-11_1057.zip!/SRP1411-BBA-01-RF-D-A-2107 154RoofGAPlan-NB1_P03 - WIP.dwg",
+      "status": "skipped:dwg",
+      "sizeBytes": 9429402,
+      "contentSha256": "c0fe03ad92a27d89014fc0302dc51bda4aafba2bbde9c616be04f1e95e5d8e95"
+    },
+    {
+      "filename": "wetransfer_srp1411-bba-01-rf-d-a-2108-154roofgaplan-nb1_p03-wip-dwg_2026-11-11_1057.zip!/B260681_St-Clere's-School_Tapered_LTF-001(RevB)_NB1+2-Roofs&Staircores_13.10.26 (1).pdf",
+      "status": "read",
+      "sizeBytes": 2351105,
+      "contentSha256": "e370bf12417e1f09779328b60f46b87d3d86853d3afa86551dfd3ba801a85074"
+    }
+  ]
+}

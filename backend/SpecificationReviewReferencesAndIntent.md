@@ -1,6 +1,6 @@
 # Specification Review: references and intent (Phase 3)
 
-Implemented on 9 November 2026. Runtime extraction is `output-v18`, evidence
+Implemented on 9 November 2026. Runtime extraction is `output-v19`, evidence
 version `3`, request-intent schema `1`, parser `specification-reference-v1`.
 Existing extraction is not relabelled: the changed pipeline identity requires a
 fresh extraction. The pinned producer manifest and historical fixtures are retained.

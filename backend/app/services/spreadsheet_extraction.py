@@ -122,7 +122,8 @@ def _xls_rows(path: str, warnings: set[str], *, visible_only: bool = False):
 
 
 def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: bool = False,
-                                  preserve_full_cells: bool = False) -> list[dict[str, str]]:
+                                  preserve_full_cells: bool = False,
+                                  max_file_bytes: int | None = None) -> list[dict[str, str]]:
     """Return bounded, source-labelled text chunks, including any extraction limits.
 
     Bad/encrypted workbooks remain downloadable: parsing failures become a source
@@ -130,6 +131,8 @@ def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: boo
     XLS uses the results cached by Excel; XLSX also reports uncached formulas.
     Design extraction preserves full cell text in labelled continuation chunks;
     search retains its existing cell excerpt limit. Both retain workbook limits.
+    A caller may raise its source file allowance without changing search's default;
+    decompression, row, cell and text limits still apply independently.
     """
     documents: list[dict[str, str]] = []
     warnings: set[str] = set()
@@ -154,7 +157,7 @@ def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: boo
     try:
         if not is_spreadsheet(filename):
             raise ValueError("Unsupported spreadsheet extension")
-        if os.path.getsize(path) > MAX_FILE_BYTES:
+        if os.path.getsize(path) > (MAX_FILE_BYTES if max_file_bytes is None else max_file_bytes):
             raise ExtractionLimit("Workbook exceeds the file size limit.")
         reader = _xlsx_rows if filename.lower().endswith((".xlsx", ".xlsm")) else _xls_rows
         rows = reader(path, warnings, visible_only=visible_only)

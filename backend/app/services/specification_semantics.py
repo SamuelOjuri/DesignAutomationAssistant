@@ -28,6 +28,7 @@ PDF_FIELD_NAMES = (
 )
 ANIMATED_IMAGE_SKIP_STATUS = "skipped:animated_image"
 DWG_SKIP_STATUS = "skipped:dwg"
+UNSUPPORTED_SOURCE_SKIP_STATUS = "skipped:unsupported_format"
 ENCRYPTED_PDF_SKIP_STATUS = "skipped:encrypted_pdf"
 ARCHIVE_EXPANDED_STATUS = "expanded:archive"
 # Gemini withheld a transcription with finish_reason=RECITATION. The source has
@@ -36,7 +37,8 @@ ARCHIVE_EXPANDED_STATUS = "expanded:archive"
 PROVIDER_RECITATION_REVIEW_STATUS = "review:provider_recitation"
 REVIEW_SOURCE_STATUSES = frozenset({PROVIDER_RECITATION_REVIEW_STATUS})
 COMPLETE_SOURCE_STATUSES = frozenset({
-    "read", ANIMATED_IMAGE_SKIP_STATUS, DWG_SKIP_STATUS, ENCRYPTED_PDF_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS,
+    "read", ANIMATED_IMAGE_SKIP_STATUS, DWG_SKIP_STATUS, UNSUPPORTED_SOURCE_SKIP_STATUS,
+    ENCRYPTED_PDF_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS,
 }) | REVIEW_SOURCE_STATUSES
 FIELD_DEFINITIONS = {
     "Scale": "The drawing scale, usually found in a drawing title block (for example, 1:100).",

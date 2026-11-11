@@ -175,25 +175,31 @@ These commands check synthetic source handling and report runtime configuration.
 The Gemini command makes no model request unless `--live` is added; optional
 `--live` performs a small synthetic model compatibility request.
 
-The source diagnostic must report five passing checks, including same-Email-column
+The source diagnostic must report seven passing checks, including same-Email-column
 ZIP intake. ZIP files uploaded beside `.eml`/`.msg` files in the Email column are
 now included automatically as supplementary extraction sources. An email remains
 required; other standalone Email-column file types remain ignored. No
 `DESIGN_PROCESSING_SOURCE_FILE_COLUMN_IDS` entry is needed for these ZIPs, and the
-Email column must remain excluded from that setting. Existing ZIP size/nesting
-bounds and document exclusions remain in effect.
+Email column must remain excluded from that setting. Source files, ZIP archives
+and their readable members have a 40 MiB limit; the 100 MiB expanded-archive, 200-entry and
+three-level nesting bounds remain. Unsupported formats are recorded as
+`skipped:unsupported_format` and supply no evidence. Supported documents that
+fail to read still block incomplete extraction. Design workbooks also accept
+40 MiB; search ingestion retains its separate 20 MiB workbook limit. Confirm
+diagnostic fields `max_source_mib: 40` and
+`unsupported_format_status: skipped:unsupported_format`.
 
 Deploy this intake change consistently across the API, design worker,
-reconciliation and specification worker. It retains `output-v18`; the newly
-included ZIP metadata changes affected items' input revisions. Existing eligible
+reconciliation and specification worker. The current revision is `output-v19`;
+the newly included ZIP metadata changes affected items' input revisions. Existing eligible
 items can be inspected and queued using the item-scoped reconciliation commands
 below. Keep `--dry-run` for inspection; the normal command can queue the existing
-design workflow and its configured outputs. Email-only items need no global
-pipeline-version bump for this change.
+design workflow and its configured outputs. The pipeline revision also refreshes
+eligible extraction for the larger source limit and unsupported-format skip policy.
 
 Confirm the services share the correct database, private artifact storage,
 existing Gemini configuration and compatible extraction identity. Current
-extraction uses the full configured `output-v18` pipeline and evidence version 3;
+extraction uses the full configured `output-v19` pipeline and evidence version 3;
 the publication contract is `performance-specification-v5`. Compare the full
 pipeline identity, not just its suffix.
 

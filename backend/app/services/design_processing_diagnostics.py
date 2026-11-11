@@ -3,7 +3,10 @@
 import os
 
 from ..config import DESIGN_PROCESSING_PIPELINE_REVISION
-from .specification_semantics import ARCHIVE_EXPANDED_STATUS, DWG_SKIP_STATUS, ENCRYPTED_PDF_SKIP_STATUS
+from .legacy_enquiry.source_documents import MAX_SOURCE_BYTES
+from .specification_semantics import (
+    ARCHIVE_EXPANDED_STATUS, DWG_SKIP_STATUS, ENCRYPTED_PDF_SKIP_STATUS, UNSUPPORTED_SOURCE_SKIP_STATUS,
+)
 
 
 def source_runtime_diagnostics():
@@ -12,6 +15,9 @@ def source_runtime_diagnostics():
         "pipeline_revision": DESIGN_PROCESSING_PIPELINE_REVISION,
         "dwg_status": DWG_SKIP_STATUS,
         "encrypted_pdf_status": ENCRYPTED_PDF_SKIP_STATUS,
+        "unsupported_format_status": UNSUPPORTED_SOURCE_SKIP_STATUS,
         "zip_status": ARCHIVE_EXPANDED_STATUS,
+        "max_source_bytes": MAX_SOURCE_BYTES,
+        "max_source_mib": MAX_SOURCE_BYTES // (1024 * 1024),
         "spreadsheet_full_cells": True,
     }

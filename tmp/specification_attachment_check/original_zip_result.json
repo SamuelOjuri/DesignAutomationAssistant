@@ -1,0 +1,21 @@
+{
+  "archive_bytes": 28156339,
+  "limit_bytes": 20971520,
+  "manifest": [
+    {
+      "sourceId": "asset:2",
+      "filename": "wetransfer_srp1411-bba-01-rf-d-a-2108-154roofgaplan-nb1_p03-wip-dwg_2026-11-11_1057.zip",
+      "sourceType": "attachment",
+      "contentSha256": "1f5cf1f9ae29bbfd96b0e0e6e66c2d3bbfdcd297cf780cb1f2103b1580f02d38",
+      "sizeBytes": 28156339,
+      "observedAt": null,
+      "status": "failed:SourceDocumentError",
+      "text": "",
+      "error": {
+        "stage": "source_document",
+        "code": "source_size_limit",
+        "message": "ZIP exceeds the 20 MiB source size limit; split the archive."
+      }
+    }
+  ]
+}

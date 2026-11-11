@@ -6,7 +6,7 @@ reviewer decisions and separately labelled PDF provenance to the publisher. See
 which supersedes the older CRM-first notes below. Phase 3 supplies generalized
 references, cited intent and read-only candidate preparation. See
 [references and intent](SpecificationReviewReferencesAndIntent.md) for the current
-`output-v18` / evidence-v3 contract. Earlier dated diagnostic notes below describe
+`output-v19` / evidence-v3 contract. Earlier dated diagnostic notes below describe
 their historical runtime policies. Phase 5 adds the independent Landing Zone
 lifecycle described below. Phase 6 adds the direct, authenticated
 [review API](SpecificationReviewAPI.md), including version 1 access for any
@@ -83,11 +83,14 @@ To check the deployed source readers independently of Gemini, run:
 python -m backend.scripts.check_design_processing_sources
 ```
 
-This uses only synthetic DWG, ZIP, XLSX and encrypted-PDF bytes with no database or
-network calls. Expected output includes `status: ok`, `pipeline_revision: output-v18`,
-and all five checks with `passed: true`. Four reader checks verify that DWG and
-encrypted PDFs are skipped, ZIP members are read and long spreadsheet cells retain
-their final technical values. The fifth check verifies that a ZIP uploaded beside
+This uses only synthetic DWG, ZIP, XLSX, encrypted-PDF and unsupported-format bytes
+with no database or network calls. Expected output includes `status: ok`,
+`pipeline_revision: output-v19`, `max_source_mib: 40`,
+`unsupported_format_status: skipped:unsupported_format`, and all seven checks with
+`passed: true`. Six reader checks verify that DWG, encrypted PDFs and unsupported
+formats are skipped, readable ZIP members proceed, long spreadsheet cells retain
+their final technical values, and a supported text file with invalid encoding
+remains a failed source. The seventh check verifies that a ZIP uploaded beside
 an `.eml` in the Email column is selected as a supplementary source, and that adding
 or changing it changes the extraction input revision. A `.dwg`
 failure reported as `failed:ValueError` is inconsistent with the current DWG skip
@@ -196,7 +199,7 @@ DOCX, text/CSV/TSV/JSON/XML/HTML and XLS/XLSX/**XLSM**. Workbook readers use cac
 values and never execute macros or formulas. The design reader excludes hidden
 worksheets and identifies visible selected values by worksheet/cell, so lookup
 catalogues do not become selected specifications. Uncached formulas, extraction
-limits, unreadable or unsupported sources hold extraction for retry/review rather
+limits and unreadable supported sources hold extraction for retry/review rather
 than imply absent fields. Failed per-source manifests are retained in the design
 job's `result_json.sourceExtractionFailure`. PDFs are read individually to preserve
 attachment identity. The extraction model also makes one targeted second pass for
@@ -218,12 +221,16 @@ can proceed to extraction and publication.
 ZIP attachments and configured source ZIPs are expanded in memory. Each member
 retains its own source ID, archive-qualified filename, content hash and parent
 source ID. Nested archives share a budget of 100 MiB expanded bytes, 200 entries
-(including directories) and three archive levels. Every archive and member must
-also fit the existing 20 MiB source limit, and extracted text remains subject to the
+(including directories) and three archive levels. Every archive and readable member must
+also fit the 40 MiB source limit, and extracted text remains subject to the
 500,000-character context limit. No archive paths are extracted to disk. Containers
 are recorded as `expanded:archive`; only readable members can supply evidence.
-Corrupt, encrypted, empty or oversized archives and failed/unsupported members
-(other than the intentional DWG/image skips) hold extraction for retry/review.
+Unsupported document formats are audited as `skipped:unsupported_format`, including
+ZIP members; they supply no field evidence and allow readable sources to proceed.
+Corrupt, encrypted, empty or oversized archives and supported members that fail
+to read still hold extraction for retry/review. The design workbook reader also
+accepts 40 MiB inputs; the independent search ingestion workbook reader retains
+its 20 MiB input limit.
 Application-owned failure messages survive the process boundary in worker logs,
 `last_error` and `result_json.sourceExtractionFailure` without exposing arbitrary
 parser/provider exception text.
@@ -337,9 +344,10 @@ IDs are rejected here; generated export filenames are also excluded. This settin
 does not automatically include attachments on linked boards.
 
 Deploy the matching API, design worker, reconciliation and specification-worker
-release for same-column ZIP intake. The pipeline remains `output-v18`: affected
-items acquire a new input revision because their ZIP metadata is now included;
-email-only items do not need a global extraction-version change. For existing
+release for same-column ZIP intake. The current pipeline is `output-v19`, which
+also raises the source/archive limit to 40 MiB and skips unsupported formats.
+Included ZIP metadata changes affected items' input revisions; the pipeline
+revision requires fresh extraction of otherwise eligible items. For existing
 eligible items, inspect item-scoped reconciliation with `--dry-run` before running
 normal reconciliation to queue the current input. Normal reconciliation can also
 produce the existing design outputs according to its configured mode.
@@ -373,7 +381,7 @@ ingestion retain their own policies.
    API, publisher and specification-enqueue/reconciliation processes with matching
    specification settings. The publisher runs as another service:
    `python -m backend.app.services.performance_specification`.
-3. Extraction identity is now `output-v18` (`output-v9` introduced source evidence;
+3. Extraction identity is now `output-v19` (`output-v9` introduced source evidence;
    `output-v10` added DWG skips and bounded ZIP extraction; `output-v11` preserves
    long spreadsheet cells; `output-v12` skips encrypted PDFs; `output-v13` validates
    recovery against source text and retains request constraints; `output-v14` repairs
@@ -381,7 +389,8 @@ ingestion retain their own policies.
    `output-v15` adds bounded drawing detail views and audited date/issuer/scope repairs;
    `output-v16` adds literal image regions, client-request context and applicable
    existing-deck evidence; `output-v18` adds the intent/reference/candidate sidecars
-   and evidence-v3 contract). The CAD publication contract is now
+   and evidence-v3 contract; `output-v19` admits 40 MiB source/archive inputs and
+   audits unsupported formats as intentional skips). The CAD publication contract is now
    `performance-specification-v5`. The canonical CSV row count and 18 specification
    labels remain unchanged; Reason for Change explicitly identifies an AI
    recommendation, separate from the human-owned Monday classification. Run
