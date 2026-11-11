@@ -76,6 +76,24 @@ test("status from another item never crosses the context boundary", () => {
   assert.strictEqual(mergeStatus(initial, workspace({ item_id: "another" })), initial);
 });
 
+test("polling an item leaving Landing Zone exposes its read-only reason while preserving available data", () => {
+  for (const ready of [false, true]) {
+    const initial = workspace({ status: ready ? "needs_review" : "source_waiting",
+      source: ready ? { identity: { source_fingerprint: "source-1" } } : null,
+      pdf: ready ? workspace().pdf : null, published_pdf: ready ? workspace().published_pdf : null });
+    const next = { ...initial, status: "read_only", scope_reason: "outside_landing_zone",
+      capabilities: { read: true, edit: false, approve: false } };
+    const merged = mergeStatus(initial, next);
+    assert.equal(merged.status, "read_only");
+    assert.equal(merged.scope_reason, "outside_landing_zone");
+    assert.equal(merged.capabilities.edit, false);
+    assert.strictEqual(merged.source, initial.source);
+    assert.strictEqual(merged.pdf, initial.pdf);
+    assert.equal(canComplete(merged, emptyDraft(), "revision-1"), false);
+    assert.equal(initial.status, ready ? "needs_review" : "source_waiting");
+  }
+});
+
 test("completion requires the loaded current published PDF and settled saved identities", () => {
   const ready = workspace();
   assert.equal(canComplete(ready, emptyDraft(), "revision-1"), true);

@@ -20,6 +20,7 @@ import FieldEditor from "./FieldEditor";
 import CandidateSelector from "./CandidateSelector";
 import PdfPreview from "./PdfPreview";
 import ReviewStatus from "./ReviewStatus";
+import { getReviewStatusDescription } from "@/lib/specification-review-status";
 import "./review.css";
 
 type Api = ReturnType<typeof createReviewApi>;
@@ -288,6 +289,9 @@ export default function ReviewWorkspace() {
   };
 
   const usable = workspace && context && workspace.board_id === context.boardId && workspace.item_id === context.itemId;
+  const readOnly = Boolean(usable && workspace.status === "read_only");
+  const statusDescription = usable ? getReviewStatusDescription({ status: workspace.status,
+    scopeReason: workspace.scope_reason, hasSource: Boolean(workspace.source), hasPdf: Boolean(workspace.pdf || workspace.published_pdf) }) : null;
   const editable = Boolean(usable && workspace.capabilities.edit && connection === "ready" && !busy && !conflict);
   const completeAllowed = Boolean(usable && !conflict && !busy && connection === "ready" && checkedPdf && canComplete(workspace, draft, pdfRevision || undefined));
   const unmappedFields = usable ? FIELD_NAMES.filter((label) => {
@@ -306,9 +310,11 @@ export default function ReviewWorkspace() {
           <p className="text-sm font-medium text-muted-foreground">Projects Holding Page</p>
           <h1 className="text-2xl font-semibold">Specification Review</h1>
           {context && <p className="mt-1 text-sm text-muted-foreground">Item {context.itemId} · Board {context.boardId}</p>}
-          {usable && <p className="mt-1 text-sm text-muted-foreground">Saved review version {workspace.review_version} · {workspace.source ? "Current source context available" : "Waiting for current source context"}</p>}
+          {usable && <p className="mt-1 text-sm text-muted-foreground">Saved review version {workspace.review_version} · {readOnly
+            ? workspace.source ? "Saved source context retained" : "No source analysis available for review"
+            : workspace.source ? "Current source context available" : "Waiting for current source context"}</p>}
         </div>
-        {usable && <ReviewStatus status={workspace.status} hasUnsavedChanges={dirty} />}
+        {usable && <ReviewStatus status={workspace.status} scopeReason={workspace.scope_reason} hasSource={Boolean(workspace.source)} hasPdf={Boolean(workspace.pdf || workspace.published_pdf)} hasUnsavedChanges={dirty} />}
       </header>
       {error && <div role="alert" className="rounded-md border border-red-300 bg-red-50 p-4 text-red-900">{error}</div>}
       {notice && <p role="status" className="rounded-md border bg-white p-4">{notice}</p>}
@@ -323,19 +329,19 @@ export default function ReviewWorkspace() {
         <button className={button} onClick={() => sdk && context ? setRenewal((value) => value + 1) : setSdkRetry((value) => value + 1)}>Reconnect review</button>
       </section>}
       {usable && <>
-        {workspace.status === "read_only" && <p className="rounded-md border bg-white p-4">This item is read-only. Its retained PDF and review history remain available. Editing requires an eligible Landing Zone item and enabled review access.</p>}
+        {readOnly && <p className="rounded-md border bg-white p-4">{statusDescription?.detail}</p>}
         {conflict && <section role="alert" className="space-y-3 rounded-md border border-amber-400 bg-amber-50 p-4">
           <p>The saved review, sources or item access have changed. Your draft is kept. Load the latest context and check your edits before saving.</p>
           <button className={button} disabled={busy || connection !== "ready"} onClick={() => void loadLatest()}>Load latest context and keep my edits</button>
         </section>}
-        <CandidateSelector candidates={workspace.candidates} intent={workspace.source?.intent} selections={{ ...workspace.review.selections, ...draft.selections }} disabled={!editable} onChange={(patch) => { setDraft((value) => updateSelection(value, patch)); setCheckedPdf(false); }} />
-        {workspace.source && (workspace.source.selected_project || workspace.source.selected_drawing) && <p className="text-sm text-muted-foreground">Displayed recommendations use project {workspace.source.selected_project?.item_id || "unassigned"}, drawing {workspace.source.selected_drawing?.item_id || "unassigned"}. Save changed selections to resolve their recommendations.</p>}
+        <CandidateSelector candidates={workspace.candidates} intent={workspace.source?.intent} selections={{ ...workspace.review.selections, ...draft.selections }} disabled={!editable} unavailableMessage={readOnly && !workspace.source ? "Project and drawing recommendations are unavailable in this read-only view." : undefined} onChange={(patch) => { setDraft((value) => updateSelection(value, patch)); setCheckedPdf(false); }} />
+        {workspace.source && (workspace.source.selected_project || workspace.source.selected_drawing) && <p className="text-sm text-muted-foreground">Displayed recommendations use project {workspace.source.selected_project?.item_id || "unassigned"}, drawing {workspace.source.selected_drawing?.item_id || "unassigned"}. {readOnly ? "These saved recommendations are read-only." : "Save changed selections to resolve their recommendations."}</p>}
         <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
           <section id="review-fields" aria-labelledby="review-fields-title" className="min-w-0 space-y-4">
             <h2 id="review-fields-title" className="text-xl font-semibold">Specification fields</h2>
-            <p className="text-sm text-muted-foreground">Save corrections to regenerate the PDF. Entered values and intentional blanks display Source: Reviewer Specified.</p>
+            <p className="text-sm text-muted-foreground">{readOnly ? "Any saved field values are shown for reference. Editing is unavailable in this view." : "Save corrections to regenerate the PDF. Entered values and intentional blanks display Source: Reviewer Specified."}</p>
             {FIELD_NAMES.map((label) => workspace.fields[label] && <FieldEditor key={label} label={label} field={workspace.fields[label]!} operation={draft.field_operations[label]} disabled={!editable} onChange={(operation) => changeField(label, operation)} />)}
-            {!workspace.source && <p>Fields will appear when current source analysis is available.</p>}
+            {!workspace.source && <p>{readOnly ? "No specification fields are available for this item." : "Fields will appear when current source analysis is available."}</p>}
             {workspace.source?.source_issues.map((issue) => {
               const id = `${issue.source_id}/${issue.code}`;
               const disposition = draft.source_dispositions.find((entry) => entry.source_id === issue.source_id && entry.issue_code === issue.code);
@@ -353,14 +359,15 @@ export default function ReviewWorkspace() {
             })}
           </section>
           <aside className="min-w-0 space-y-4 xl:sticky xl:top-4" aria-label="PDF and completion">
-            <PdfPreview pdf={workspace.pdf} publishedPdf={workspace.published_pdf} url={pdfUrl} loading={pdfLoading} error={pdfError} onRetry={() => setPdfRetry((value) => value + 1)} />
+            <PdfPreview pdf={workspace.pdf} publishedPdf={workspace.published_pdf} url={pdfUrl} loading={pdfLoading} readOnly={readOnly} error={pdfError} onRetry={() => setPdfRetry((value) => value + 1)} />
             <section className="space-y-3 rounded-lg border bg-white p-4" aria-labelledby="complete-title">
               <h2 id="complete-title" className="text-lg font-semibold">Final review</h2>
-              {completionIssues(workspace).length > 0 && <details className="text-sm"><summary className="cursor-pointer font-medium">Decisions still needed ({completionIssues(workspace).length})</summary><ul className="mt-2 list-disc space-y-1 pl-5">{completionIssues(workspace).map((issue) => <li key={issue}>{issue}</li>)}</ul></details>}
+              {readOnly && <p className="text-sm">Completion is unavailable while this item is read-only.</p>}
+              {!readOnly && completionIssues(workspace).length > 0 && <details className="text-sm"><summary className="cursor-pointer font-medium">Decisions still needed ({completionIssues(workspace).length})</summary><ul className="mt-2 list-disc space-y-1 pl-5">{completionIssues(workspace).map((issue) => <li key={issue}>{issue}</li>)}</ul></details>}
               {unmappedFields.length > 0 && <p id="review-mapping-limitations" className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">No confirmed CAD mapping is available for: {unmappedFields.join(", ")}. These values are preserved in the PDF; completion does not establish compatibility with CAD or TRICS.</p>}
               <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={checkedPdf} aria-describedby={unmappedFields.length ? "review-mapping-limitations" : undefined} disabled={!pdfUrl || dirty || conflict || workspace.status !== "awaiting_final_review" || connection !== "ready" || busy} onChange={(event) => setCheckedPdf(event.target.checked)} />I have checked the current published PDF, its source labels{unmappedFields.length ? " and the mapping limitations above" : ""}.</label>
               <button className={`${button} w-full bg-primary text-primary-foreground`} disabled={!completeAllowed} onClick={() => void mutate("approve")}>Mark specification complete</button>
-              <p className="text-sm text-muted-foreground">Completion records this exact published PDF. Move the item manually in Monday after completion.</p>
+              {!readOnly && <p className="text-sm text-muted-foreground">Completion records this exact published PDF. Move the item manually in Monday after completion.</p>}
             </section>
           </aside>
         </div>

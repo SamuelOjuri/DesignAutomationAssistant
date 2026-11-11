@@ -8,13 +8,14 @@ export interface CandidateSelectorProps {
   intent?: RequestIntent | null;
   selections: ReviewSelections;
   disabled?: boolean;
+  unavailableMessage?: string;
   onChange: (patch: Partial<ReviewSelections>) => void;
 }
 
 const recordKey = (record: { board_id: string; item_id: string } | null) => record ? `${record.board_id}:${record.item_id}` : "";
 const cardClass = "flex min-w-0 cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-accent has-[:disabled]:cursor-default has-[:disabled]:opacity-70";
 
-export default function CandidateSelector({ candidates, intent, selections, disabled = false, onChange }: CandidateSelectorProps) {
+export default function CandidateSelector({ candidates, intent, selections, disabled = false, unavailableMessage, onChange }: CandidateSelectorProps) {
   const id = useId();
   const projectKey = recordKey(selections.selected_project);
   const drawingKey = recordKey(selections.selected_drawing);
@@ -54,7 +55,7 @@ export default function CandidateSelector({ candidates, intent, selections, disa
       </div>
 
       {candidates.issues.length > 0 && <ul className="mt-4 space-y-1 text-sm text-amber-900" aria-label="Candidate review issues">{candidates.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}
-      {candidates.status !== "available" && <p role="status" className="mt-3 text-sm text-muted-foreground">{candidates.status === "pending" ? "Project and drawing recommendations are being prepared." : "Project and drawing recommendations are temporarily unavailable."}</p>}
+      {candidates.status !== "available" && <p role="status" className="mt-3 text-sm text-muted-foreground">{unavailableMessage ?? (candidates.status === "pending" ? "Project and drawing recommendations are being prepared." : "Project and drawing recommendations are temporarily unavailable.")}</p>}
 
       <fieldset className="mt-5 min-w-0">
         <legend className="text-sm font-semibold">Project candidates</legend>

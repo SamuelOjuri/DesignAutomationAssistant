@@ -120,7 +120,7 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     const requests = latestRequests();
     assert(requests.some((request) => request.path.endsWith("/session") && request.body.context.itemId === "102") && requests.some((request) => request.path.includes("/items/100/102")), "New item context bootstraps a new scoped API session");
     await command("leave_landing_zone");
-    await waitFor(() => text().includes("Read-only; retained PDF available"), "early group move read-only");
+    await waitFor(() => text().includes("Outside Landing Zone"), "early group move read-only");
     assert(button("Save corrections and regenerate PDF").disabled && button("Mark specification complete").disabled && documentOf().querySelector('iframe[title="Current specification PDF preview"]'), "Leaving Landing Zone disables mutations and retains authenticated PDF");
 
     await navigate("ambiguous");
