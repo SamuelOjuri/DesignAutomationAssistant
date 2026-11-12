@@ -148,6 +148,21 @@ def test_limits_are_explicit_and_close_workbook(tmp_path, monkeypatch, limit, va
     path.unlink()
 
 
+@pytest.mark.parametrize("extension", [".xls", ".xlsx"])
+def test_worksheet_allowance_is_scoped_to_the_caller(tmp_path, monkeypatch, extension):
+    path = tmp_path / ("allowance" + extension)
+    if extension == ".xls":
+        path.write_bytes(XLS_FIXTURE.read_bytes())
+    else:
+        make_xlsx(path)
+    monkeypatch.setattr(excel, "MAX_SHEETS", 1)
+    default = excel.extract_spreadsheet_documents(str(path), path.name)
+    assert "worksheet limit" in default[-1]["notice"]
+    raised = excel.extract_spreadsheet_documents(str(path), path.name, max_sheets=40)
+    assert all(doc["section"] != "spreadsheet:extraction-notice" for doc in raised)
+    path.unlink()
+
+
 def test_larger_file_allowance_is_scoped_to_the_caller(tmp_path, monkeypatch):
     path = tmp_path / "design-source.xlsx"
     make_xlsx(path)

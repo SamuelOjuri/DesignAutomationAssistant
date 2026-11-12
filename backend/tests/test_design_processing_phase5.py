@@ -507,6 +507,38 @@ def test_attachment_read_failure_retains_manifest_and_schedules_extraction_retry
     assert "test-token" not in failure_log
 
 
+@pytest.mark.parametrize("transient_sibling", [False, True])
+def test_permanent_source_rejection_fails_without_retry_and_is_not_requeued(
+        db_session, golden, monkeypatch, transient_sibling):
+    # Render jobs 65d14c7f/ecc45db0 (491 MiB ZIP) and e3e10183 (128-byte MacBinary
+    # stub) repeated the same byte-level rejection on all three attempts.
+    from backend.app.services.legacy_enquiry.source_documents import SourceDocumentError
+    golden_input, _ = golden
+    snapshot = _snapshot(golden_input)
+    _queue(db_session, snapshot)
+    calls = []
+
+    def fail(*args):
+        calls.append(args)
+        if transient_sibling and len(calls) > 1:
+            raise TimeoutError("attachment service unavailable")
+        raise SourceDocumentError("unreadable_pdf", "PDF could not be read; supply a valid PDF export.")
+    monkeypatch.setattr(FakeLegacyClient, "process_pdf", fail)
+    result, _, client, _, storage = _run_shadow(db_session, golden_input)
+    job = db_session.query(DesignProcessingJob).one()
+    assert job.attempt_count == 1 and client.query_count == 0 and not storage.objects
+    codes = {source.get("error", {}).get("code") for source in job.result_json["sourceExtractionFailure"]}
+    assert "unreadable_pdf" in codes
+    if transient_sibling:
+        # Another source's provider failure can still succeed on a later attempt.
+        assert len(calls) > 1 and (result.retry_wait, job.status) == (1, "retry_wait")
+        return
+    assert (result.failed, result.retry_wait, job.status) == (1, 0, "failed")
+    queued = _queue(db_session, snapshot)
+    assert (queued.outcome, queued.readiness) == ("ignored", "attempts_exhausted")
+    assert db_session.query(DesignProcessingJob).count() == 1
+
+
 def test_evidence_failure_retains_private_replay_payload_on_job(db_session, golden, monkeypatch):
     from backend.app.services.specification_failures import SpecificationEvidenceError
     golden_input, _ = golden

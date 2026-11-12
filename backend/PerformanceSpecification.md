@@ -225,6 +225,27 @@ column, cell and document limits, plus the overall 500,000-character context lim
 Uncached formulas and actual extraction limits still block incomplete evidence;
 their safe reason is now retained in the job's error and source manifest.
 
+The design reader allows 40 worksheets, while search ingestion keeps 20. Contract
+pricing documents commonly have one worksheet per trade package; the row, cell,
+chunk and context limits above still bound their total size. Item `3342464181`
+(job `80c7df2f`) failed all three attempts on a 33-worksheet (27 visible) pricing
+schedule of about 5,600 rows. Read with the design allowance, its visible sheets
+yield 236,000 characters without a notice. A blocking workbook error now names its
+own remedy: recalculating uncached formulas, or supplying a smaller export or
+splitting the workbook for a size/sheet limit.
+
+A design job now fails on its first attempt when every incomplete source was
+rejected on its own unchanged bytes: oversize sources, unreadable PDFs/archives,
+incomplete workbooks, and empty, encrypted or over-limit ZIPs
+(`PERMANENT_SOURCE_ERROR_CODES`). Retrying cannot change these until a replacement
+file creates new input. Reconciliation treats such a failed job as exhausted for its
+input identity. Provider/transcription failures, `no_readable_text` and
+transcribed-text limits keep the bounded retry, including when they accompany a
+permanent rejection. On 12 November, a 491 MiB WeTransfer ZIP (item `3353889887`,
+jobs `65d14c7f`/`ecc45db0`) and a 128-byte MacBinary header attached in place of a
+PDF (item `3305268547`, job `e3e10183`) each repeated the same rejection on all
+three attempts.
+
 DWG drawings are intentionally skipped, including inside ZIP archives. Their
 identity/hash and `skipped:dwg` status remain in the source manifest; they are not
 sent to the model and cannot supply field evidence. The remaining readable sources
@@ -676,8 +697,8 @@ literal excerpt verified and just its value or request date did not, the value's
 words occur in that excerpt in order, and a verified **undated** candidate states
 the same field, value, scope, issuer and role. The undated candidate already keeps
 that scope out of date-based selection, so the duplicate cannot add a value,
-supersede another or reorder the scope. Different values, scopes or issuers,
-unverified excerpts, and duplicates of only dated facts still block. For item
+supersede another or reorder the scope. Different values, scopes or issuers and
+unverified excerpts still block; a dated twin is covered by the next paragraph. For item
 `3312851487` (job `18700b4f`), each roof plan's `University of Kent, Darwin College`
 / `Registry Roof` title verified undated, but its copy dated by the forwarded 27
 October 14:38 message and the later outlet plans' comma-joined title-block lines did
@@ -686,6 +707,43 @@ the reviewable Darwin College/Registry Roof conflict; the live retry still depen
 on its new model response. When such a conflict masks an unverified candidate, the
 failure also logs `unverified_candidates` with fixed verifier reasons only, never
 values or excerpts.
+
+A candidate rejected only because its request timestamp could not be verified is
+also `redundant` when a verified candidate states the same field, value, scope,
+issuer and role, **and** every verified candidate for that field states that one
+value. Its excerpt, scope and value already verified, and with a single value its
+claimed date or direct/forwarded role cannot add, supersede or reorder anything;
+the verified candidate's date remains the one selected. If the field has another
+verified value (another roof's or a later request's), the copy still blocks,
+because its real date could change which value is current. Responses commonly
+repeat a forwarded fact with the carrying email's date and `direct_request` role.
+For item `3352626143` (job `4b0b514d`), Membrane `VM Zinc membrane`, VCL `Aludex
+Max` and Decking `18mm` each verified at the forwarded 11 November 16:09 message,
+and their copies at the carrying 12 November 09:51 email failed all three
+attempts; item `3345815639` (job `9e9bcffb`) failed the same way on Tapered
+Insulation. A read-only replay of the 69 current-version stored extractions
+changed none of them; among 37 recent failure payloads it cleared only these
+same-value copies and the underscore citations below.
+
+Excerpt and value matching treats `_` as a word separator, so a subject such as
+`FW: B265674_Bermuda Road Retirement Living` supports `B265674` and `Bermuda Road
+Retirement Living` as whole tokens. Truncated tokens (`B26567`, `265674`) still
+fail. Drawing Reference and Revision citations keep `_` as part of the identifier,
+because it joins a TP number to its revision (`TP18954_26.02 - A`): an excerpt or
+value starting after that underscore still fails. Item `3345436089` failed three
+jobs (`0c498572`, `ae9b0976`, `8bc1710e`) because no Drawing Title or Bauder
+Contract Number citation could ever verify.
+
+Before schema validation, an evidence citation whose `value` or `snippet` is empty
+or whitespace is dropped and audited as `Dropped blank evidence citation`. It
+claims no checkable fact, so a populated scalar left uncited enters targeted
+recovery and the normal evidence gates instead of failing the whole extraction
+with `string_too_short` (item `3345436089`, job `8bc1710e`, first attempt).
+
+These three changes affect only the verifier and the pre-validation step, so
+`output-v20` is unchanged and no re-extraction is forced. Already failed jobs keep
+their exhausted attempt budget; after deployment, confirm each job is still the
+current input and use the documented operator retry.
 
 A U-value restated with a unit is also `redundant` when a verified bare value cites
 the same source, excerpt, scope, roles and date, states the identical number, and

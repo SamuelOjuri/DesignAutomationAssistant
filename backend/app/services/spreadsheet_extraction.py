@@ -46,7 +46,8 @@ def _format_value(value) -> str:
     return " ".join(str(value).replace("\x00", "").split())
 
 
-def _xlsx_rows(path: str, warnings: set[str], *, visible_only: bool = False):
+def _xlsx_rows(path: str, warnings: set[str], *, visible_only: bool = False, max_sheets: int | None = None):
+    sheet_limit = MAX_SHEETS if max_sheets is None else max_sheets
     with ZipFile(path) as archive:
         if sum(entry.file_size for entry in archive.infolist()) > MAX_UNCOMPRESSED_BYTES:
             raise ExtractionLimit("Workbook exceeds the uncompressed size limit.")
@@ -66,7 +67,7 @@ def _xlsx_rows(path: str, warnings: set[str], *, visible_only: bool = False):
         for sheet_index, values_sheet in enumerate(values_book.worksheets):
             if visible_only and values_sheet.sheet_state != "visible":
                 continue  # Hidden option catalogues are not selected form values.
-            if sheet_index >= MAX_SHEETS:
+            if sheet_index >= sheet_limit:
                 raise ExtractionLimit("Workbook exceeds the worksheet limit.")
             formulas_sheet = formulas_book[values_sheet.title]
             # Some producers incorrectly declare A1:A1 as the used range.
@@ -88,11 +89,12 @@ def _xlsx_rows(path: str, warnings: set[str], *, visible_only: bool = False):
                 yield values_sheet.title, row_number, cells
 
 
-def _xls_rows(path: str, warnings: set[str], *, visible_only: bool = False):
+def _xls_rows(path: str, warnings: set[str], *, visible_only: bool = False, max_sheets: int | None = None):
+    sheet_limit = MAX_SHEETS if max_sheets is None else max_sheets
     book = xlrd.open_workbook(path, on_demand=True, ragged_rows=True)
     try:
         for sheet_index in range(book.nsheets):
-            if sheet_index >= MAX_SHEETS:
+            if sheet_index >= sheet_limit:
                 raise ExtractionLimit("Workbook exceeds the worksheet limit.")
             sheet = book.sheet_by_index(sheet_index)
             try:
@@ -123,7 +125,8 @@ def _xls_rows(path: str, warnings: set[str], *, visible_only: bool = False):
 
 def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: bool = False,
                                   preserve_full_cells: bool = False,
-                                  max_file_bytes: int | None = None) -> list[dict[str, str]]:
+                                  max_file_bytes: int | None = None,
+                                  max_sheets: int | None = None) -> list[dict[str, str]]:
     """Return bounded, source-labelled text chunks, including any extraction limits.
 
     Bad/encrypted workbooks remain downloadable: parsing failures become a source
@@ -131,8 +134,9 @@ def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: boo
     XLS uses the results cached by Excel; XLSX also reports uncached formulas.
     Design extraction preserves full cell text in labelled continuation chunks;
     search retains its existing cell excerpt limit. Both retain workbook limits.
-    A caller may raise its source file allowance without changing search's default;
-    decompression, row, cell and text limits still apply independently.
+    A caller may raise its source file or worksheet allowance without changing
+    search's defaults; decompression, row, cell and text limits still apply
+    independently.
     """
     documents: list[dict[str, str]] = []
     warnings: set[str] = set()
@@ -160,7 +164,7 @@ def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: boo
         if os.path.getsize(path) > (MAX_FILE_BYTES if max_file_bytes is None else max_file_bytes):
             raise ExtractionLimit("Workbook exceeds the file size limit.")
         reader = _xlsx_rows if filename.lower().endswith((".xlsx", ".xlsm")) else _xls_rows
-        rows = reader(path, warnings, visible_only=visible_only)
+        rows = reader(path, warnings, visible_only=visible_only, max_sheets=max_sheets)
         scanned_cells = 0
         with ExitStack() as stack:
             stack.callback(rows.close)

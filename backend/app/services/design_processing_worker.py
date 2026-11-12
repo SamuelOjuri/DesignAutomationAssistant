@@ -60,6 +60,7 @@ from .design_processing_target import (
     refresh_current_target,
 )
 from .legacy_enquiry.llm import LegacyGeminiClient
+from .legacy_enquiry.source_documents import permanent_source_failure
 from .gemini_requests import runtime_diagnostics
 from .monday_item_availability import (
     availability_decision, availability_read_predicate, observe_item, observe_unavailable,
@@ -909,6 +910,8 @@ def _record_execution_failure(
         job.result_json = {**(job.result_json or {}), "sourceExtractionFailure": source_manifest}
     if evidence_failure is not None:
         job.result_json = {**(job.result_json or {}), "specificationEvidenceFailure": evidence_failure}
+    # A source rejected on its own bytes fails identically on every attempt.
+    permanent = permanent_source_failure(source_manifest)
     if execution_identity(job) is None:
         job.attempt_count += 1
         job.last_error = error
@@ -916,7 +919,7 @@ def _record_execution_failure(
         job.locked_by = None
         job.heartbeat_at = None
         job.updated_at = now
-        if job.attempt_count >= job.max_attempts:
+        if permanent or job.attempt_count >= job.max_attempts:
             job.status = "failed"
             job.completed_at = now
             item.state = "failed"
@@ -929,7 +932,7 @@ def _record_execution_failure(
             item.state = "scheduled"
             item.updated_at = now
             outcome = "retry_wait"
-    elif job.attempt_count >= job.max_attempts:
+    elif permanent or job.attempt_count >= job.max_attempts:
         fail_job(item, job, error=error, now=now)
         outcome = "failed"
     else:

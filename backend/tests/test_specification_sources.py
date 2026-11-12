@@ -19,6 +19,7 @@ from backend.app.services.legacy_enquiry.parameter_extraction import DesignParam
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.legacy_enquiry.source_documents import (
     AnimatedImageSkipped, IncompleteSourceExtraction, extract_document, extract_source_records,
+    permanent_source_failure,
 )
 from backend.app.services.performance_specification_contract import FIELD_NAMES
 from backend.app.services.performance_specification_evidence import resolve_email_evidence
@@ -344,7 +345,54 @@ def test_workbook_failure_keeps_safe_reason_in_manifest_and_worker_error():
                                 extractor=SimpleNamespace())
     record = captured.value.manifest[1]
     assert record["error"]["code"] == "workbook_incomplete" and record["text"] == ""
+    assert "Recalculate and save uncached formulas" in record["error"]["message"]
     assert "PRIVATE CONTENT" not in str(captured.value) and "=1/4" not in str(captured.value)
+
+
+def _workbook(sheets, hidden=0):
+    book = openpyxl.Workbook()
+    book.active.title = "Cover"
+    book.active.append(["Package", "Cover"])
+    for index in range(1, sheets):
+        sheet = book.create_sheet(f"2.{index}")
+        sheet.append(["Package", f"Trade {index}"])
+        if index >= sheets - hidden:
+            sheet.sheet_state = "hidden"
+    output = io.BytesIO()
+    book.save(output)
+    book.close()
+    return output.getvalue()
+
+
+def test_design_workbook_reads_a_contract_pricing_schedule_beyond_the_search_sheet_limit():
+    # Render job 80c7df2f (item 3342464181): a 33-sheet pricing document (27 visible)
+    # failed every attempt on the shared 20-sheet search limit.
+    text = extract_document(_workbook(33, hidden=6), "Pricing Schedule.xlsx", None)
+    assert "Worksheet: 2.26" in text and "Trade 26" in text and "Trade 27" not in text
+
+
+def test_design_workbook_limit_reports_sheet_specific_advice():
+    with pytest.raises(ValueError, match="worksheet limit") as error:
+        extract_document(_workbook(41), "Pricing Schedule.xlsx", None)
+    assert error.value.details["code"] == "workbook_incomplete"
+    assert "split the workbook" in str(error.value) and "formulas" not in str(error.value)
+
+
+@pytest.mark.parametrize("failures,permanent", [
+    ([("source_document", "source_size_limit")], True),  # Render jobs 65d14c7f/ecc45db0: 491 MiB ZIP.
+    ([("source_document", "unreadable_pdf")], True),  # Render job e3e10183: 128-byte MacBinary stub.
+    ([("source_document", "unreadable_pdf"), ("source_document", "workbook_incomplete")], True),
+    ([("source_document", "unreadable_pdf"), ("image_text", "provider_error")], False),
+    ([("source_document", "no_readable_text")], False),  # Model transcription may differ.
+    ([("source_document", "source_text_limit")], False),
+    ([], False),
+])
+def test_only_byte_level_source_rejections_are_permanent(failures, permanent):
+    manifest = [{"sourceId": "asset:1:body", "status": "read"}] + [
+        {"sourceId": f"asset:1:attachment:{index}", "status": "failed:SourceDocumentError",
+         "error": {"stage": stage, "code": code}} for index, (stage, code) in enumerate(failures)]
+    assert permanent_source_failure(manifest) is permanent
+    assert permanent_source_failure(None) is False
 
 
 def test_docx_attachment_retains_table_text_and_does_not_expand_xml_entities():

@@ -79,6 +79,25 @@ def bound_verified_request_notes(data, manifest):
     return {**data, "specification_request_notes": notes}, repairs
 
 
+def drop_blank_evidence(data):
+    """Drop citations whose value or excerpt is blank; they assert no checkable fact.
+
+    A populated scalar left without a citation still enters targeted recovery and
+    the verifier's normal evidence gates instead of failing schema validation.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("specification_evidence", []), list):
+        return data, []  # The original model schema reports the type error.
+    kept, repairs = [], []
+    for evidence in data.get("specification_evidence", []):
+        if isinstance(evidence, dict) and any(
+                isinstance(evidence.get(key), str) and not evidence[key].strip() for key in ("value", "snippet")):
+            repairs.append({"reason": "Dropped blank evidence citation", "field": evidence.get("field"),
+                            "before": evidence, "after": None})
+            continue
+        kept.append(evidence)
+    return ({**data, "specification_evidence": kept}, repairs) if repairs else (data, [])
+
+
 def repair_image_company_citations(result, manifest):
     """Restore one complete literal image region; never change the claimed name."""
     sources = {source["sourceId"]: source for source in manifest}

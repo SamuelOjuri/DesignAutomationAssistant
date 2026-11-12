@@ -323,6 +323,23 @@ alone does not validate those facts. See the
 [12 November log assessment](../output/design-worker-log-assessment-2026-11-12.md)
 for the seven unresolved items and four recoveries observed in that log.
 
+The afternoon update (see the
+[12 November 13:11 assessment](../output/design-worker-log-assessment-2026-11-12-1311.md))
+keeps `output-v20` and needs no migration. It makes a job fail on its first attempt
+when every failed source was rejected on its own bytes (size, unreadable PDF/ZIP,
+workbook or archive limits); reconciliation then reports `attempts_exhausted` for
+that input until a replacement file arrives. Provider and transcription failures
+still retry. It also raises the design workbook allowance to 40 worksheets and fixes
+three evidence-verifier false negatives described in
+[the specification notes](PerformanceSpecification.md). Deploy the design workers,
+reconciliation, API and specification publisher from the same revision. After that
+deployment, retry the failed jobs for items `3352626143` (`4b0b514d`),
+`3345436089` (`8bc1710e`) and `3342464181` (`80c7df2f`) with the operator command
+above, once each is confirmed failed/current. Do not retry `3353889887` or
+`3305268547` until their sources are replaced, `3345815639` until its request-note
+citation and U-value conflict are reviewed, or `3353070362`, which is now outside
+the Landing Zone.
+
 Local verification on 11 November exercised the backend tests, PostgreSQL checks,
 44 frontend Node tests and the frontend production build. Browser journey
 assertions were not completed: the in-app browser was unavailable and the

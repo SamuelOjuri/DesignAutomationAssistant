@@ -34,6 +34,17 @@ MAX_ARCHIVE_EXPANDED_BYTES = 100 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 200
 MAX_ARCHIVE_DEPTH = 3
 MAX_CONTEXT_CHARS = 500_000
+# Contract pricing workbooks commonly have one sheet per trade package. Row,
+# cell, chunk and extracted-text limits still bound the total work.
+MAX_DESIGN_WORKSHEETS = 40
+# Rejections of the downloaded bytes themselves recur on every attempt; only a
+# replacement source (a new input revision) can change them. Model-dependent
+# outcomes such as no_readable_text and transcribed-text limits stay retryable.
+PERMANENT_SOURCE_ERROR_CODES = frozenset({
+    "source_size_limit", "workbook_incomplete", "unreadable_pdf", "unreadable_archive",
+    "empty_archive", "encrypted_archive", "archive_depth_limit", "archive_member_limit",
+    "archive_member_size_limit", "archive_expansion_limit",
+})
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
 DOCUMENT_EXTENSIONS = frozenset({
     ".pdf", ".docx", ".txt", ".csv", ".tsv", ".json", ".xml", ".html", ".htm",
@@ -128,6 +139,17 @@ class IncompleteSourceExtraction(ValueError):
         super().__init__("Incomplete source extraction; retry/review required: " + "; ".join(failures)[:1000])
 
 
+def permanent_source_failure(manifest) -> bool:
+    """True when every incomplete source failed on its own unchanged bytes."""
+    failed = [source for source in manifest or []
+              if isinstance(source, dict) and source.get("status") not in COMPLETE_SOURCE_STATUSES]
+    return bool(failed) and all(
+        isinstance(source.get("error"), dict) and source["error"].get("stage") == "source_document"
+        and source["error"].get("code") in PERMANENT_SOURCE_ERROR_CODES
+        for source in failed
+    )
+
+
 class _HTMLText(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -179,11 +201,15 @@ def extract_document(content: bytes, filename: str, extractor, *, extraction_met
             path = Path(directory) / ("source" + suffix)
             path.write_bytes(content)
             documents = extract_spreadsheet_documents(str(path), filename, visible_only=True, preserve_full_cells=True,
-                                                      max_file_bytes=MAX_SOURCE_BYTES)
+                                                      max_file_bytes=MAX_SOURCE_BYTES,
+                                                      max_sheets=MAX_DESIGN_WORKSHEETS)
         notices = [doc["notice"] for doc in documents if doc["section"] == "spreadsheet:extraction-notice"]
         if notices:
-            raise SourceDocumentError("workbook_incomplete", "Workbook extraction incomplete: " + " ".join(notices)
-                                      + " Recalculate and save uncached formulas in Excel, or supply a smaller readable export.")
+            advice = ("Recalculate and save uncached formulas in Excel, or supply a smaller readable export."
+                      if any("formula" in notice.lower() for notice in notices)
+                      else "Supply a smaller readable export, or split the workbook.")
+            raise SourceDocumentError("workbook_incomplete",
+                                      "Workbook extraction incomplete: " + " ".join(notices) + " " + advice)
         text = "\n\n".join(doc["text"] for doc in documents)
     elif suffix == ".pdf":
         native_text = None

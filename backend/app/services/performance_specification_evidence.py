@@ -55,18 +55,22 @@ def _excerpt_normal(value):
     return _normal(text)
 
 
-def _contains_excerpt(excerpt, text):
+def _contains_excerpt(excerpt, text, *, joined_identifier=False):
     excerpt, text = _excerpt_normal(excerpt), _excerpt_normal(text)
     if not excerpt:
         return False
     # A short value such as A1 or 1:10 cannot match the prefix of A10 or 1:100.
-    start = r"(?<!\w)" if re.match(r"\w", excerpt[0]) else ""
-    end = r"(?!\w)" if re.match(r"\w", excerpt[-1]) else ""
+    # '_' separates words in subjects/filenames (B265674_Project), but joins a
+    # drawing number to its revision (TP16670_26.12), so references keep it.
+    token = r"\w" if joined_identifier else r"[^\W_]"
+    start = rf"(?<!{token})" if re.match(token, excerpt[0]) else ""
+    end = rf"(?!{token})" if re.match(token, excerpt[-1]) else ""
     return re.search(start + re.escape(excerpt) + end, text) is not None
 
 
-def _source_contains_excerpt(source, excerpt):
-    return any(_contains_excerpt(excerpt, text) for text in literal_source_texts(source))
+def _source_contains_excerpt(source, excerpt, *, joined_identifier=False):
+    return any(_contains_excerpt(excerpt, text, joined_identifier=joined_identifier)
+               for text in literal_source_texts(source))
 
 
 def _reference_normal(value):
@@ -85,7 +89,8 @@ def _comparable_value(field, value):
 def _contains_reference(value, snippet):
     # The snippet itself is verified literally against its source first; only
     # the drawing-reference value may read a typographic dash as '-'.
-    return _contains_excerpt(normalize_reference_dashes(value), normalize_reference_dashes(snippet))
+    return _contains_excerpt(normalize_reference_dashes(value), normalize_reference_dashes(snippet),
+                             joined_identifier=True)
 
 
 def _candidate_key(evidence):
@@ -106,9 +111,10 @@ def _candidate_key(evidence):
 
 
 # Rejections after the source excerpt itself verified: only the value or date is unproven.
+UNVERIFIED_TIMESTAMP = "Candidate request timestamp could not be verified"
 REDUNDANT_REJECTION_REASONS = frozenset({
     "Raw value is absent from the supporting excerpt",
-    "Candidate request timestamp could not be verified",
+    UNVERIFIED_TIMESTAMP,
 })
 
 
@@ -343,7 +349,8 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
             excluded[label].append({**evidence, "reason": "Evidence does not belong to the selected client request"})
             continue
         if (source is None or source["status"] != "read"
-                or not _source_contains_excerpt(source, evidence["snippet"])):
+                or not _source_contains_excerpt(source, evidence["snippet"],
+                                                joined_identifier=label in REFERENCE_FIELDS)):
             reject("Supporting source/excerpt could not be verified")
             continue
         if label in {"Bauder Roof Num", "Date Received"} and source["sourceType"] != "email_body":
@@ -404,7 +411,7 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
                     timestamp = timestamp.replace(tzinfo=ZoneInfo("Europe/London"))
                 observed_at = timestamp.astimezone(timezone.utc).isoformat()
             except (ValueError, OverflowError):
-                reject("Candidate request timestamp could not be verified")
+                reject(UNVERIFIED_TIMESTAMP)
                 continue
         candidates[label].append({**evidence, "observedAt": observed_at,
                                   "sourceObservedAt": source.get("observedAt"),
@@ -423,11 +430,20 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         # so a duplicate of that same fact cannot add a value or reorder the scope.
         # Its verified excerpt must still contain the value's words in order.
         undated = {_fact_key(evidence) for evidence in candidates[label] if evidence["observedAt"] is None}
+        # Only the date failed for a timestamp rejection; its excerpt, scope and
+        # value verified. When every verified candidate states that same value,
+        # its claimed date or direct/forwarded role cannot add, supersede or
+        # reorder a value, so the copy is redundant even if the fact is dated.
+        verified_facts = {_fact_key(evidence) for evidence in candidates[label]}
+        single_value = len({_excerpt_normal(_comparable_value(label, evidence["value"]))
+                            for evidence in candidates[label]}) == 1
         for failure in failures:
             if _candidate_key(failure) in verified:
                 failure["status"] = "repaired"
             elif ((failure["reason"] in REDUNDANT_REJECTION_REASONS and _fact_key(failure) in undated
                    and _words_in_order(failure["value"], failure["snippet"]))
+                  or (failure["reason"] == UNVERIFIED_TIMESTAMP and single_value
+                      and _fact_key(failure) in verified_facts)
                   or any(_restates_u_value(failure, evidence) for evidence in candidates[label])):
                 failure["status"] = "redundant"
             else:

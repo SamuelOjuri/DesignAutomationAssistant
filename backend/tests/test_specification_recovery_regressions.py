@@ -218,8 +218,7 @@ def test_literal_forwarded_header_replaces_reformatted_date_without_changing_fac
     assert result._evidence_repairs[0]["after"]["message_date"] == header
 
 
-@pytest.mark.parametrize("case", ["different_time", "different_date", "unrelated_message", "body_date", "duplicate", "role"])
-def test_date_repair_cannot_move_fact_to_another_message_or_time(case):
+def _minimum_u_value_case(case):
     header = "15 October 2026 10:55"
     text = ("From: Requester\nDate: Fri, 30 Oct 2026 11:32:17 +0000\n\nPlease revise.\n"
             f"From: Earlier requester\nSent: {header}\nSubject: Request\n\nMinimum U-value 0.35")
@@ -236,10 +235,29 @@ def test_date_repair_cannot_move_fact_to_another_message_or_time(case):
         old_date = "2026-10-14T10:55:00Z"
     evidence = candidate("Target Min U Value", "0.35", "Minimum U-value 0.35", source_id="asset:1:body",
                          request_role="direct_request" if case == "role" else "forwarded_request", message_date=old_date)
+    manifest = [source("asset:1:body", text, "email_body")]
+    return lambda: extract_twice(
+        parameters(target_min_u_value="0.35", specification_evidence=[evidence]),
+        parameters(target_min_u_value="0.35", specification_evidence=[{**evidence, "message_date": header}]),
+        manifest), manifest
+
+
+@pytest.mark.parametrize("case", ["unrelated_message", "body_date", "role"])
+def test_date_repair_cannot_move_fact_to_another_message_or_time(case):
+    extract, _ = _minimum_u_value_case(case)
     with pytest.raises(ValueError, match="recovery unresolved"):
-        extract_twice(parameters(target_min_u_value="0.35", specification_evidence=[evidence]),
-                      parameters(target_min_u_value="0.35", specification_evidence=[{**evidence, "message_date": header}]),
-                      [source("asset:1:body", text, "email_body")])
+        extract()
+
+
+@pytest.mark.parametrize("case", ["different_time", "different_date", "duplicate"])
+def test_unverifiable_first_date_is_redundant_beside_the_verified_literal_header(case):
+    # The recovered citation verifies the same single value at its literal header.
+    # The first claimed date never moves that fact; it is retained as redundant.
+    extract, manifest = _minimum_u_value_case(case)
+    raw, provenance, issues = resolve_email_evidence(extraction_payload(extract(), manifest))
+    assert not issues and raw["Target Min U Value"] == "0.35"
+    assert provenance["Target Min U Value"]["selected"]["observedAt"] == "2026-10-15T09:55:00+00:00"
+    assert {e["status"] for e in provenance["Target Min U Value"]["rejectedCandidates"]} == {"redundant"}
 
 
 def test_iso_message_date_preserves_month_and_day():
@@ -465,9 +483,6 @@ DUPLICATE_OUTLET = "Example Campus\n27/10/26\nOutlet Plan\nNorth Roof"
     ({}, {}, "Example Campus\nOutlet Plan"),  # A value word is absent.
     ({}, {"snippet": "Unlisted excerpt"}, DUPLICATE_OUTLET),
     ({"message_date": SENT}, {}, DUPLICATE_OUTLET),  # The verified twin is dated.
-    ({"message_date": SENT}, {"source_id": "asset:1:attachment:0", "snippet": DUPLICATE_PLAN,
-                              "request_role": "forwarded_request", "message_date": "27 October 2026 14:38"},
-     DUPLICATE_OUTLET),
 ])
 def test_only_an_undated_verified_twin_makes_an_unverified_duplicate_redundant(
         verified_change, duplicate_change, outlet_text):
@@ -790,3 +805,131 @@ def test_general_reference_cannot_claim_an_unquoted_issuer():
 def test_review_prefix_reference_must_still_be_literal(value):
     data = extraction([source("asset:1:attachment:0", FA_TEXT)], [candidate("Drawing Reference", value, FA_TEXT)])
     assert resolve_email_evidence(data)[2]["Drawing Reference"] == "Raw value is absent from the supporting excerpt"
+
+
+BERMUDA_SUBJECT = "Subject: FW: B265674_Bermuda Road Retirement Living - Tapered design"
+
+
+@pytest.mark.parametrize("snippet,fields", [
+    (BERMUDA_SUBJECT, {"Drawing Title": "Bermuda Road Retirement Living", "Bauder Contract Number": "B265674"}),
+    ("Bermuda Road Retirement Living", {"Drawing Title": "Bermuda Road Retirement Living"}),
+    ("B265674", {"Bauder Contract Number": "B265674"}),
+])
+def test_underscore_separated_subject_words_verify(snippet, fields):
+    # Render jobs 0c498572/ae9b0976/8bc1710e (item 3345436089): '_' joined the Bauder
+    # contract number to the title, so no title/contract citation could verify.
+    text = f"From: Requester\nDate: {SENT}\n{BERMUDA_SUBJECT}\n\nPlease see attached."
+    evidence = [candidate(field, value, snippet, source_id="asset:1:body",
+                          request_role="direct_request", message_date=SENT) for field, value in fields.items()]
+    raw, _, issues = resolve_email_evidence(extraction([source("asset:1:body", text, "email_body")], evidence))
+    assert not issues and {field: raw[field] for field in fields} == fields
+
+
+@pytest.mark.parametrize("value,text", [
+    ("B26567", BERMUDA_SUBJECT),  # A truncated number is not a separate token.
+    ("Bermuda Road Retirement Liv", BERMUDA_SUBJECT),
+    ("265674", BERMUDA_SUBJECT),
+])
+def test_underscore_separation_keeps_whole_token_matching(value, text):
+    data = extraction([source("asset:1:attachment:0", text)], [candidate("Drawing Title", value, value)])
+    assert resolve_email_evidence(data)[2]["Drawing Title"] == "Supporting source/excerpt could not be verified"
+
+
+@pytest.mark.parametrize("field,value", [("Revision", "26.02 - A"), ("Drawing Reference", "26.02 - A")])
+def test_reference_excerpt_cannot_start_after_the_number_underscore(field, value):
+    # Render job ae9b0976: in TP references '_' joins the number to its revision.
+    text = "Drawing TP18954_26.02 - A issued"
+    data = extraction([source("asset:1:attachment:0", text)], [candidate(field, value, value)])
+    assert field in resolve_email_evidence(data)[2]
+
+
+CLIENT_DATE = "Thu, 12 Nov 2026 09:51:19 +0000"
+FORWARDED_DATE = "11 November 2026 16:09"
+FORWARDED_SPEC = (f"From: Client <client@example.com>\nDate: {CLIENT_DATE}\n\nPlease price the attached.\n\n"
+                  f"From: Architect <architect@example.org>\nSent: {FORWARDED_DATE}\nSubject: Roof\n\n"
+                  "Membrane: VM Zinc membrane\nVCL: Aludex Max\nRoof 2 membrane: Single ply")
+
+
+def forwarded_fact(value, snippet, **overrides):
+    return candidate("Membrane", value, snippet, source_id="asset:1:body",
+                     request_role="forwarded_request", message_date=FORWARDED_DATE, **overrides)
+
+
+def test_same_fact_with_an_unverifiable_alternate_date_is_redundant():
+    # Render job 4b0b514d (item 3352626143): Membrane, VCL and Decking each verified
+    # from the forwarded specification, and a copy claiming the carrying email's
+    # direct-request date blocked all three attempts.
+    verified = forwarded_fact("VM Zinc membrane", "Membrane: VM Zinc membrane")
+    copy = {**verified, "request_role": "direct_request", "message_date": CLIENT_DATE}
+    raw, provenance, issues = resolve_email_evidence(
+        extraction([source("asset:1:body", FORWARDED_SPEC, "email_body")], [verified, copy]))
+    assert raw["Membrane"] == "VM Zinc membrane" and not issues
+    rejected, = provenance["Membrane"]["rejectedCandidates"]
+    assert (rejected["reason"], rejected["status"]) == ("Candidate request timestamp could not be verified",
+                                                        "redundant")
+    assert provenance["Membrane"]["selected"]["message_date"] == FORWARDED_DATE
+
+
+def test_unverifiable_alternate_date_still_blocks_when_the_field_has_another_value():
+    # The copy's real date could reorder the roof's values, so it remains a review issue.
+    verified = forwarded_fact("VM Zinc membrane", "Membrane: VM Zinc membrane", scope="Roof 1")
+    other = forwarded_fact("Single ply", "Roof 2 membrane: Single ply", scope="Roof 2")
+    copy = {**verified, "request_role": "direct_request", "message_date": CLIENT_DATE}
+    data = extraction([source("asset:1:body", FORWARDED_SPEC, "email_body")], [verified, other, copy])
+    raw, provenance, issues = resolve_email_evidence(data, ["Roof 1"])
+    assert raw["Membrane"] == "VM Zinc membrane"
+    assert issues["Membrane"] == "Candidate request timestamp could not be verified"
+    assert provenance["Membrane"]["rejectedCandidates"][0]["status"] == "unverified"
+
+
+def test_dated_twin_copy_from_the_same_plan_is_redundant():
+    # Formerly blocking: the verified twin is dated and the copy claims another date.
+    verified = candidate("Drawing Title", "Example Campus, North Roof", DUPLICATE_PLAN,
+                         scope="North Roof", message_date=SENT)
+    copy = {**verified, "request_role": "forwarded_request", "message_date": "27 October 2026 14:38"}
+    data = extraction([source("asset:1:body", f"From: Requester\nDate: {SENT}\n\nRequest", "email_body"),
+                       source("asset:1:attachment:0", DUPLICATE_PLAN)], [verified, copy])
+    raw, provenance, issues = resolve_email_evidence(data)
+    assert raw["Drawing Title"] == "Example Campus, North Roof" and not issues
+    assert provenance["Drawing Title"]["rejectedCandidates"][0]["status"] == "redundant"
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+@pytest.mark.parametrize("key", ["value", "snippet"])
+def test_blank_evidence_citation_is_dropped_and_audited(blank, key):
+    # Render job 8bc1710e (item 3345436089), attempt 1: one citation had an empty
+    # value, so schema validation failed the whole extraction before recovery.
+    text = "Project: Example Roof"
+    manifest = [source("asset:1:attachment:0", text)]
+    valid = candidate("Drawing Title", "Example Roof", text)
+    reply = parameters(drawing_title="Example Roof", specification_evidence=[valid]).model_dump()
+    reply["specification_evidence"].append({**valid, "field": "Scale", key: blank})
+    calls = []
+
+    def generate(model, prompt, config):
+        calls.append(prompt)
+        return SimpleNamespace(parsed=dict(reply))
+
+    result = LegacyGeminiClient("offline", generate_content=generate).extract_design_parameters_with_manifest(
+        "Synthetic source context", manifest)
+    assert len(calls) == 1 and [e.field for e in result.specification_evidence] == ["Drawing Title"]
+    repair, = result._evidence_repairs
+    assert repair["reason"] == "Dropped blank evidence citation" and repair["before"][key] == blank
+    assert resolve_email_evidence(extraction_payload(result, manifest))[0]["Drawing Title"] == "Example Roof"
+
+
+def test_dropped_blank_citation_leaves_a_populated_scalar_for_recovery():
+    text = "Project: Example Roof"
+    manifest = [source("asset:1:attachment:0", text)]
+    reply = parameters(drawing_title="Example Roof").model_dump()
+    reply["specification_evidence"] = [{**candidate("Drawing Title", "Example Roof", text), "value": ""}]
+    calls = []
+
+    def generate(model, prompt, config):
+        calls.append(prompt)
+        return SimpleNamespace(parsed=dict(reply))
+
+    with pytest.raises(ValueError, match="Drawing Title"):
+        LegacyGeminiClient("offline", generate_content=generate).extract_design_parameters_with_manifest(
+            "Synthetic source context", manifest)
+    assert len(calls) == 2 and "Drawing Title" in calls[1]

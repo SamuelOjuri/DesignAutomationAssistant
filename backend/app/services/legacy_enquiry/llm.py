@@ -79,7 +79,7 @@ class LegacyGeminiClient:
 
     def extract_design_parameters(self, context: str, *, source_manifest=None) -> DesignParameterExtraction:
         from ..specification_recovery import (
-            evidence_diagnostics, extraction_payload, merge_recovery,
+            drop_blank_evidence, evidence_diagnostics, extraction_payload, merge_recovery,
             repair_note_list_formatting, repair_image_company_citations, repair_message_dates, bound_verified_request_notes,
             repair_template_markers,
         )
@@ -119,13 +119,14 @@ class LegacyGeminiClient:
                 parsed = json.loads(response_text)
                 require_json_safe_text(parsed)
             bounded, repairs = bound_verified_request_notes(parsed, source_manifest)
+            bounded, dropped = drop_blank_evidence(bounded)
             try:
                 result = DesignParameterExtraction.model_validate(bounded)
             except ValidationError as exc:
                 issues = exc.errors(include_input=False, include_context=False, include_url=False)
                 raise SpecificationEvidenceError("Invalid parameter extraction response: " + json.dumps(issues),
                     {"schemaIssues": issues, "response": bounded, "sourceManifest": source_manifest or []}) from None
-            result._evidence_repairs.extend(repairs)
+            result._evidence_repairs.extend(repairs + dropped)
             return result
 
         result = request(prompt, "parameter_extraction")
