@@ -67,6 +67,15 @@ class Settings(BaseSettings):
 
     # Postgres
     database_url: str
+    # Each API/worker process owns a pool. Spawned extraction children use a
+    # smaller pool because cache/admission transactions end before model calls.
+    database_pool_size: int = Field(default=2, ge=1, le=50)
+    database_max_overflow: int = Field(default=0, ge=0, le=50)
+    database_extraction_pool_size: int = Field(default=1, ge=1, le=20)
+    database_extraction_max_overflow: int = Field(default=0, ge=0, le=20)
+    database_pool_timeout_seconds: float = Field(default=30, ge=1, le=300)
+    database_pool_recycle_seconds: int = Field(default=300, ge=1, le=3600)
+    database_connect_timeout_seconds: int = Field(default=10, ge=1, le=120)
 
     # Auto-sync foundation
     auto_sync_enabled: bool = False

@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 import logging
 import time
 import uuid
@@ -11,9 +12,40 @@ from sqlalchemy import func, text
 from ..config import settings
 from ..db import SessionLocal
 from ..models import GeminiRequestLease
+from .database_diagnostics import database_error_details
 
 
 logger = logging.getLogger(__name__)
+
+
+class GeminiAdmissionDatabaseError(RuntimeError):
+    """A local admission failure, distinct from a Gemini HTTP rejection."""
+    origin = "gemini_admission"
+
+    def __init__(self, details):
+        self.database_details = dict(details)
+        super().__init__("Shared Gemini admission database is unavailable")
+
+
+def _admit_with_database_retry(scope, deadline):
+    # Each failed transaction is closed by try_acquire's session context before
+    # sleeping. Provider requests remain forbidden without successful admission.
+    for attempt in range(1, 4):
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Shared Gemini request admission timed out")
+        try:
+            return try_acquire(scope)
+        except Exception as exc:
+            details = database_error_details(exc)
+            if details is None:
+                raise
+            logger.warning("Shared Gemini admission database unavailable attempt=%s/3 diagnostics=%s",
+                           attempt, json.dumps(details, sort_keys=True))
+            remaining = deadline - time.monotonic()
+            if not details.get("transient") or attempt == 3 or remaining <= 0:
+                raise GeminiAdmissionDatabaseError(details) from None
+            time.sleep(min(0.5 * 2 ** (attempt - 1), remaining))
+    raise AssertionError("Database admission retry loop exited unexpectedly")
 
 
 def budget_scope():
@@ -69,20 +101,26 @@ def shared_generation_slot():
         raise RuntimeError("Shared Gemini lease must exceed the configured request timeout")
     deadline = time.monotonic() + settings.gemini_shared_wait_seconds
     token = None
-    while token is None:
-        # Missing migration/database failure is intentionally not a quota bypass.
-        token = try_acquire(budget_scope())
-        if token is None:
-            if time.monotonic() >= deadline:
-                raise TimeoutError("Shared Gemini request budget is busy")
-            time.sleep(0.5)
+    busy_count = 0
     try:
+        while token is None:
+            # Missing migration/database failure is intentionally not a quota bypass.
+            token = _admit_with_database_retry(budget_scope(), deadline)
+            if time.monotonic() >= deadline:
+                # A database call can finish after its admission deadline. Release
+                # any late token in finally and never begin the provider request.
+                raise TimeoutError("Shared Gemini request admission timed out")
+            if token is None:
+                busy_count += 1
+                time.sleep(min(2.0, 0.5 * 2 ** min(busy_count - 1, 2), max(0, deadline - time.monotonic())))
         yield
     finally:
-        try:
-            release(token)
-        except Exception as exc:
-            # Admission remains fail closed. A failed release keeps its lease
-            # occupied until expiry, without losing an already-paid response or
-            # replacing the provider's original error with a database exception.
-            logger.warning("Shared Gemini lease release unavailable error_type=%s", type(exc).__name__)
+        if token is not None:
+            try:
+                release(token)
+            except Exception as exc:
+                # Admission remains fail closed. A failed release keeps its lease
+                # occupied until expiry, without losing an already-paid response or
+                # replacing the provider's original error with a database exception.
+                logger.warning("Shared Gemini lease release unavailable error_type=%s diagnostics=%s",
+                               type(exc).__name__, json.dumps(database_error_details(exc) or {}, sort_keys=True))

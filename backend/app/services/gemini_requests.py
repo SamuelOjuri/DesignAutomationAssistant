@@ -11,6 +11,8 @@ import platform
 import re
 import time
 
+from .database_diagnostics import database_error_details, sanitized_database_details
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,6 +70,12 @@ def request_gemini(generate_content, model, contents, config, *, stage, input_by
                         "error_type": type(exc).__name__, "mode": "structured" if schema else "json" if config.response_mime_type == "application/json" else "text",
                         "prompt_characters": len(contents) if isinstance(contents, str) else None,
                         "input_bytes": input_bytes})
+        database_details = (sanitized_database_details(getattr(exc, "database_details", None))
+                            or database_error_details(exc))
+        if database_details:
+            details.update(database_details)
+            details["origin"] = ("gemini_admission" if getattr(exc, "origin", None) == "gemini_admission"
+                                 else "database")
         # Provider exception bodies may include URLs, keys or source excerpts.
         # Keep them out of both the process traceback and the persisted error.
         raise GeminiRequestFailure(details) from None

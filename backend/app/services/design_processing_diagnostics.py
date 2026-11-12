@@ -3,6 +3,7 @@
 import os
 
 from ..config import DESIGN_PROCESSING_PIPELINE_REVISION, settings
+from ..db import database_pool_diagnostics
 from .legacy_enquiry.source_documents import MAX_SOURCE_BYTES
 from .specification_semantics import (
     ARCHIVE_EXPANDED_STATUS, DWG_SKIP_STATUS, ENCRYPTED_PDF_SKIP_STATUS, UNSUPPORTED_SOURCE_SKIP_STATUS,
@@ -11,6 +12,7 @@ from .specification_semantics import (
 
 def source_runtime_diagnostics():
     return {
+        **database_pool_diagnostics(),
         "pid": os.getpid(),
         "pipeline_revision": DESIGN_PROCESSING_PIPELINE_REVISION,
         "dwg_status": DWG_SKIP_STATUS,

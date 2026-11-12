@@ -12,6 +12,7 @@ import threading
 from ..config import DESIGN_PROCESSING_PIPELINE_REVISION, settings
 from ..db import SessionLocal
 from ..models import SourceTranscriptionCache
+from .database_diagnostics import database_error_details
 from .source_text import clean_source_text
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,8 @@ def cached_transcription(kind):
                 try:
                     text = read_text(scope, key)
                 except Exception as exc:
-                    logger.warning("Source transcription cache read unavailable error_type=%s", type(exc).__name__)
+                    details = database_error_details(exc) or {"error_type": type(exc).__name__}
+                    logger.warning("Source transcription cache read unavailable details=%s", json.dumps(details, sort_keys=True))
                     text = None
                 if text is not None:
                     logger.info("Source transcription reused kind=%s digest=%s", kind, digest[:12])
@@ -119,7 +121,8 @@ def cached_transcription(kind):
                     try:
                         save_text(scope, key, digest, text)
                     except Exception as exc:
-                        logger.warning("Source transcription cache write unavailable error_type=%s", type(exc).__name__)
+                        details = database_error_details(exc) or {"error_type": type(exc).__name__}
+                        logger.warning("Source transcription cache write unavailable details=%s", json.dumps(details, sort_keys=True))
                 return text
         return wrapped
     return decorate

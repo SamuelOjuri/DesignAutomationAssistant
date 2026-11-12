@@ -96,6 +96,9 @@ def _provider_recitation(exc):
 
 
 def _failure_summary(source):
+    import re
+    from ..database_diagnostics import sanitized_database_details
+
     summary = f"{source['filename']}: {source['status']}"
     error = source.get("error")
     if isinstance(error, dict):
@@ -105,6 +108,15 @@ def _failure_summary(source):
             summary += f" (stage={error.get('stage')}, http_status={error.get('http_status')}, mode={error.get('mode')})"
             if error.get("code"):
                 summary += f" (code={error['code']}, finish_reason={error.get('finish_reason')})"
+            diagnostics = {}
+            error_type = error.get("error_type")
+            if isinstance(error_type, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", error_type):
+                diagnostics["error_type"] = error_type
+            diagnostics.update(sanitized_database_details(error) or {})
+            if error.get("origin") in {"gemini_admission", "database"}:
+                diagnostics["origin"] = error["origin"]
+            if diagnostics:
+                summary += " (" + ", ".join(f"{key}={value}" for key, value in diagnostics.items()) + ")"
     return summary
 
 

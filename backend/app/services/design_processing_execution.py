@@ -53,6 +53,8 @@ def _analyze_in_child(connection, downloaded_assets, client):
         with send_lock:
             connection.send(("progress", update))
     try:
+        from ..db import configure_extraction_database
+        configure_extraction_database()
         result = analyze_downloaded_email_assets(downloaded_assets, client=client, on_progress=progress)
         connection.send((True, result))
     except Exception as exc:
