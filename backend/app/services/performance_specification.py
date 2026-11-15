@@ -1,4 +1,4 @@
-"""Durable, fenced refresh and publication of Landing Zone specification PDFs.
+"""Prepare specification drafts; publish automatically in Landing Zone or on request.
 
 Run separately from ingestion with:
     python -m backend.app.services.performance_specification --once
@@ -37,6 +37,7 @@ from .specification_review_contract import SOURCE_POLICY_VERSION, ReviewDecision
 from .specification_references import REFERENCE_PARSER_VERSION
 from .specification_policy import (
     SPECIFICATION_SCOPE_POLICY_VERSION, specification_scope_exclusion,
+    eligible_specification_group_ids,
     specification_processing_enabled, specification_processing_allowed,
     specification_publication_allowed,
 )
@@ -201,9 +202,10 @@ def enqueue_specification(db, board_id, item_id, *, group_id=None, immediate=Fal
     return record
 
 
-def cancel_specification(db, board_id, item_id, *, reason="outside_landing_zone"):
+def cancel_specification(db, board_id, item_id, *, reason="group_not_eligible"):
     record = _record(db, str(board_id), str(item_id)).one_or_none()
     if record is not None:
+        record.requested_publication_revision = None
         record.completed_generation = record.requested_generation
         record.scheduled_for = None
         record.lease_token = record.lease_until = None
@@ -275,9 +277,9 @@ def discover_specifications(db, limit=100, *, gateway=None):
     )).filter(
         DesignProcessingItem.board_id == str(settings.design_processing_board_id),
         or_(check.last_outcome.is_(None), check.last_outcome != RETIRED_SOURCE_OUTCOME),
-        or_(check.last_group_id.is_(None), check.last_group_id == str(settings.design_processing_landing_group_id)),
+        or_(check.last_group_id.is_(None), check.last_group_id.in_(eligible_specification_group_ids())),
         # Scheduled rows already have periodic worker checks; cancelled/missing
-        # rows need discovery. A newer Landing observation bypasses the delay.
+        # rows need discovery. A newer eligible observation bypasses the delay.
         or_(spec.item_id.is_(None), and_(
             spec.scheduled_for.is_(None),
             or_(spec.checked_at.is_(None), spec.checked_at <= stale_before,
@@ -440,6 +442,23 @@ def _publication_allowed(item_id):
     return specification_publication_allowed(item_id)
 
 
+def _publication_permitted(db, claim, gateway, revision, *, cleanup=False):
+    """Fresh lifecycle plus an exact reviewer request at every upload boundary."""
+    if not _publication_allowed(claim[1]):
+        return False
+    target = gateway.fetch_target(claim[1])
+    reason = specification_scope_exclusion(target)
+    if reason is not None:
+        raise SpecificationIneligible(reason)
+    record = _check_claim(db, claim)
+    if str(target.group_id) == str(settings.design_processing_landing_group_id):
+        return True
+    # Cleanup is entered only after a verified current publication. Consuming a
+    # request must not prevent cleanup, or grant permission for another upload.
+    return (record.current_revision == revision if cleanup
+            else record.requested_publication_revision == revision)
+
+
 def _source(db, claim, gateway):
     record = _check_claim(db, claim)
     item = db.query(DesignProcessingItem).filter_by(board_id=claim[0], item_id=claim[1]).populate_existing().one()
@@ -458,6 +477,7 @@ def _source(db, claim, gateway):
         if record.lease_token != claim[2] or record.requested_generation != claim[3]:
             db.rollback()
             raise SupersededSpecification("Specification changed while waiting for extraction")
+        record.requested_publication_revision = None
         review = db.query(PerformanceSpecificationReview).filter_by(
             board_id=claim[0], item_id=claim[1],
         ).populate_existing().with_for_update().one_or_none()
@@ -489,6 +509,11 @@ def _source(db, claim, gateway):
     except ReviewConflict as exc:
         db.rollback()
         raise SupersededSpecification(str(exc)) from exc
+    if record.requested_publication_revision:
+        requested = db.get(PerformanceSpecificationArtifact,
+                           (claim[0], claim[1], record.requested_publication_revision))
+        if requested is None or (requested.source_json or {}).get("review") != source["review"]:
+            record.requested_publication_revision = None
     db.commit()
     if source_failure is not None:
         raise source_failure
@@ -543,7 +568,7 @@ def _adoptable(artifact, assets):
     return matches[0] if matches else None
 
 
-def _finish(db, claim, source, publication, *, revision=None):
+def _finish(db, claim, source, publication, *, revision=None, draft_revision=None):
     _check_claim(db, claim)
     if revision is not None and not _publication_allowed(claim[1]):
         raise SupersededSpecification("Specification publication disabled before completion")
@@ -551,7 +576,13 @@ def _finish(db, claim, source, publication, *, revision=None):
     if record.lease_token != claim[2] or record.requested_generation != claim[3]:
         db.rollback()
         raise SupersededSpecification("Specification changed before completion")
+    if (revision or draft_revision) != record.current_revision:
+        review = db.query(PerformanceSpecificationReview).filter_by(
+            board_id=claim[0], item_id=claim[1],
+        ).populate_existing().with_for_update().one_or_none()
+        invalidate_publication_approval(db, review, reason="A different specification PDF has been prepared")
     record.source_json = source
+    record.prepared_revision = revision or draft_revision
     record.checked_at = utc_now()
     record.completed_generation = claim[3]
     record.scheduled_for = utc_now() + timedelta(seconds=settings.performance_specification_recheck_seconds)
@@ -567,6 +598,7 @@ def _finish(db, claim, source, publication, *, revision=None):
           or publication.mapping_issues) else None
     if revision is not None:
         record.current_revision = revision
+        record.requested_publication_revision = None
     _replace_dependencies(db, record, source)
     db.commit()
 
@@ -579,6 +611,10 @@ def execute_specification(db, claim, *, gateway, client, storage):
         record, source = _source(db, claim, gateway)
         model_version = f"{SPECIFICATION_VERSION}:{client.model}:thinking-{client.thinking_level}"
         revision = digest({"review": source["review"], "modelVersion": model_version})
+        if record.requested_publication_revision and record.requested_publication_revision != revision:
+            record = _record(db, board_id, item_id).one()
+            record.requested_publication_revision = None
+            db.commit()
         artifact = db.get(PerformanceSpecificationArtifact, (board_id, item_id, revision))
         if artifact is None:
             cached = _cached_translation(db, board_id, item_id, source, model_version)
@@ -613,9 +649,16 @@ def execute_specification(db, claim, *, gateway, client, storage):
             if hashlib.sha256(content).hexdigest() != artifact.content_sha256 or len(content) != artifact.size_bytes:
                 raise SpecificationSourceError("Stored specification PDF failed its integrity check")
 
-        if not _publication_allowed(item_id):
-            _finish(db, claim, source, translation)
-            return "rendered"  # Specification rollout is independent of design exports.
+        if not _publication_permitted(db, claim, gateway, revision):
+            if artifact.status in {"uploading", "deleted"}:
+                artifact.status = "rendered"
+                db.commit()
+            _finish(db, claim, source, translation, draft_revision=revision)
+            if record.current_revision == revision and artifact.status == "published":
+                # Retry interrupted cleanup of an already published revision,
+                # without uploading or granting permission to any new draft.
+                _cleanup_specifications(db, board_id, item_id, revision, gateway, source)
+            return "rendered"  # Active groups retain the published PDF until explicitly requested.
 
         _, current = _source(db, claim, gateway)
         if current != source:
@@ -625,7 +668,7 @@ def execute_specification(db, claim, *, gateway, client, storage):
         candidate = _adoptable(artifact, assets)
         artifact.status = "uploading"
         db.commit()
-        if not _publication_allowed(item_id):
+        if not _publication_permitted(db, claim, gateway, revision):
             raise SupersededSpecification("Specification publication disabled")
         uploaded = candidate or gateway.upload(item_id, artifact.filename, content)
         # Persist the asset even when a notification arrived during upload. It
@@ -634,7 +677,7 @@ def execute_specification(db, claim, *, gateway, client, storage):
         artifact.status = "uploaded"
         db.commit()
         _, current = _source(db, claim, gateway)
-        if current != source or not _publication_allowed(item_id):
+        if current != source or not _publication_permitted(db, claim, gateway, revision):
             raise SupersededSpecification("Specification changed during upload")
         artifact.status = "published"
         artifact.last_error = None
@@ -710,7 +753,7 @@ def _cleanup_specifications(db, board_id, item_id, revision, gateway, source):
         db.commit()
         for artifact in prior:
             _, current = _source(db, claim, gateway)
-            if current != source or not _publication_allowed(item_id):
+            if current != source or not _publication_permitted(db, claim, gateway, revision, cleanup=True):
                 raise SupersededSpecification("Specification changed before cleanup")
             assets = gateway.inspect_files(item_id)
             current_artifact = db.get(PerformanceSpecificationArtifact, (board_id, item_id, revision))
@@ -718,7 +761,7 @@ def _cleanup_specifications(db, board_id, item_id, revision, gateway, source):
                 raise SpecificationSourceError("Replacement specification is missing; cleanup stopped")
             owned = _adoptable(artifact, assets)
             _check_claim(db, claim)
-            if not _publication_allowed(item_id):
+            if not _publication_permitted(db, claim, gateway, revision, cleanup=True):
                 raise SupersededSpecification("Specification publication disabled before cleanup")
             if owned:
                 gateway.delete(board_id, item_id, owned.asset_id)

@@ -184,7 +184,7 @@ def test_workspace_opens_without_task_or_snapshot_and_passes_verified_identity(a
     response = api.client.get(BASE, headers=HEADERS)
     assert response.status_code == 200
     assert response.json()["fields"] == list(FIELD_NAMES)
-    assert observed == [{"board_id": BOARD, "item_id": ITEM, "account_id": ACCOUNT, "gateway": api.gateway, "editable": True}]
+    assert observed == [{"board_id": BOARD, "item_id": ITEM, "account_id": ACCOUNT, "gateway": api.gateway, "editable": True, "manual_publication": False}]
     assert api.db.query(Task).count() == 0
     assert api.db.query(TaskSnapshot).count() == 0
     _assert_private(response)
@@ -221,9 +221,12 @@ def test_lost_read_access_blocks_pdf_before_storage_lookup(api, monkeypatch):
     ("put", "/decisions", decisions()),
     ("post", "/refresh", {key: value for key, value in decisions().items() if key != "field_operations"}),
     ("post", "/approve", approval()),
+    ("post", "/publish", approval()),
 ])
 @pytest.mark.parametrize("reason,code,status", [
     ("outside_landing_zone", "scope_changed", 409),
+    ("completed_folder", "scope_changed", 409),
+    ("group_not_eligible", "scope_changed", 409),
     ("review_disabled", "reviewer_forbidden", 403),
 ])
 def test_read_only_or_disabled_session_cannot_mutate(api, monkeypatch, method, suffix, payload, reason, code, status):
@@ -233,7 +236,7 @@ def test_read_only_or_disabled_session_cannot_mutate(api, monkeypatch, method, s
     def unexpected(*args, **kwargs):
         raise AssertionError("A read-only actor must never reach a mutation service")
 
-    for name in ("save_decisions", "refresh_recommendations", "approve_specification"):
+    for name in ("save_decisions", "refresh_recommendations", "approve_specification", "publish_specification"):
         monkeypatch.setattr(review_api.workspace, name, unexpected)
     response = getattr(api.client, method)(BASE + suffix, headers=HEADERS, json=payload)
     assert response.status_code == status
@@ -291,15 +294,16 @@ def test_save_requires_explicit_concurrency_and_retry_identity(api, missing):
     assert response.status_code == 422
 
 
-def test_approve_passes_exact_artifact_identity_and_trusted_actor(api, monkeypatch):
+@pytest.mark.parametrize("action,service_name", [("approve", "approve_specification"), ("publish", "publish_specification")])
+def test_publication_commands_pass_exact_artifact_identity_and_trusted_actor(api, monkeypatch, action, service_name):
     observed = []
 
     def approve(db, **kwargs):
         observed.append(kwargs)
         return {"review_version": 1, "approval_id": "approval-1", "changed": True}
 
-    monkeypatch.setattr(review_api.workspace, "approve_specification", approve)
-    response = api.client.post(BASE + "/approve", headers=HEADERS, json=approval())
+    monkeypatch.setattr(review_api.workspace, service_name, approve)
+    response = api.client.post(BASE + "/" + action, headers=HEADERS, json=approval())
     assert response.status_code == 200
     assert response.json()["approval_id"] == "approval-1"
     assert observed[0]["actor"] == ACTOR

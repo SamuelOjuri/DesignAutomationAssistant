@@ -7,7 +7,7 @@ import {
   type ReviewSession, type FieldOperation,
 } from "@/lib/specification-review-api";
 import {
-  emptyDraft, hasUnsavedChanges, saveCommand, approvalCommand, canComplete,
+  emptyDraft, hasUnsavedChanges, saveCommand, approvalCommand, canComplete, canPublish, publicationCommand,
   mergeStatus, friendlyReviewError, sameReviewIdentity, updateSelection, updateField,
   draftValidationErrors,
   completionIssues, rebaseDraft,
@@ -83,6 +83,7 @@ export default function ReviewWorkspace() {
       // Revoked capabilities apply immediately, even while the old draft is kept.
       setWorkspace({ ...before, capabilities: next.capabilities, scope_reason: next.scope_reason,
         analysis: next.analysis, provisional: next.provisional,
+        publication_mode: next.publication_mode, requested_publication_revision: next.requested_publication_revision,
         status: ["read_only", "analysis_pending", "source_waiting"].includes(next.status) ? next.status : before.status });
       return;
     }
@@ -189,7 +190,9 @@ export default function ReviewWorkspace() {
           const current = workspaceRef.current;
           if (busyRef.current) {
             // A command owns the next workspace read; keep the polling timer alive.
-          } else if (!current || !sameReviewIdentity(current, status) || Date.now() - lastFullRead > 60000 || current.status === "source_waiting") {
+          } else if (!current || !sameReviewIdentity(current, status)
+            || current.published_pdf?.revision !== status.published_pdf?.revision
+            || Date.now() - lastFullRead > 60000 || current.status === "source_waiting") {
             const next = await api.workspace(controller.signal);
             if (!controller.signal.aborted && !busyRef.current) receiveWorkspace(next);
             lastFullRead = Date.now();
@@ -209,7 +212,10 @@ export default function ReviewWorkspace() {
     return () => { controller.abort(); clearTimeout(timer); document.removeEventListener("visibilitychange", wake); window.removeEventListener("focus", wake); };
   }, [api, connection, receiveWorkspace, reportError]);
 
-  const revision = workspace?.pdf?.revision;
+  const [showPublished, setShowPublished] = useState(false);
+  useEffect(() => { setShowPublished(false); }, [workspace?.pdf?.revision, workspace?.item_id]);
+  const visiblePdf = showPublished ? workspace?.published_pdf : workspace?.pdf;
+  const revision = visiblePdf?.revision;
   useEffect(() => {
     const controller = new AbortController();
     let url: string | null = null;
@@ -238,7 +244,7 @@ export default function ReviewWorkspace() {
     if (receipt.current?.digest !== digest) receipt.current = { digest, key: crypto.randomUUID() };
     return receipt.current.key;
   };
-  const mutate = async (kind: "save" | "refresh" | "approve") => {
+  const mutate = async (kind: "save" | "refresh" | "approve" | "publish") => {
     const current = workspaceRef.current;
     const currentApi = apiRef.current;
     const operationScope = active.current;
@@ -251,12 +257,20 @@ export default function ReviewWorkspace() {
         await currentApi.save({ ...base, idempotency_key: commandKey(kind, base) }, signal);
         if (signal.aborted) return;
         draftRef.current = emptyDraft(); setDraft(emptyDraft());
-        setNotice("Corrections saved. Wait for the matching PDF, then check it before completing the review.");
+        setNotice(current.publication_mode === "manual"
+          ? "Corrections saved. Inspect the updated draft, then publish when ready. The published PDF is unchanged."
+          : "Corrections saved. Wait for the matching PDF, then check it before completing the review.");
+      } else if (kind === "publish") {
+        if (!canPublish(current, draftRef.current, pdfRevision)) return;
+        const base = publicationCommand(current, "pending");
+        await currentApi.publish({ ...base, idempotency_key: commandKey(kind, base) }, signal);
+        if (signal.aborted) return;
+        setNotice("Publication requested for this draft. Wait for publication, then check the published PDF before completing the review.");
       } else if (kind === "approve") {
         const base = approvalCommand(current, "pending");
         await currentApi.approve({ ...base, idempotency_key: commandKey(kind, base) }, signal);
         if (signal.aborted) return;
-        setNotice("Specification complete. The item can now be moved manually in Monday.");
+        setNotice("The current published specification has been marked complete.");
       } else {
         const base = { expected_review_version: current.review_version, expected_source_fingerprint: current.source_fingerprint!, idempotency_key: "pending" };
         await currentApi.refresh({ ...base, idempotency_key: commandKey(kind, base) }, signal);
@@ -296,6 +310,8 @@ export default function ReviewWorkspace() {
   const analysisPending = Boolean(usable && (workspace.provisional || (workspace.analysis && !workspace.analysis.ready)));
   const editable = Boolean(usable && !analysisPending && workspace.capabilities.edit && connection === "ready" && !busy && !conflict);
   const completeAllowed = Boolean(usable && !conflict && !busy && connection === "ready" && checkedPdf && canComplete(workspace, draft, pdfRevision || undefined));
+  const manualPublication = Boolean(usable && workspace.publication_mode === "manual");
+  const publishAllowed = Boolean(usable && editable && !showPublished && canPublish(workspace, draft, pdfRevision));
   const unmappedFields = usable ? FIELD_NAMES.filter((label) => {
     const field = workspace.fields[label];
     return field?.effective.display_value && field.effective.cad_mapping.status === "unmapped";
@@ -342,7 +358,7 @@ export default function ReviewWorkspace() {
         <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
           <section id="review-fields" aria-labelledby="review-fields-title" className="min-w-0 space-y-4">
             <h2 id="review-fields-title" className="text-xl font-semibold">Specification fields</h2>
-            <p className="text-sm text-muted-foreground">{analysisPending ? "Validated source recommendations are available to read. Wait for analysis and matching to finish before making corrections." : readOnly ? "Any saved field values are shown for reference. Editing is unavailable in this view." : "Save corrections to regenerate the PDF. Entered values and intentional blanks display Source: Reviewer Specified."}</p>
+            <p className="text-sm text-muted-foreground">{analysisPending ? "Validated source recommendations are available to read. Wait for analysis and matching to finish before making corrections." : readOnly ? "Any saved field values are shown for reference. Editing is unavailable in this view." : manualPublication ? "Save corrections to prepare a draft. Publish separately when ready. Entered values and intentional blanks display Source: Reviewer Specified." : "Save corrections to regenerate the PDF. Entered values and intentional blanks display Source: Reviewer Specified."}</p>
             {FIELD_NAMES.map((label) => workspace.fields[label] && <FieldEditor key={label} label={label} field={workspace.fields[label]!} operation={draft.field_operations[label]} disabled={!editable} onChange={(operation) => changeField(label, operation)} />)}
             {!workspace.source && <p>{readOnly ? "No specification fields are available for this item." : "Fields will appear when current source analysis is available."}</p>}
             {workspace.source?.source_issues.map((issue) => {
@@ -362,7 +378,21 @@ export default function ReviewWorkspace() {
             })}
           </section>
           <aside className="min-w-0 space-y-4 xl:sticky xl:top-4" aria-label="PDF and completion">
-            <PdfPreview pdf={workspace.pdf} publishedPdf={workspace.published_pdf} url={pdfUrl} loading={pdfLoading} readOnly={readOnly} error={pdfError} onRetry={() => setPdfRetry((value) => value + 1)} />
+            {manualPublication && workspace.pdf && workspace.published_pdf && workspace.pdf.revision !== workspace.published_pdf.revision && <div className="flex flex-wrap gap-2" role="group" aria-label="Choose specification version">
+              <button className={button} aria-pressed={!showPublished} onClick={() => setShowPublished(false)}>View draft PDF</button>
+              <button className={button} aria-pressed={showPublished} onClick={() => setShowPublished(true)}>View published PDF</button>
+            </div>}
+            <PdfPreview pdf={visiblePdf || null} publishedPdf={workspace.published_pdf} url={pdfUrl} loading={pdfLoading} readOnly={readOnly} error={pdfError} onRetry={() => setPdfRetry((value) => value + 1)} />
+            {manualPublication && workspace.published_pdf && workspace.status !== "complete" && workspace.status !== "awaiting_final_review" && <section className="space-y-2 rounded-lg border bg-white p-4" aria-label="Recommended publication changes">
+              <h2 className="text-lg font-semibold">Recommended publication changes</h2>
+              {workspace.publication_changes?.length ? <div className="overflow-x-auto"><table className="w-full text-left text-sm">
+                <thead><tr><th className="p-2">Field</th><th className="p-2">Published</th><th className="p-2">Proposed</th></tr></thead>
+                <tbody>{workspace.publication_changes.map((change) => <tr key={change.field} className="border-t">
+                  <th className="p-2 font-medium">{change.field}</th><td className="p-2">{change.published_value ?? "Not provided"}<span className="block text-xs text-muted-foreground">{change.published_source}</span></td>
+                  <td className="p-2">{change.proposed_value ?? "Not provided"}<span className="block text-xs text-muted-foreground">{change.proposed_source}</span></td>
+                </tr>)}</tbody></table></div> : <p className="text-sm">Review current evidence, source labels and saved decisions. Source or review changes can require a new PDF even when displayed field values are unchanged.</p>}
+              <p className="text-sm text-muted-foreground">The published PDF remains attached until you publish an update.</p>
+            </section>}
             <section className="space-y-3 rounded-lg border bg-white p-4" aria-labelledby="complete-title">
               <h2 id="complete-title" className="text-lg font-semibold">Final review</h2>
               {readOnly && <p className="text-sm">Completion is unavailable while this item is read-only.</p>}
@@ -370,12 +400,13 @@ export default function ReviewWorkspace() {
               {unmappedFields.length > 0 && <p id="review-mapping-limitations" className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">No confirmed CAD mapping is available for: {unmappedFields.join(", ")}. These values are preserved in the PDF; completion does not establish compatibility with CAD or TRICS.</p>}
               <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={checkedPdf} aria-describedby={unmappedFields.length ? "review-mapping-limitations" : undefined} disabled={!pdfUrl || dirty || conflict || workspace.status !== "awaiting_final_review" || connection !== "ready" || busy} onChange={(event) => setCheckedPdf(event.target.checked)} />I have checked the current published PDF, its source labels{unmappedFields.length ? " and the mapping limitations above" : ""}.</label>
               <button className={`${button} w-full bg-primary text-primary-foreground`} disabled={!completeAllowed} onClick={() => void mutate("approve")}>Mark specification complete</button>
-              {!readOnly && <p className="text-sm text-muted-foreground">Completion records this exact published PDF. Move the item manually in Monday after completion.</p>}
+              {!readOnly && <p className="text-sm text-muted-foreground">Completion records this exact published PDF. Relevant source or decision changes reopen review.</p>}
             </section>
           </aside>
         </div>
         <section className="flex flex-wrap items-center gap-3 rounded-lg border bg-white p-4" aria-label="Save review">
-          <button className={`${button} bg-primary text-primary-foreground`} disabled={!editable || !dirty || !workspace.source_fingerprint || Object.keys(draftValidationErrors(draft)).length > 0 || draft.source_dispositions.some((entry) => !entry.explanation.trim())} onClick={() => void mutate("save")}>{busy ? "Working…" : "Save corrections and regenerate PDF"}</button>
+          <button className={`${button} bg-primary text-primary-foreground`} disabled={!editable || !dirty || !workspace.source_fingerprint || Object.keys(draftValidationErrors(draft)).length > 0 || draft.source_dispositions.some((entry) => !entry.explanation.trim())} onClick={() => void mutate("save")}>{busy ? "Working…" : manualPublication ? "Save corrections" : "Save corrections and regenerate PDF"}</button>
+          {manualPublication && <button className={`${button} bg-primary text-primary-foreground`} disabled={!publishAllowed} onClick={() => void mutate("publish")}>{workspace.published_pdf ? "Update Published PDF" : "Publish Specification PDF"}</button>}
           <button className={button} disabled={!editable || dirty || !workspace.source_fingerprint} onClick={() => void mutate("refresh")}>Refresh recommendations</button>
           {dirty && <p className="text-sm">Unsaved corrections · completion is unavailable</p>}
         </section>

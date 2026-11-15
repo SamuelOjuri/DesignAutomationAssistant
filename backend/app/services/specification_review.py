@@ -59,6 +59,10 @@ class ApproveReview(ReviewModel):
     explanation: str | None = Field(default=None, max_length=4000)
 
 
+class PublishReview(ApproveReview):
+    """Request upload of an exact prepared PDF, without approving its contents."""
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -122,10 +126,42 @@ def _write_state(review, state, source):
 
 
 def _queue(spec):
+    spec.requested_publication_revision = None
     spec.requested_generation += 1
     spec.scheduled_for = _now()
     # An old worker cannot promote its result or delay the newer generation.
     spec.lease_token = spec.lease_until = None
+
+
+def request_publication(db, *, board_id, item_id, actor, command, source):
+    command = PublishReview.model_validate(command)
+    request_digest = _command_digest("publish", command)
+    _clean_session(db)
+    with db.begin():
+        spec, review = _locked_rows(db, str(board_id), str(item_id))
+        _tenant(review, actor.monday_account_id)
+        retry = _retry(db, review, actor, command.idempotency_key, request_digest)
+        if retry is not None:
+            return retry
+        _expected(review, command, source)
+        if (review.decision_digest != command.expected_decision_digest
+                or review.desired_publication_identity != command.expected_publication_identity):
+            raise ReviewConflict("stale_review", "The saved specification changed before publication")
+        artifact = db.get(PerformanceSpecificationArtifact, (str(board_id), str(item_id), command.artifact_revision))
+        state = review_state(review)
+        if (artifact is None or artifact.revision != spec.prepared_revision
+                or artifact.status not in {"rendered", "uploaded", "published"}
+                or (artifact.source_json or {}).get("review") != build_review_artifact_metadata(state, source)):
+            raise ReviewConflict("source_changed", "Prepare and inspect the current draft before publishing")
+        if spec.lease_token or spec.requested_generation != spec.completed_generation:
+            raise ReviewConflict("source_waiting", "Wait for current draft preparation to finish")
+        changed = not (spec.current_revision == artifact.revision and artifact.status == "published")
+        if changed:
+            _queue(spec)
+            spec.requested_publication_revision = artifact.revision
+        return _event(db, review, command_type="publish", before=state, after=state, source=source,
+            actor=actor, idempotency_key=command.idempotency_key, request_digest=request_digest,
+            explanation=f"Requested PDF revision {artifact.revision}", changed=changed)
 
 
 def _result(review, *, changed, event_id=None):

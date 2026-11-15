@@ -1,0 +1,88 @@
+# Specification publication in active groups
+
+Implemented: 13 November 2026. This document describes repository behaviour;
+it does not record a production deployment. It supersedes the Landing Zone-only
+scope and post-move read-only statements in the earlier review phase documents.
+
+| Location | Processing and review | Monday PDF publication |
+| --- | --- | --- |
+| Landing Zone | Automatic analysis; editable review | Automatic under existing rollout controls |
+| Configured active groups | Continuous preparation; editable review | Explicit reviewer request for each revision |
+| Completed Folder or other excluded lifecycle/scope | Retained authorized document access | No new publication or editing |
+
+The eligible set uses `DESIGN_PROCESSING_LANDING_GROUP_ID` and
+`AUTO_SYNC_ACTIVE_GROUP_IDS`, with `AUTO_SYNC_COMPLETED_GROUP_ID` always excluded.
+This reuses the group inventory, not the auto-sync enablement switches. Existing
+specification mode, item allowlist, master flag and review flag still apply.
+No extraction pipeline, source policy, PDF format or model version bump is needed.
+
+## Reviewer workflow
+
+In active groups, opening Specification Review and **Refresh recommendations**
+may prepare a draft, but cannot publish it. **Save corrections** persists decisions
+and prepares their matching draft. **Publish Specification PDF**, or **Update
+Published PDF** when a publication already exists, explicitly requests that draft.
+No artificial correction is required to publish satisfactory recommendations.
+
+Publication is disabled while there are unsaved corrections, incomplete analysis,
+a stale source identity, pending preparation, or a draft that has not loaded. A
+reviewable PDF may still contain issues: final approval retains its stricter checks.
+The view distinguishes draft and published PDFs, allows either to be inspected,
+and shows changes in displayed field values/source labels against the publication.
+Evidence-only changes can also require a new revision even when those values match.
+
+Later source changes prepare recommendations/drafts and reopen review; they never
+reuse an earlier click to publish changed content. Saved overrides remain retained
+and can require reconfirmation. **Mark specification complete** approves the exact
+published PDF separately. Historical PDFs and approvals remain retained.
+
+## API and persistence
+
+`POST /api/specification-review/items/{board_id}/{item_id}/publish` accepts
+`artifact_revision`, `expected_review_version`, `expected_source_fingerprint`,
+`expected_decision_digest`, `expected_publication_identity`, and `idempotency_key`.
+It requires authenticated current item access and the publication-capable rollout
+grant (the existing approval capability), verifies private artifact integrity,
+and checks current sources before recording the request in a short transaction.
+An immutable `publish` review event records the actor and exact revision. Identical
+retries return the original receipt, without reauthorizing an already used request.
+
+Migration `0022_specification_publication` adds two nullable columns to
+`performance_specifications`: `prepared_revision` selects the latest prepared PDF
+and `requested_publication_revision` authorizes one exact revision. Existing rows
+start with no request. Source/decision/model changes revoke incompatible requests;
+success and scope cancellation clear them. Transient failures retry the same
+authorized draft. Saves and publication requests use the same specification-then-
+review lock order, so a concurrent save cannot leave permission for its old PDF.
+
+The worker rechecks live scope and exact permission before upload and promotion.
+An automatic Landing Zone job moved to an active group becomes draft preparation.
+Monday and the database are separate systems: an upload already in progress when
+a move/source change occurs may leave a tracked attachment, but it cannot be
+promoted as current. The previous PDF is retained. Cleanup removes only owned
+prior specification attachments after a verified replacement, and stops in Completed.
+
+## Deployment and recovery
+
+1. Drain/stop old specification publishers. Their old policy cannot implement
+   revision-specific authorization. Deploy matching API, design/reconciliation,
+   specification worker and frontend revisions.
+2. Apply the additive migration before starting code that reads the new columns:
+   `python -m alembic -c backend/alembic.ini upgrade head`. Expected head is
+   `0022_specification_publication`. Retain existing rollout settings consistently
+   across services; begin with the specification item allowlist.
+3. Scope policy is now `specification-active-review-v2`. Discovery includes known
+   active groups and recovers missing/cancelled registered records. Those active
+   items prepare drafts without publishing; existing attachments remain current.
+   Older unregistered items or missing/current extraction still require explicit
+   item-scoped design reconciliation; this release does not bulk-register history.
+4. Validate a Landing Zone automatic publication, active initial publication with
+   no corrections, save/refresh without publication, source-change recommendations,
+   explicit replacement, and a move into Completed Folder during work.
+5. To pause, use the existing specification mode/master/review controls consistently.
+   Keep the additive schema and retained artifacts. Do not run older publishers
+   against this workflow or downgrade while updated services are running.
+
+Tests use fake Monday/model/storage gateways and isolated PostgreSQL schemas.
+The browser harness uses the actual frontend with a local mocked API. Live Monday
+acceptance and deployment remain separate operations.

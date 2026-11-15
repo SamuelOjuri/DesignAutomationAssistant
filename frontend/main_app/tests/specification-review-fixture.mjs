@@ -2,6 +2,15 @@
 export const FIELD_NAMES = ["Scale", "Page Size", "Drawing Reference", "Drawing Title", "Bauder Contract Number", "Bauder Roof Num", "Incoming Information", "Revision", "Date Received", "Company", "Contact", "Surveyor", "Target U Value", "Target Min U Value", "Membrane", "Tapered Insulation", "VCL", "Decking"];
 
 export function createFixture(scenario = "new_enquiry", itemId = "101") {
+  if (scenario === "active") {
+    const result = createFixture("new_enquiry", itemId);
+    result.publication_mode = "manual";
+    result.status = "ready_to_publish";
+    result.published_pdf = null;
+    result.pdf = { ...result.pdf, published: false, status: "rendered", publication_identity: result.desired_publication_identity };
+    result.publication_changes = [];
+    return result;
+  }
   const amendment = scenario === "amendment" || scenario === "ambiguous";
   const now = "2026-11-09T10:00:00Z";
   const identity = { source_fingerprint: `source-${itemId}-1`, extraction_identity: `extraction-${itemId}-1`, source_policy_version: "review-source-v1", reference_parser_version: "drawing-reference-v1" };
@@ -68,9 +77,19 @@ export function installHarness(fixtures) {
     current.approval = null;
     current.status = "needs_review";
     current.desired_publication_identity += "-changed";
+    if (current.publication_mode === "manual") prepareDraft();
+  }
+  function prepareDraft() {
+    current.pdf = { ...current.pdf, revision: `draft-${current.desired_publication_identity}`, published: false,
+      status: "rendered", publication_identity: current.desired_publication_identity };
+    current.status = "ready_to_publish";
+    current.queue.completed_generation = current.queue.requested_generation;
+    current.publication_changes = current.published_pdf ? [{ field: "Target U Value", published_value: "0.18",
+      proposed_value: "0.15", published_source: "Email Context", proposed_source: "Email Context" }] : [];
   }
   function publish() {
     current.pdf = { revision: `pdf-${context.itemId}-${current.review_version + 2}`, filename: `Performance Specification ${context.itemId}.pdf`, status: "published", published: true, size_bytes: 640, url: "unused-scoped-path" };
+    current.pdf.publication_identity = current.desired_publication_identity;
     current.published_pdf = clone(current.pdf);
     current.queue.completed_generation = current.queue.requested_generation;
     current.queue.running = false;
@@ -107,7 +126,8 @@ export function installHarness(fixtures) {
       case "sources_change": sourceChanged(); break;
       case "session_expiry": expired = true; break;
       case "switch_item": context = { ...context, itemId: context.itemId === "101" ? "102" : "101" }; current = clone(fixtures[context.itemId === "102" ? "second_item" : scenario] || fixtures.new_enquiry); expired = false; receipts = new Map(); emitContext(); break;
-      case "leave_landing_zone": current.capabilities = { read: true, edit: false, approve: false }; current.status = "read_only"; current.scope_reason = "outside_landing_zone"; break;
+      case "leave_landing_zone": current.publication_mode = "manual"; break;
+      case "complete_group": current.publication_mode = "disabled"; current.capabilities = { read: true, edit: false, approve: false }; current.status = "read_only"; current.scope_reason = "completed_folder"; break;
       case "publish": publish(); break;
       case "inspect": report(); break;
     }
@@ -157,6 +177,12 @@ export function installHarness(fixtures) {
     if (nextFailure === "stale_review") { nextFailure = null; current.review_version++; current.review.review_version++; current.decision_digest += "-other"; return error("stale_review", 409); }
     if (body.expected_review_version !== current.review_version) return error("stale_review", 409);
     if (body.expected_source_fingerprint !== current.source_fingerprint) return error("source_changed", 409);
+    if (url.pathname.endsWith("/publish")) {
+      if (current.status !== "ready_to_publish" || body.artifact_revision !== current.pdf?.revision
+        || body.expected_publication_identity !== current.desired_publication_identity) return error("stale_review", 409);
+      publish();
+      const result = receipt(true); receipts.set(body.idempotency_key, result); return json(result);
+    }
     if (url.pathname.endsWith("/approve")) {
       if (current.status !== "awaiting_final_review" || body.artifact_revision !== current.published_pdf?.revision || body.expected_decision_digest !== current.decision_digest || body.expected_publication_identity !== current.desired_publication_identity) return error("stale_review", 409);
       if (!current.review.selections.selected_request_type) return error("candidates_ambiguous", 409);
@@ -192,6 +218,7 @@ export function installHarness(fixtures) {
     current.queue.running = false;
     current.status = nextFailure === "publication_failed" ? "publication_failed" : "regenerating_pdf";
     current.queue.failed = nextFailure === "publication_failed";
+    if (current.publication_mode === "manual" && !current.queue.failed) prepareDraft();
     nextFailure = null;
     current.history.unshift({ event_id: `event-${requests.length}`, command_type: url.pathname.endsWith("/refresh") ? "recommendations_refreshed" : "decisions_saved", review_version: current.review_version, actor_monday_user_id: "10", created_at: new Date().toISOString(), explanation: null });
     const result = receipt(true); receipts.set(body.idempotency_key, clone(result)); return json(result);

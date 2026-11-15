@@ -16,7 +16,8 @@ from ..services.performance_specification_sources import (
     MondaySpecificationGateway, SpecificationIneligible, SpecificationSourceError,
     SpecificationSourceWaiting,
 )
-from ..services.specification_review import ApproveReview, ReviewConflict
+from ..services.specification_review import ApproveReview, PublishReview, ReviewConflict
+from ..services.specification_policy import specification_publication_mode
 from ..services.specification_review_contract import SaveReviewDecisions
 
 
@@ -121,12 +122,16 @@ def _access(db, authorization, board_id, item_id, *, capability="read"):
         raise ReviewConflict("reviewer_forbidden", "No access to this specification")
     if not access.capabilities.get(capability):
         if access.scope_reason in {
-            "outside_landing_zone", "completed_folder", "board_not_managed",
+            "outside_landing_zone", "group_not_eligible", "completed_folder", "board_not_managed",
             "item_archived", "item_deleted", "item_unknown",
         }:
-            raise ReviewConflict("scope_changed", "The item is outside the editable Landing Zone")
+            raise ReviewConflict("scope_changed", "The item is outside the editable specification groups")
         raise ReviewConflict("reviewer_forbidden", "This review is currently read-only")
     return access
+
+
+def _publication_mode(access):
+    return specification_publication_mode(getattr(access, "snapshot", {}))
 
 
 @router.post("/session")
@@ -142,8 +147,10 @@ def review_workspace(board_id: str, item_id: str, authorization: str | None = He
     result = workspace.get_workspace(
         db, board_id=board_id, item_id=item_id, account_id=access.account_id,
         gateway=_gateway() if editable else None, editable=editable,
+        manual_publication=_publication_mode(access) == "manual",
     )
-    return {**result, "capabilities": access.capabilities, "scope_reason": access.scope_reason}
+    return {**result, "capabilities": access.capabilities, "scope_reason": access.scope_reason,
+            "publication_mode": _publication_mode(access)}
 
 
 @router.put("/items/{board_id}/{item_id}/decisions")
@@ -174,6 +181,7 @@ def candidates(board_id: str, item_id: str, authorization: str | None = Header(N
     result = workspace.get_workspace(
         db, board_id=board_id, item_id=item_id, account_id=access.account_id,
         gateway=_gateway() if editable else None, editable=editable,
+        manual_publication=_publication_mode(access) == "manual",
     )
     return {"candidates": result.get("candidates"),
             "review_version": result.get("review_version"),
@@ -187,8 +195,20 @@ def status(board_id: str, item_id: str, authorization: str | None = Header(None)
     result = workspace.get_status(
         db, board_id=board_id, item_id=item_id, account_id=access.account_id,
         editable=bool(access.capabilities.get("edit")),
+        manual_publication=_publication_mode(access) == "manual",
     )
-    return {**result, "capabilities": access.capabilities, "scope_reason": access.scope_reason}
+    return {**result, "capabilities": access.capabilities, "scope_reason": access.scope_reason,
+            "publication_mode": _publication_mode(access)}
+
+
+@router.post("/items/{board_id}/{item_id}/publish")
+def publish(board_id: str, item_id: str, payload: PublishReview,
+            authorization: str | None = Header(None), db: Session = Depends(get_db)):
+    # Publication uses the same actor/rollout grant as completion, without its
+    # all-decisions-resolved requirement. A reviewable draft may be published.
+    access = _access(db, authorization, board_id, item_id, capability="approve")
+    return workspace.publish_specification(db, board_id=board_id, item_id=item_id,
+        actor=access.actor, command=payload, gateway=_gateway())
 
 
 @router.get("/items/{board_id}/{item_id}/pdf/{revision}")

@@ -87,12 +87,14 @@ export type PdfArtifact = {
   revision: string; filename: string; status: string; published: boolean; size_bytes: number;
   /** Informational only: the client constructs its own authenticated, item-scoped PDF path. */
   url: string;
+  publication_identity?: string | null;
 };
 export type Approval = {
   id: string; artifact_revision: string; review_version: number; actor_monday_user_id: string; approved_at: string;
 };
 export type ReviewStatus = "read_only" | "source_waiting" | "source_unavailable" | "publication_failed"
-  | "analysis_pending" | "regenerating_pdf" | "complete" | "awaiting_final_review" | "needs_review";
+  | "analysis_pending" | "regenerating_pdf" | "complete" | "awaiting_final_review" | "needs_review"
+  | "preparing_draft" | "ready_to_publish" | "changes_recommended" | "publishing_pdf";
 export type AnalysisProgress = {
   status: string; stage: string | null; ready: boolean; current_extraction: boolean;
   extraction_identity: string | null; phase?: string;
@@ -107,8 +109,12 @@ export type ReviewStatusSnapshot = {
   pdf: PdfArtifact | null; published_pdf: PdfArtifact | null; approval: Approval | null;
   capabilities: ReviewCapabilities; scope_reason: string | null;
   provisional?: boolean; analysis?: AnalysisProgress | null; extraction_identity?: string | null;
+  publication_mode?: "automatic" | "manual" | "disabled";
+  requested_publication_revision?: string | null;
 };
 export type ReviewWorkspace = ReviewStatusSnapshot & {
+  publication_changes?: { field: string; published_value: string | null; proposed_value: string | null;
+    published_source: string | null; proposed_source: string | null }[];
   review: ReviewDecisionState; source: ReviewSource | null; fields: Partial<Record<FieldName, ReviewField>>;
   candidates: CandidateLookup;
   history: { event_id: string; command_type: string; review_version: number; actor_monday_user_id: string | null; created_at: string; explanation: string | null }[];
@@ -129,6 +135,7 @@ export type RefreshCommand = ReviewCommandIdentity & { explanation?: string };
 export type ApproveCommand = ReviewCommandIdentity & {
   artifact_revision: string; expected_decision_digest: string; expected_publication_identity: string; explanation?: string;
 };
+export type PublishCommand = ApproveCommand;
 export type ReviewCommandReceipt = {
   review_version: number; source_fingerprint: string; decision_digest: string;
   desired_publication_identity: string; approval_id: string | null; changed: boolean; event_id: string | null;
@@ -142,7 +149,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   candidates_ambiguous: "Choose the relevant project and drawing before continuing.",
   stale_review: "Another reviewer has saved changes. Compare the latest review before saving your corrections.",
   source_changed: "The sources have changed. Compare the latest recommendations before saving your corrections.",
-  scope_changed: "This item is outside the editable Landing Zone. Its retained PDF is still available.",
+  scope_changed: "This item is outside the editable specification groups. Its retained PDF is still available.",
   publication_failed: "The PDF update failed. Your saved decisions and the previous PDF are retained.",
   idempotency_conflict: "This retry no longer matches the original command. Reload the latest review before saving again.",
   invalid_request: "Check the review entries and try again.",
@@ -232,6 +239,7 @@ export function createReviewApi(apiBase: string, session: ReadyReviewSession, fe
     save: (command: SaveDecisionsCommand, signal?: AbortSignal) => call<ReviewCommandReceipt>("/decisions", "PUT", command, signal),
     refresh: (command: RefreshCommand, signal?: AbortSignal) => call<ReviewCommandReceipt>("/refresh", "POST", command, signal),
     approve: (command: ApproveCommand, signal?: AbortSignal) => call<ReviewCommandReceipt>("/approve", "POST", command, signal),
+    publish: (command: PublishCommand, signal?: AbortSignal) => call<ReviewCommandReceipt>("/publish", "POST", command, signal),
     pdf: (revision: string, signal?: AbortSignal) => call<Blob>(`/pdf/${encodeURIComponent(revision)}`, "GET", undefined, signal, true),
     destroy: () => { token = null; controller.abort(); },
   };

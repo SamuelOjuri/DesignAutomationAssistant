@@ -159,7 +159,7 @@ def test_obsolete_policy_discovery_failure_respects_recheck_delay(case, wake):
     assert current(case).requested_generation == before + 1
 
 
-@pytest.mark.parametrize("group,state", [("topics", "active"), ("group_mkpbb3tx", "active"),
+@pytest.mark.parametrize("group,state", [("unconfigured", "active"), ("group_mkpbb3tx", "active"),
     ("group_mkpbd6vy", "archived"), ("group_mkpbd6vy", "deleted")])
 def test_discovery_checks_live_scope_and_defers_excluded_rows(case, group, state):
     case.gateway.target.group_id, case.gateway.target.item_state = group, state
@@ -172,7 +172,7 @@ def test_discovery_checks_live_scope_and_defers_excluded_rows(case, group, state
     assert not case.calls and not case.gateway.uploads
 
 
-@pytest.mark.parametrize("group,outcome", [("topics", "ignored"), ("group_mkpbb3tx", "excluded"),
+@pytest.mark.parametrize("group,outcome", [("unconfigured", "ignored"), ("group_mkpbb3tx", "excluded"),
     ("group_mkpbd6vy", RETIRED_SOURCE_OUTCOME)])
 def test_discovery_uses_durable_observations_to_skip_historical_scope(case, group, outcome):
     _observation(case, group=group, outcome=outcome)
@@ -195,7 +195,7 @@ def test_bounded_discovery_rotates_past_unavailable_and_excluded_candidates(case
         target = deepcopy(case.gateway.target)
         target.item_id = identity
         if identity == "124":
-            target.group_id = "topics"
+            target.group_id = "unconfigured"
         return target
 
     case.gateway.fetch_target = fetch
@@ -243,9 +243,9 @@ def test_leaving_landing_during_remote_work_retains_prior_pdf(case, stage):
         case.on_translate.append(move)
     else:
         case.gateway.on_upload = move
-    assert run(case) == ["excluded"]
+    assert run(case) == (["rendered"] if stage == "translation" else ["superseded"])
     assert current(case).current_revision == original
-    assert current(case).scheduled_for is None
+    assert current(case).scheduled_for is not None
     assert original_asset in {asset.asset_id for asset in case.gateway.files}
     assert case.db.get(PerformanceSpecificationArtifact, (BOARD, ITEM, original)).status == "published"
     assert not case.gateway.deletes

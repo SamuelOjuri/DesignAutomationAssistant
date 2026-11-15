@@ -111,7 +111,7 @@ class Settings(BaseSettings):
             raise ValueError("monday_item_availability_retry_seconds must be positive increasing seconds")
         return values
 
-    # Independent Landing Zone-only specification processing/publication.
+    # Independent specification processing; active groups require explicit publication.
     performance_specification_enabled: bool = False
     # Roll out specifications independently from legacy design extraction/output.
     # Both this explicit mode and the publisher master switch must permit work.

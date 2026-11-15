@@ -78,7 +78,7 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     assert(labels.every((label) => fieldset(label).textContent.includes("Source: Reviewer Specified")), "All saved overrides display Reviewer Specified provenance");
     const check = documentOf().querySelector('input[type="checkbox"]');
     assert(check && !check.disabled, "Current published preview enables final-check acknowledgement"); check.click(); await delay(40);
-    await click("Mark specification complete"); await waitFor(() => text().includes("Specification complete. The item can now be moved"), "exact-PDF approval");
+    await click("Mark specification complete"); await waitFor(() => text().includes("The current published specification has been marked complete."), "exact-PDF approval");
     const approved = latestRequests().filter((request) => request.path.endsWith("/approve")).at(-1);
     assert(Boolean(approved?.body.artifact_revision && approved.body.expected_decision_digest && approved.body.expected_publication_identity), "Approval identifies the exact published PDF, decisions and publication");
     await click("Restore recommendation", fieldset("Revision")); await save(); await publish();
@@ -131,8 +131,36 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     const requests = latestRequests();
     assert(requests.some((request) => request.path.endsWith("/session") && request.body.context.itemId === "102") && requests.some((request) => request.path.includes("/items/100/102")), "New item context bootstraps a new scoped API session");
     await command("leave_landing_zone");
-    await waitFor(() => text().includes("Outside Landing Zone"), "early group move read-only");
-    assert(button("Save corrections and regenerate PDF").disabled && button("Mark specification complete").disabled && documentOf().querySelector('iframe[title="Current specification PDF preview"]'), "Leaving Landing Zone disables mutations and retains authenticated PDF");
+    await waitFor(() => button("Save corrections"), "active group manual publication");
+    assert(button("Update Published PDF") && !button("Specify value", fieldset("Decking")).disabled, "Moving to active groups preserves editing and separates publication");
+    await command("complete_group");
+    await waitFor(() => text().includes("Completed Folder"), "completed group read-only");
+    assert(button("Mark specification complete").disabled && documentOf().querySelector('iframe[title="Current specification PDF preview"]'), "Completed Folder disables mutations and retains authenticated PDF");
+
+    await navigate("active");
+    await waitFor(() => button("Publish Specification PDF") && !button("Publish Specification PDF").disabled, "initial draft ready");
+    assert(button("Save corrections").disabled, "First publication does not require artificial corrections");
+    assert(!latestRequests().some((request) => request.path.endsWith("/publish")), "Opening active review prepares recommendations without publishing");
+    await click("Refresh recommendations");
+    await waitFor(() => !button("Publish Specification PDF").disabled, "refreshed draft ready");
+    assert(!latestRequests().some((request) => request.path.endsWith("/publish")), "Refreshing active recommendations does not publish");
+    await click("Publish Specification PDF");
+    await waitFor(() => text().includes("Awaiting final review"), "explicit first publication");
+    assert(button("Update Published PDF").disabled, "Publication button changes after first successful publication");
+    await command("sources_change");
+    await waitFor(() => text().includes("Recommended publication changes") && !button("Update Published PDF").disabled, "source changes recommend replacement");
+    assert(latestRequests().filter((request) => request.path.endsWith("/publish")).length === 1, "Later source changes do not automatically publish");
+    await click("View published PDF");
+    await waitFor(() => button("Update Published PDF").disabled, "published version inspection");
+    await click("View draft PDF");
+    await edit("Decking", "Reviewed active deck");
+    assert(button("Update Published PDF").disabled, "Unsaved corrections block publication");
+    await click("Save corrections");
+    await waitFor(() => !button("Update Published PDF").disabled, "saved draft ready");
+    assert(latestRequests().filter((request) => request.path.endsWith("/publish")).length === 1, "Saving active corrections prepares a draft without replacing the PDF");
+    await click("Update Published PDF");
+    await waitFor(() => text().includes("Awaiting final review"), "explicit replacement publication");
+    assert(latestRequests().filter((request) => request.path.endsWith("/publish")).length === 2, "Each active publication requires a separate explicit request");
 
     await navigate("ambiguous");
     await chooseType("amendment"); documentOf().querySelector('input[type="radio"][value="200:201"]').click(); await delay(40);

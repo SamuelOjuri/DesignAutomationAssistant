@@ -59,7 +59,7 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None, p
     target = gateway.fetch_target(item.item_id)
     if (str(target.item_id) != str(item.item_id)
             or specification_scope_exclusion(target) is not None):
-        raise SpecificationIneligible("Specification item is outside the live Landing Zone scope")
+        raise SpecificationIneligible("Specification item is outside the live editable scope")
     extraction = item.extracted_parameters_json or {}
     if extraction.get("pipelineVersion") != settings.design_processing_pipeline_version:
         raise SpecificationSourceWaiting("Waiting for extraction from the current configured pipeline")

@@ -550,6 +550,9 @@ class PerformanceSpecification(Base):
     source_json = Column(JSON, nullable=True)
     review_json = Column(JSON, nullable=True)
     current_revision = Column(String, nullable=True)
+    # One exact draft authorized by a reviewer; cleared on changes/completion.
+    requested_publication_revision = Column(String, nullable=True)
+    prepared_revision = Column(String, nullable=True)
 
 
 class PerformanceSpecificationLink(Base):

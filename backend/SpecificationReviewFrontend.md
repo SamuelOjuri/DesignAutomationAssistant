@@ -1,5 +1,9 @@
 # Specification Review frontend (Phase 7)
 
+13 November 2026: [active-group publication](SpecificationActivePublication.md)
+supersedes the earlier Landing Zone-only lifecycle and deployment notes below.
+The current database head is `0022_specification_publication`.
+
 The dedicated `/specification-review` route in `frontend/main_app` implements the
 Monday reviewer workspace against the [Phase 6 API](SpecificationReviewAPI.md).
 It opens without the active-project task page, chat, ingestion or a Supabase
@@ -30,7 +34,12 @@ recommendation retains its email/CRM provenance. All decisions target the review
 API and do not write Monday business columns, shared project/drawing values or
 group membership.
 
-Save corrections regenerates the PDF. Completion remains disabled while edits
+In Landing Zone, saving corrections regenerates and publishes the PDF. In active
+groups, **Save corrections** prepares a private draft; **Publish Specification PDF**
+or **Update Published PDF** requests its publication separately. Opening the view,
+refreshing recommendations and later source changes never publish automatically
+in active groups. Draft/published previews and recommended field changes are shown.
+Completion remains disabled while edits
 are unsaved, required decisions or source dispositions are outstanding, the
 current matching PDF is pending/failed, or its protected preview has not loaded
 and been checked. The approval command identifies the exact artifact revision,
@@ -44,8 +53,9 @@ the reviewer to accept changed recommendations and acknowledge source issues
 again. Failed requests and session renewal retain the draft for the same item;
 mutation retries reuse their idempotency key. An item-context change aborts old
 work, destroys its bearer and clears item-bound drafts/previews. Invalid context
-also clears prior-item access. Leaving Landing Zone applies read-only
-capabilities while keeping authorized retained-PDF access.
+also clears prior-item access. Moving between Landing Zone and configured active
+groups preserves editing and updates the publication controls. Completed Folder
+and other excluded scope apply read-only capabilities with retained-PDF access.
 
 ## Authentication and embedding
 

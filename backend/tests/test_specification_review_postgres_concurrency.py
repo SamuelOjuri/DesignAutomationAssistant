@@ -20,7 +20,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.models import (
-    DesignProcessingItem, PerformanceSpecification, PerformanceSpecificationReview,
+    DesignProcessingItem, PerformanceSpecification, PerformanceSpecificationReview, PerformanceSpecificationArtifact,
     PerformanceSpecificationReviewEvent,
 )
 from backend.app.services import specification_review as service
@@ -128,6 +128,58 @@ def snapshot(Session, item_id):
             "source_events": db.query(PerformanceSpecificationReviewEvent).filter_by(
                 board_id=BOARD, item_id=item_id, command_type="source_changed").count(),
         }
+
+
+def prepare_publication(Session, item_id):
+    from backend.app.services.specification_review_artifacts import build_review_artifact_metadata
+    with Session() as db:
+        review = db.get(PerformanceSpecificationReview, (BOARD, item_id))
+        spec = db.get(PerformanceSpecification, (BOARD, item_id))
+        metadata = build_review_artifact_metadata(service.review_state(review), source_snapshot())
+        spec.completed_generation = spec.requested_generation
+        spec.prepared_revision = "prepared-pdf"
+        db.add(PerformanceSpecificationArtifact(board_id=BOARD, item_id=item_id, revision="prepared-pdf",
+            translation_json={}, source_json={"review": metadata}, model_version="test", filename="draft.pdf",
+            storage_bucket="private", storage_object_key="draft.pdf", content_sha256="a" * 64,
+            size_bytes=100, status="rendered"))
+        request = service.PublishReview(expected_review_version=review.review_version,
+            expected_source_fingerprint=review.source_fingerprint, expected_decision_digest=review.decision_digest,
+            expected_publication_identity=review.desired_publication_identity, artifact_revision="prepared-pdf",
+            idempotency_key="publish-once")
+        db.commit()
+        return request
+
+
+def test_concurrent_publication_retry_records_one_request(postgres_review):
+    Session, item_id = postgres_review
+    request = prepare_publication(Session, item_id)
+    before = snapshot(Session, item_id)
+    def publish(db):
+        return service.request_publication(db, board_id=BOARD, item_id=item_id,
+            actor=ACTOR, command=request, source=source_snapshot())
+    outcomes = race(Session, [publish, publish])
+    assert all(isinstance(result, service.ReviewCommandResult) for result in outcomes), outcomes
+    assert outcomes[0] == outcomes[1]
+    assert snapshot(Session, item_id)["generation"] == before["generation"] + 1
+    with Session() as db:
+        assert db.get(PerformanceSpecification, (BOARD, item_id)).requested_publication_revision == "prepared-pdf"
+        assert db.query(PerformanceSpecificationReviewEvent).filter_by(board_id=BOARD, item_id=item_id, command_type="publish").count() == 1
+
+
+def test_save_racing_publication_never_leaves_permission_for_old_draft(postgres_review):
+    Session, item_id = postgres_review
+    request = prepare_publication(Session, item_id)
+    save = save_command(field_operations={"Decking": {"operation": "specify_blank"}})
+    outcomes = race(Session, [
+        lambda db: service.request_publication(db, board_id=BOARD, item_id=item_id, actor=ACTOR,
+            command=request, source=source_snapshot()),
+        lambda db: service.save_review_decisions(db, board_id=BOARD, item_id=item_id, actor=ACTOR,
+            command=save, source=source_snapshot()),
+    ])
+    assert all(isinstance(result, (service.ReviewCommandResult, service.ReviewConflict)) for result in outcomes), outcomes
+    assert snapshot(Session, item_id)["version"] == 1
+    with Session() as db:
+        assert db.get(PerformanceSpecification, (BOARD, item_id)).requested_publication_revision is None
 
 
 def test_competing_reviewers_get_one_save_and_one_stale_conflict(postgres_review):

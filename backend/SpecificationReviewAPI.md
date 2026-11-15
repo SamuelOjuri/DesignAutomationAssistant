@@ -1,5 +1,9 @@
 # Specification Review API (Phase 6)
 
+13 November 2026: [active-group publication](SpecificationActivePublication.md)
+extends this API with explicit draft publication. Deploy through migration
+`0022_specification_publication` with matching API and workers.
+
 Phase 6 exposes the review persistence, source policy and publication ledger
 through a direct API. It opens independently of active-project ingestion, chat,
 `Task` and `TaskSnapshot`. Phase 7 implements the separate
@@ -48,13 +52,14 @@ jobs or an ordinary app cookie session.
 | `DESIGN_PROCESSING_MODE` / `DESIGN_PROCESSING_ALLOWLIST_ITEM_IDS` | Independent design CSV/preview/matched-report policy. It can remain `enabled` while specification review uses `off`, `shadow` or its own item allowlist. |
 | `MONDAY_INGESTION_ACCESS_TOKEN` | Existing backend source/publication identity; separate from the reviewer's OAuth access. |
 
-The canonical design-processing board/Landing Zone settings and Completed Folder
-exclusion remain shared with the publisher. Moving an item out of Landing Zone
-removes edit and approval capabilities while retaining authorized PDF access.
+The canonical design-processing board, Landing Zone and configured active groups
+are shared with the publisher. Moving into an active group preserves review and
+requires explicit PDF publication. Completed Folder and other excluded scope
+remove mutation capabilities while retaining authorized PDF access.
 Pausing publication can leave decisions saved and pending; completion requires
 their successfully published PDF. No reviewer-user-ID setting is needed in V1.
 API enablement starts no workers and provisions no webhooks. Apply migration
-`0019_specification_review` before deploying these routes.
+`0022_specification_publication` before deploying the current routes.
 
 Upgrades default the new specification mode to `off`, even when the existing
 publisher flag is `true` and design processing is `enabled`. Set the specification
@@ -78,16 +83,18 @@ Item base: `/api/specification-review/items/{board_id}/{item_id}`.
 | `GET base/candidates` | Current bounded candidates and review/source versions. |
 | `GET base/status` | Lightweight publication/completion polling; no recommendation lookup. |
 | `GET base/pdf/{revision}` | Authenticated PDF bytes from the scoped artifact ledger with size/SHA-256 verification. |
+| `POST base/publish` | Request the exact prepared draft for publication; requires the existing approval capability without recording completion. |
 | `POST base/approve` | Approve the exact current published PDF. |
 
 Opening an eligible, already registered item can initialize its review from
 current matching extraction. Unknown items report `source_waiting`; GET does not
 register historical items or start extraction/backfill. Read-only views use
 retained snapshots and documents. Relevant live source changes preserve saved
-decisions, invalidate current completion and queue regeneration.
+decisions, invalidate current completion and queue draft preparation. Landing Zone
+publishes automatically; active groups require a fresh explicit publication request.
 
-Decisions, refresh and approval require `expected_review_version`,
-`expected_source_fingerprint` and `idempotency_key`. Approval additionally requires
+Decisions, refresh, publication and approval require `expected_review_version`,
+`expected_source_fingerprint` and `idempotency_key`. Publication and approval additionally require
 `artifact_revision`, `expected_decision_digest` and
 `expected_publication_identity`. Identical retries return the original receipt;
 reusing a key for another command conflicts. Actors, audit attribution and source
@@ -95,7 +102,7 @@ labels are server-authored. Unknown/forged actor, provenance or CAD-mapping fiel
 are rejected at the typed request boundary.
 
 Remote access/source/storage reads occur outside database transactions. The final
-save/refresh/approval checks lock specification then review rows and compare the
+save/refresh/publication/approval checks lock specification then review rows and compare the
 observed identities before committing. Approval verifies retained PDF bytes and
 the unique exact Monday AI Data asset, refreshes sources, then checks the current
 artifact, decisions and absence of newer queued/running work under lock. An

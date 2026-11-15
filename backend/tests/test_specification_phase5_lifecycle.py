@@ -74,7 +74,7 @@ def test_landing_webhook_followed_by_ingestion_exclusion_keeps_publication_pendi
 
 
 @pytest.mark.parametrize("group,state,cancelled", [
-    (None, "active", False), ("topics", "active", True), ("completed", "active", True),
+    (None, "active", False), ("topics", "active", False), ("completed", "active", True),
     (None, "archived", True), (None, "deleted", True),
 ])
 def test_live_scope_cancellation_is_independent_of_metadata(case, group, state, cancelled):

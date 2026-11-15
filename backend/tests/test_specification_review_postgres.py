@@ -93,6 +93,19 @@ def _seed_legacy(connection, item="123"):
     """), {"item": item, "digest": "a" * 64, "source": '{"legacy":true}'})
 
 
+def test_manual_publication_migration_retains_existing_pdf_and_defaults_to_no_permission(postgres_migration_database):
+    engine, schema = postgres_migration_database
+    with engine.begin() as connection:
+        _migrate(connection, schema, "0021_processing_acceleration")
+        _seed_legacy(connection)
+        connection.execute(text("UPDATE performance_specifications SET current_revision='historic-pdf'"))
+        _migrate(connection, schema, "0022_specification_publication")
+        assert connection.execute(text("SELECT current_revision, requested_publication_revision, prepared_revision FROM performance_specifications")).one() == ("historic-pdf", None, None)
+        _migrate(connection, schema, "0021_processing_acceleration", downgrade=True)
+        assert connection.scalar(text("SELECT current_revision FROM performance_specifications")) == "historic-pdf"
+        _migrate(connection, schema, "0022_specification_publication")
+
+
 def _seed_review(connection, item="123", account="200"):
     connection.execute(text("""
         INSERT INTO performance_specification_reviews (

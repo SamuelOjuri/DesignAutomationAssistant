@@ -15,6 +15,10 @@ export interface ReviewStatusDescription {
 }
 
 const descriptions: Record<string, ReviewStatusDescription> = {
+  preparing_draft: { title: "Preparing draft PDF", detail: "Preparing the current recommendations and saved corrections. The published PDF remains unchanged.", tone: "bg-secondary text-foreground" },
+  ready_to_publish: { title: "Unpublished changes ready for review", detail: "Inspect the draft and recommended changes, then publish when ready. Opening this view and saving corrections do not publish in active groups.", tone: "bg-amber-50 text-amber-950" },
+  changes_recommended: { title: "Publication changes recommended", detail: "Review the latest recommendations. The published PDF remains unchanged until you publish an updated draft.", tone: "bg-amber-50 text-amber-950" },
+  publishing_pdf: { title: "Publishing PDF", detail: "Publishing the draft you requested. The previous PDF is retained until the replacement succeeds.", tone: "bg-secondary text-foreground" },
   source_waiting: { title: "Waiting for source analysis", detail: "Current email and attachment analysis is not ready yet. This view will check for updates.", tone: "bg-secondary text-foreground" },
   analysis_pending: { title: "Validated fields available", detail: "The current email and attachment fields are shown below. Matching and document preparation are still pending. Editing and completion become available when analysis finishes.", tone: "bg-secondary text-foreground" },
   source_unavailable: { title: "Sources temporarily unavailable", detail: "Recommendations could not be checked. Your saved decisions and the previous PDF are retained.", tone: "bg-amber-50 text-amber-950" },
@@ -27,6 +31,7 @@ const descriptions: Record<string, ReviewStatusDescription> = {
 };
 
 const readOnlyReasons: Record<string, { title: string; reason: string }> = {
+  group_not_eligible: { title: "Outside specification groups", reason: "This item is outside Landing Zone and the configured active groups." },
   outside_landing_zone: { title: "Outside Landing Zone", reason: "This item is outside Landing Zone." },
   completed_folder: { title: "Completed Folder", reason: "This item is in Completed Folder." },
   review_disabled: { title: "Review access disabled", reason: "Specification review access is disabled." },

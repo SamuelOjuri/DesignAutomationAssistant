@@ -122,7 +122,7 @@ def test_review_capabilities_follow_specification_controls_and_preserve_pending_
 
 @pytest.mark.parametrize("change,reason", [
     ({"board": {"id": "21"}}, "board_not_managed"),
-    ({"group": {"id": "active"}}, "outside_landing_zone"),
+    ({"group": {"id": "unconfigured"}}, "group_not_eligible"),
     ({"group": {"id": "completed"}}, "completed_folder"),
     ({"state": "archived"}, "item_archived"),
     ({"state": "deleted"}, "item_deleted"),

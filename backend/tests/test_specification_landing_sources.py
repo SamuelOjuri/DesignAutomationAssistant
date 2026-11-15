@@ -23,15 +23,16 @@ def landing_case(case):
 
 
 @pytest.mark.parametrize("group,state,expected", [
-    ("landing", "active", None), ("topics", "active", "outside_landing_zone"),
+    ("landing", "active", None), ("topics", "active", None), ("unconfigured", "active", "group_not_eligible"),
     ("completed", "active", "completed_folder"), ("landing", "archived", "item_archived"),
     ("landing", "deleted", "item_deleted"), ("landing", None, "item_unknown"),
 ])
-def test_specification_policy_uses_live_landing_zone_only(monkeypatch, group, state, expected):
+def test_specification_policy_uses_landing_and_configured_active_groups(monkeypatch, group, state, expected):
     monkeypatch.setattr(settings, "design_processing_board_id", "123")
     monkeypatch.setattr(settings, "design_processing_landing_group_id", "landing")
     monkeypatch.setattr(settings, "auto_sync_completed_group_id", "completed")
-    assert eligible_specification_group_ids() == frozenset({"landing"})
+    monkeypatch.setattr(settings, "auto_sync_active_group_ids", "topics,completed")
+    assert eligible_specification_group_ids() == frozenset({"landing", "topics"})
     assert specification_scope_exclusion(board_id="123", group_id=group, item_state=state) == expected
     assert specification_scope_exclusion(board_id="456", group_id="landing", item_state="active") == "board_not_managed"
 
@@ -39,7 +40,7 @@ def test_specification_policy_uses_live_landing_zone_only(monkeypatch, group, st
 def test_completed_exclusion_wins_over_misconfigured_landing_group(monkeypatch):
     monkeypatch.setattr(settings, "design_processing_landing_group_id", "completed")
     monkeypatch.setattr(settings, "auto_sync_completed_group_id", "completed")
-    assert not eligible_specification_group_ids()
+    assert "completed" not in eligible_specification_group_ids()
     assert specification_scope_exclusion(board_id=settings.design_processing_board_id,
         group_id="completed", item_state="active") == "completed_folder"
 
@@ -49,11 +50,11 @@ def test_completed_exclusion_wins_over_misconfigured_landing_group(monkeypatch):
 def test_every_live_source_scope_read_fails_closed(landing_case, surface, lifecycle):
     case = landing_case
     if surface == "target":
-        attribute, value = (("group_id", "topics") if lifecycle == "group" else
+        attribute, value = (("group_id", "unconfigured") if lifecycle == "group" else
             ("board_id", "999") if lifecycle == "board" else ("item_state", lifecycle))
         setattr(case.gateway.target, attribute, value)
     elif lifecycle == "group":
-        case.gateway.holding["group"]["id"] = "topics"
+        case.gateway.holding["group"]["id"] = "unconfigured"
     elif lifecycle == "board":
         case.gateway.holding["board"]["id"] = "999"
     else:

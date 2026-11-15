@@ -1,12 +1,13 @@
--- Read-only Landing Zone/review diagnostics, requiring migration 0019 or later.
+-- Read-only specification/review diagnostics, requiring migration 0022 or later.
 -- Set scope_settings from the deployed DESIGN_PROCESSING_BOARD_ID,
--- DESIGN_PROCESSING_LANDING_GROUP_ID and AUTO_SYNC_COMPLETED_GROUP_ID. Supply the
+-- DESIGN_PROCESSING_LANDING_GROUP_ID, AUTO_SYNC_ACTIVE_GROUP_IDS and
+-- AUTO_SYNC_COMPLETED_GROUP_ID. Supply the
 -- full deployed settings.design_processing_pipeline_version when checking upgrades;
 -- NULL deliberately reports that the target pipeline has not been verified.
 -- Version settings below match the source/parser/evidence constants in this release.
 -- Base identities include registered design items and reconciliation observations,
 -- even with an excluded Task or no Task. Retained specification records outside
--- Landing Zone are included to diagnose cancelled work/history. Unknown scope is
+-- eligible groups are included to diagnose cancelled work/history. Unknown scope is
 -- shown explicitly. This query never establishes live Monday eligibility/completion.
 -- No mode/allowlist filter: inspect operational configuration before enqueueing work.
 -- Some legacy extraction JSON contains escaped U+0000, which PostgreSQL cannot
@@ -27,10 +28,11 @@ WITH scope_settings AS (
     SELECT
         '1882196103'::text AS board_id,
         'group_mkpbd6vy'::text AS landing_group_id,
+        ARRAY['topics','group_mkpbs35c','group_mkqbx92r']::text[] AS active_group_ids,
         'group_mkpbb3tx'::text AS completed_group_id,
         NULL::text AS expected_pipeline_version,
         '3'::text AS expected_evidence_version,
-        'specification-landing-zone-v1'::text AS expected_scope_policy_version,
+        'specification-active-review-v2'::text AS expected_scope_policy_version,
         'performance-specification-v5'::text AS expected_publication_version,
         'specification-review-source-v1'::text AS expected_source_policy_version,
         'specification-reference-v1'::text AS expected_reference_parser_version
@@ -61,7 +63,7 @@ tracked_items AS (
     UNION
     SELECT t.board_id, t.item_id FROM latest_tasks AS t
     JOIN scope_settings AS cfg ON cfg.board_id = t.board_id
-    WHERE t.source_group_id = cfg.landing_group_id
+    WHERE t.source_group_id = cfg.landing_group_id OR t.source_group_id = ANY(cfg.active_group_ids)
 )
 SELECT
     CURRENT_TIMESTAMP AS observed_at,
@@ -72,9 +74,12 @@ SELECT
     CASE
         WHEN observed_scope.group_id = cfg.completed_group_id THEN 'completed_folder'
         WHEN observed_scope.group_id = cfg.landing_group_id THEN 'landing_zone_check_live_lifecycle'
+        WHEN observed_scope.group_id = ANY(cfg.active_group_ids) THEN 'active_group_manual_publication'
         WHEN observed_scope.group_id IS NULL THEN 'scope_unknown'
-        ELSE 'outside_landing_zone_retained'
+        ELSE 'outside_specification_groups_retained'
     END AS stored_scope_diagnostic,
+    s.prepared_revision,
+    s.requested_publication_revision,
     t.source_group_id,
     t.source_group_title,
     t.auto_sync_state AS task_auto_sync_state,
@@ -285,6 +290,7 @@ LEFT JOIN LATERAL (
     WHERE prior.board_id = ids.board_id AND prior.item_id = ids.item_id
 ) AS history ON TRUE
 WHERE observed_scope.group_id = cfg.landing_group_id
+   OR observed_scope.group_id = ANY(cfg.active_group_ids)
    OR observed_scope.group_id IS NULL
    OR s.item_id IS NOT NULL
 ORDER BY observed_scope.group_id NULLS LAST, ids.item_id;

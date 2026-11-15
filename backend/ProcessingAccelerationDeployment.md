@@ -1,5 +1,10 @@
 # Processing acceleration deployment
 
+13 November specification workflow update: the required database head is now
+`0022_specification_publication`. Follow [active-group publication](SpecificationActivePublication.md)
+for migration and coordinated deployment. Extraction remains on the existing
+pipeline; active groups prepare drafts and require explicit PDF publication.
+
 Prepared: 11 November 2026. This runbook describes the `output-v20` release and
 does not record a production deployment. Deploy the API, design workers,
 reconciliation, specification publisher and frontend from one matching revision.
@@ -7,8 +12,8 @@ reconciliation, specification publisher and frontend from one matching revision.
 Operational update: 12 November 2026. The bounded database pools, sanitized
 database diagnostics and short admission retry are operational fixes within
 `output-v20`. They require a matching backend deployment, with no new migration
-or extraction pipeline bump. The required database head remains
-`0021_processing_acceleration`.
+or extraction pipeline bump. That operational update introduced no changes beyond
+`0021_processing_acceleration`; the current workflow also requires 0022 above.
 
 The release adds a private source-transcription cache, conservative native PDF
 reading, shared Gemini request admission and early read-only Specification Review
@@ -26,7 +31,7 @@ python -m alembic -c backend/alembic.ini upgrade head
 python -m alembic -c backend/alembic.ini current
 ```
 
-The head must be `0021_processing_acceleration`, after
+The acceleration migration is `0021_processing_acceleration`, after
 `0020_monday_item_availability`. It adds `source_transcription_cache` and
 `gemini_request_leases`. Apply it before deploying code that uses these tables.
 Use the existing migration/pre-deploy process and the intended database; the

@@ -1,5 +1,5 @@
 import type {
-  ApproveCommand, FieldName, FieldOperation, ReviewDraft, ReviewSelections,
+  ApproveCommand, PublishCommand, FieldName, FieldOperation, ReviewDraft, ReviewSelections,
   ReviewStatus, ReviewStatusSnapshot, ReviewWorkspace, SaveDecisionsCommand,
 } from "./specification-review-api.ts";
 
@@ -49,6 +49,7 @@ export function mergeStatus(workspace: ReviewWorkspace, status: ReviewStatusSnap
     // Keep the baseline used to author drafts. A newer poll must not silently rebase a stale command.
     return { ...workspace, status: status.status, queue: status.queue, pdf: status.pdf, published_pdf: status.published_pdf,
       approval: status.approval, capabilities: status.capabilities, scope_reason: status.scope_reason,
+      publication_mode: status.publication_mode, requested_publication_revision: status.requested_publication_revision,
       analysis: status.analysis, provisional: status.provisional };
   }
   return { ...workspace, ...status };
@@ -133,7 +134,31 @@ export function approvalCommand(workspace: ReviewStatusSnapshot, idempotencyKey:
     expected_decision_digest: workspace.decision_digest, expected_publication_identity: workspace.desired_publication_identity };
 }
 
+export function canPublish(workspace: ReviewStatusSnapshot, draft: ReviewDraft, previewedRevision?: string | null): boolean {
+  return workspace.publication_mode === "manual" && workspace.capabilities.approve
+    && workspace.status === "ready_to_publish" && !hasUnsavedChanges(draft)
+    && !workspace.provisional && (!workspace.analysis || workspace.analysis.ready)
+    && Boolean(workspace.pdf && workspace.pdf.revision === previewedRevision
+      && workspace.pdf.publication_identity === workspace.desired_publication_identity)
+    && Boolean(workspace.source_fingerprint && workspace.decision_digest && workspace.desired_publication_identity)
+    && Boolean(workspace.queue && !workspace.queue.failed && !workspace.queue.running
+      && workspace.queue.requested_generation === workspace.queue.completed_generation);
+}
+
+export function publicationCommand(workspace: ReviewStatusSnapshot, idempotencyKey: string): PublishCommand {
+  if (!workspace.pdf || !workspace.decision_digest || !workspace.desired_publication_identity
+      || workspace.pdf.publication_identity !== workspace.desired_publication_identity) {
+    throw new Error("Wait for the current saved draft before publishing.");
+  }
+  return { ...commandIdentity(workspace, idempotencyKey), artifact_revision: workspace.pdf.revision,
+    expected_decision_digest: workspace.decision_digest, expected_publication_identity: workspace.desired_publication_identity };
+}
+
 const STATUS_TEXT: Record<ReviewStatus, string> = {
+  preparing_draft: "Preparing draft PDF",
+  ready_to_publish: "Unpublished changes ready for review",
+  changes_recommended: "Publication changes recommended",
+  publishing_pdf: "Publishing PDF",
   source_waiting: "Waiting for source analysis",
   analysis_pending: "Validated fields available; analysis pending",
   source_unavailable: "Recommendations temporarily unavailable",

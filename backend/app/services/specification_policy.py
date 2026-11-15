@@ -1,12 +1,13 @@
 """Specification scope, independent of active-project ingestion and chat.
 
-All callers use the canonical design-processing board and Landing Zone setting.
+All callers share the canonical design board, Landing Zone and active groups.
 Completed Folder always wins if the group settings accidentally overlap.
 """
 
 from ..config import settings
+from .design_processing_policy import eligible_design_group_ids
 
-SPECIFICATION_SCOPE_POLICY_VERSION = "specification-landing-zone-v1"
+SPECIFICATION_SCOPE_POLICY_VERSION = "specification-active-review-v2"
 
 
 def specification_rollout_exclusion(item_id) -> str | None:
@@ -42,9 +43,17 @@ def specification_publication_allowed(item_id) -> bool:
 
 
 def eligible_specification_group_ids() -> frozenset[str]:
-    return frozenset({str(settings.design_processing_landing_group_id)}) - {
-        str(settings.auto_sync_completed_group_id),
-    }
+    return eligible_design_group_ids(landing_group_id=str(settings.design_processing_landing_group_id))
+
+
+def specification_publication_mode(snapshot: dict) -> str:
+    """Describe the live workflow; operational/actor permissions remain separate."""
+    group, board = snapshot.get("group"), snapshot.get("board")
+    group_id = group.get("id") if isinstance(group, dict) else None
+    if specification_scope_exclusion(board_id=board.get("id") if isinstance(board, dict) else None,
+            group_id=group_id, item_state=snapshot.get("state")) is not None:
+        return "disabled"
+    return "automatic" if str(group_id) == str(settings.design_processing_landing_group_id) else "manual"
 
 
 def specification_scope_exclusion(
@@ -65,5 +74,5 @@ def specification_scope_exclusion(
     if item_state != "active":
         return f"item_{item_state or 'unknown'}"
     if str(group_id) not in eligible_specification_group_ids():
-        return "outside_landing_zone"
+        return "group_not_eligible"
     return None

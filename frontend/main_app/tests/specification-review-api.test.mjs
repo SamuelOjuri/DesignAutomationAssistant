@@ -10,6 +10,22 @@ const session = {
 const context = { accountId: "1", boardId: "3", itemId: "4" };
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
+test("publication is an explicit authenticated POST for the selected revision", async () => {
+  const requests = [];
+  const api = createReviewApi("", session, async (url, options) => {
+    requests.push({ url, options }); return json({ changed: true });
+  });
+  const command = { artifact_revision: "draft-2", expected_review_version: 2,
+    expected_source_fingerprint: "source-2", expected_decision_digest: "decisions-2",
+    expected_publication_identity: "publication-2", idempotency_key: "publish-once" };
+  await api.publish(command);
+  assert.equal(requests[0].url, "/api/specification-review/items/3/4/publish");
+  assert.equal(requests[0].options.method, "POST");
+  assert.equal(requests[0].options.headers.Authorization, "Bearer private-review-bearer");
+  assert.deepEqual(JSON.parse(requests[0].options.body), command);
+  api.destroy();
+});
+
 test("bootstrap sends SDK credentials only in a private POST body", async () => {
   let request;
   const result = await bootstrapReviewSession("https://backend.test/", "sdk-secret", context, undefined, async (url, options) => {

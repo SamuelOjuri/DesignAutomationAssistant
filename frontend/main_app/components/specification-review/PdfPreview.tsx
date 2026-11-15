@@ -20,7 +20,7 @@ export default function PdfPreview({ pdf, publishedPdf, url, loading = false, re
     <section className="min-w-0 rounded-xl border bg-card p-4 sm:p-5" aria-labelledby={`${id}-title`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id={`${id}-title`} className="text-lg font-semibold">Specification PDF</h2>
-        {pdf && <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${privatePreview ? "bg-amber-50 text-amber-950" : "bg-secondary text-foreground"}`}>{privatePreview ? "Private preview" : "Published PDF"}</span>}
+        {pdf && <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${privatePreview ? "bg-amber-50 text-amber-950" : "bg-secondary text-foreground"}`}>{privatePreview ? "Draft PDF · not published" : "Published PDF"}</span>}
       </div>
       {pdf && <p className="mt-2 break-words text-sm text-muted-foreground">{pdf.filename}</p>}
       {pdf && <p className="mt-1 break-all text-xs text-muted-foreground">Revision: {pdf.revision}</p>}

@@ -1,5 +1,11 @@
 # Project Performance Specification Details
 
+13 November 2026: the [active-group publication workflow](SpecificationActivePublication.md)
+extends continuous processing and review to configured active groups, where each
+PDF publication requires an explicit reviewer request. Landing Zone retains
+automatic publication. Apply migration `0022_specification_publication` and deploy
+matching services; this supersedes the earlier scope/deployment notes below.
+
 Phase 4 of Specification Review connects email-first recommendations, durable
 reviewer decisions and separately labelled PDF provenance to the publisher. See
 [source policy and PDF](SpecificationReviewSourcePolicy.md) for the current policy,
@@ -112,17 +118,20 @@ which process produced an earlier/in-flight failure.
 
 ## Scope and existing outputs
 
-Specification publication is restricted to `DESIGN_PROCESSING_BOARD_ID` and
-`DESIGN_PROCESSING_LANDING_GROUP_ID`. The item must have live Monday state `active`.
+Specification processing is restricted to `DESIGN_PROCESSING_BOARD_ID`, with
+`DESIGN_PROCESSING_LANDING_GROUP_ID` and `AUTO_SYNC_ACTIVE_GROUP_IDS` eligible.
+Landing Zone publishes automatically; active groups require an exact saved-draft
+request for each publication. The item must have live Monday state `active`.
 `AUTO_SYNC_COMPLETED_GROUP_ID` always excludes the item, including when it conflicts
 with the Landing Zone setting. `specification_policy.py` supplies this common scope
 to queueing and source checks. Current scope is read before translation, after
 translation, before/after publication and before cleanup.
 
-Leaving Landing Zone, entering Completed Folder or archive/delete cancels queued
-work and fences running work. The attached PDF, saved decisions and audit history
-remain. A human moves the item; the publisher never moves it back. Return to
-Landing Zone requires a fresh scope/source check before publication. In-flight
+Entering Completed Folder, an unconfigured group or archive/delete cancels queued
+work and fences running work. Moving into an active group preserves processing
+and changes automatic publication to private draft preparation. The attached PDF,
+saved decisions and audit history remain. A human moves the item; the publisher
+never moves it back. Re-entry requires fresh scope/source checks. In-flight
 external requests cannot be recalled, so a change during upload may briefly leave
 a tracked, superseded PDF until the next eligible refresh replaces it.
 

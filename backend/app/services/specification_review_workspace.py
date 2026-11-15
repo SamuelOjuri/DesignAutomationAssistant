@@ -152,7 +152,7 @@ def _resolve(db, context, gateway):
     except SpecificationSourceWaiting as exc:
         raise persistence.ReviewConflict("source_waiting", "Waiting for current source analysis") from exc
     except SpecificationIneligible as exc:
-        raise persistence.ReviewConflict("scope_changed", "The item is no longer editable in Landing Zone") from exc
+        raise persistence.ReviewConflict("scope_changed", "The item is outside the editable specification groups") from exc
     except SpecificationSourceError as exc:
         raise persistence.ReviewConflict("source_unavailable", "Source recommendations are temporarily unavailable") from exc
     return ReviewSourceSnapshot.model_validate(resolved["reviewSource"])
@@ -227,11 +227,14 @@ def _artifact_info(artifact, board_id, item_id):
         return None
     return {"revision": artifact.revision, "filename": artifact.filename,
             "status": artifact.status, "published": artifact.status == "published",
+            "publication_identity": (getattr(artifact, "publication_identity", None)
+                or ((getattr(artifact, "source_json", None) or {}).get("review") or {}).get("publication_identity")),
             "size_bytes": artifact.size_bytes,
             "url": f"/api/specification-review/items/{board_id}/{item_id}/pdf/{artifact.revision}"}
 
 
-def _status(*, spec, review, source_ready, exact, approval, editable, source_error=None):
+def _status(*, spec, review, source_ready, exact, approval, editable, source_error=None,
+            manual_publication=False, draft_ready=False):
     source_error = source_error or ((spec.review_json or {}).get("reviewApiSourceState") if spec else None)
     if not editable:
         return "read_only"
@@ -242,13 +245,18 @@ def _status(*, spec, review, source_ready, exact, approval, editable, source_err
     if spec and spec.last_error:
         return "publication_failed"
     if spec and (spec.requested_generation != spec.completed_generation or spec.lease_token):
+        if manual_publication:
+            return "publishing_pdf" if spec.requested_publication_revision else "preparing_draft"
         return "regenerating_pdf"
     if approval and exact:
         return "complete"
+    if manual_publication and not exact:
+        return "ready_to_publish" if draft_ready else "changes_recommended"
     return "awaiting_final_review" if exact else "needs_review"
 
 
-def _payload(context, *, board_id, item_id, editable, source=None, source_error=None, provisional=False):
+def _payload(context, *, board_id, item_id, editable, source=None, source_error=None, provisional=False,
+             manual_publication=False):
     spec, review, state = context["spec"], context["review"], context["state"]
     if provisional:
         state = ReviewDecisionState()
@@ -261,12 +269,15 @@ def _payload(context, *, board_id, item_id, editable, source=None, source_error=
                 if metadata and (artifact.source_json or {}).get("review") == metadata]
     # Prefer a matching private render for shadow inspection while retaining a
     # previously published PDF as a separate, explicitly labelled document.
-    preview = current if current in matching else next(iter(matching), current)
+    prepared = next((entry for entry in matching if spec and entry.revision == spec.prepared_revision), None)
+    preview = prepared or (current if current in matching else next(iter(matching), current))
     exact = bool(current and current.status == "published" and metadata
+                 and (not spec.prepared_revision or current.revision == spec.prepared_revision)
                  and (current.source_json or {}).get("review") == metadata)
     approval = context["approval"]
     status = _status(spec=spec, review=review, source_ready=source is not None, exact=exact,
-                     approval=approval, editable=editable, source_error=source_error)
+                     approval=approval, editable=editable, source_error=source_error,
+                     manual_publication=manual_publication, draft_ready=preview in matching)
     if provisional and editable:
         status = "analysis_pending"
     return {
@@ -277,6 +288,8 @@ def _payload(context, *, board_id, item_id, editable, source=None, source_error=
         "source_fingerprint": review.source_fingerprint if review and not provisional else None,
         "decision_digest": review.decision_digest if review else None,
         "desired_publication_identity": review.desired_publication_identity if review else None,
+        "requested_publication_revision": spec.requested_publication_revision if spec else None,
+        "publication_changes": _publication_changes(current, metadata) if not provisional else [],
         "review": state.model_dump(mode="json"),
         "source": source.model_dump(mode="json") if source else None,
         "fields": {label: {**source.fields[label].model_dump(mode="json"),
@@ -298,7 +311,21 @@ def _payload(context, *, board_id, item_id, editable, source=None, source_error=
     }
 
 
-def get_workspace(db, *, board_id, item_id, account_id, gateway, editable):
+def _publication_changes(current, metadata):
+    if current is None or metadata is None:
+        return []
+    before = ((current.source_json or {}).get("review") or {}).get("field_provenance", {})
+    changes = []
+    for label, value in metadata["field_provenance"].items():
+        prior = before.get(label, {})
+        if any(prior.get(key) != value.get(key) for key in ("display_value", "source_label")):
+            changes.append({"field": label, "published_value": prior.get("display_value"),
+                            "proposed_value": value.get("display_value"),
+                            "published_source": prior.get("source_label"), "proposed_source": value.get("source_label")})
+    return changes
+
+
+def get_workspace(db, *, board_id, item_id, account_id, gateway, editable, manual_publication=False):
     context = _context(db, board_id, item_id, account_id)
     source, source_error, provisional = None, None, False
     if editable:
@@ -322,22 +349,24 @@ def get_workspace(db, *, board_id, item_id, account_id, gateway, editable):
                     pass  # Invalid/stale evidence never becomes an early preview.
             if provisional:
                 return _payload(context, board_id=board_id, item_id=item_id, editable=editable,
-                                source=source, provisional=True)
+                                source=source, provisional=True, manual_publication=manual_publication)
             if context["spec"]:
                 _record_source_error(db, context, board_id=board_id, item_id=item_id,
                                      account_id=account_id, code=exc.code)
                 context = _context(db, board_id, item_id, account_id)
     return _payload(context, board_id=board_id, item_id=item_id, editable=editable,
-                    source=source, source_error=source_error)
+                    source=source, source_error=source_error, manual_publication=manual_publication)
 
 
-def get_status(db, *, board_id, item_id, account_id, editable):
+def get_status(db, *, board_id, item_id, account_id, editable, manual_publication=False):
     """Poll identities without loading email snapshots, history or all artifacts."""
     board_id, item_id = str(board_id), str(item_id)
     try:
         spec_row = db.query(PerformanceSpecification.requested_generation,
             PerformanceSpecification.completed_generation, PerformanceSpecification.lease_token,
             PerformanceSpecification.last_error, PerformanceSpecification.current_revision,
+            PerformanceSpecification.requested_publication_revision,
+            PerformanceSpecification.prepared_revision,
             PerformanceSpecification.review_json["reviewApiSourceState"].as_string().label("source_state")
         ).filter_by(board_id=board_id, item_id=item_id).one_or_none()
         spec = SimpleNamespace(**spec_row._asdict(),
@@ -357,12 +386,15 @@ def get_status(db, *, board_id, item_id, account_id, editable):
         current = artifact_query.filter(PerformanceSpecificationArtifact.revision == spec.current_revision).one_or_none() \
             if spec and spec.current_revision else None
         exact = bool(current and current.status == "published" and review
+                     and (not spec.prepared_revision or current.revision == spec.prepared_revision)
                      and current.publication_identity == review.desired_publication_identity)
         preview = current
         if not exact and review:
-            preview = artifact_query.filter(
+            matching = artifact_query.filter(
                 PerformanceSpecificationArtifact.source_json["review"]["publication_identity"].as_string()
-                == review.desired_publication_identity).first() or current
+                == review.desired_publication_identity)
+            preview = (matching.filter(PerformanceSpecificationArtifact.revision == spec.prepared_revision).first()
+                       if spec and spec.prepared_revision else None) or matching.first() or current
         approval = db.query(PerformanceSpecificationApproval.id,
             PerformanceSpecificationApproval.artifact_revision, PerformanceSpecificationApproval.review_version,
             PerformanceSpecificationApproval.actor_monday_user_id, PerformanceSpecificationApproval.approved_at
@@ -378,13 +410,16 @@ def get_status(db, *, board_id, item_id, account_id, editable):
         source_error = "analysis_pending" if provisional else "source_waiting" if analysis and not analysis["ready"] else None
         return {"board_id": board_id, "item_id": item_id,
             "status": _status(spec=spec, review=review, source_ready=review is not None,
-                              exact=exact, approval=approval, editable=editable, source_error=source_error),
+                              exact=exact, approval=approval, editable=editable, source_error=source_error,
+                              manual_publication=manual_publication,
+                              draft_ready=bool(preview and review and preview.publication_identity == review.desired_publication_identity)),
             "provisional": provisional, "analysis": analysis,
             "extraction_identity": analysis["extraction_identity"] if analysis else None,
             "review_version": review.review_version if review else 0,
             "source_fingerprint": review.source_fingerprint if review and not provisional else None,
             "decision_digest": review.decision_digest if review else None,
             "desired_publication_identity": review.desired_publication_identity if review else None,
+            "requested_publication_revision": spec.requested_publication_revision if spec else None,
             "queue": {"requested_generation": spec.requested_generation,
                       "completed_generation": spec.completed_generation,
                       "running": spec.lease_token is not None, "failed": bool(spec.last_error)} if spec else None,
@@ -510,6 +545,26 @@ def read_pdf(db, *, board_id, item_id, account_id, revision, storage=None):
     if artifact is None:
         raise persistence.ReviewConflict("source_unavailable", "The requested PDF revision does not exist")
     return artifact.filename, _stored_bytes(db, artifact, storage)
+
+
+def publish_specification(db, *, board_id, item_id, actor, command, gateway, storage=None):
+    command = persistence.PublishReview.model_validate(command)
+    if not specification_publication_allowed(item_id):
+        raise persistence.ReviewConflict("reviewer_forbidden", "Specification publication is currently disabled")
+    retry = _replay(db, board_id=board_id, item_id=item_id, actor=actor, command=command, kind="publish")
+    if retry is not None:
+        return retry
+    source = _mutation_source(db, board_id=board_id, item_id=item_id, actor=actor, gateway=gateway)
+    context = _context(db, board_id, item_id, actor.monday_account_id)
+    artifact = next((entry for entry in context["artifacts"] if entry.revision == command.artifact_revision), None)
+    if artifact is None or (artifact.source_json or {}).get("review") != build_review_artifact_metadata(context["state"], source):
+        raise persistence.ReviewConflict("source_changed", "Prepare and inspect the current draft before publishing")
+    _stored_bytes(db, artifact, storage)
+    source = _mutation_source(db, board_id=board_id, item_id=item_id, actor=actor, gateway=gateway)
+    if not specification_publication_allowed(item_id):
+        raise persistence.ReviewConflict("reviewer_forbidden", "Specification publication is currently disabled")
+    return persistence.request_publication(db, board_id=board_id, item_id=item_id,
+                                         actor=actor, command=command, source=source)
 
 
 def approve_specification(db, *, board_id, item_id, actor, command, gateway, storage=None):

@@ -187,7 +187,7 @@ def test_malformed_or_missing_live_group_fails_closed_to_read_only(db, monkeypat
     }})
     result = auth.bootstrap_review_session(db, bootstrap_payload())
     assert result["capabilities"] == {"read": True, "edit": False, "approve": False}
-    assert result["scope_reason"] == "outside_landing_zone"
+    assert result["scope_reason"] == "group_not_eligible"
 
 
 @pytest.mark.parametrize("setting,value,editable,approvable", [
@@ -219,6 +219,20 @@ def test_readonly_bearer_needs_bootstrap_to_gain_edit_access(db, monkeypatch):
     mock_live(monkeypatch)
     access = auth.authenticate_review(db, "Bearer " + token, "20", "30")
     assert access.capabilities == {"read": True, "edit": False, "approve": False}
+
+
+def test_configured_active_groups_preserve_review_capabilities(db, monkeypatch):
+    monkeypatch.setattr(settings, "auto_sync_active_group_ids", "active,other_active,completed")
+    add_link(db)
+    mock_live(monkeypatch)
+    token = auth.bootstrap_review_session(db, bootstrap_payload())["access_token"]
+    for group in ("active", "other_active"):
+        mock_live(monkeypatch, group=group)
+        access = auth.authenticate_review(db, "Bearer " + token, "20", "30")
+        assert access.capabilities == {"read": True, "edit": True, "approve": True}
+    mock_live(monkeypatch, group="completed")
+    assert auth.authenticate_review(db, "Bearer " + token, "20", "30").capabilities == {
+        "read": True, "edit": False, "approve": False}
 
 
 def test_item_bound_bearer_rejects_other_item_and_sdk_token(db, monkeypatch):

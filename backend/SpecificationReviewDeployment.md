@@ -1,5 +1,10 @@
 # Specification Review Phase 8 deployment runbook
 
+13 November update: [Active-group publication](SpecificationActivePublication.md)
+supersedes this runbook's Landing Zone-only lifecycle. Apply migration
+`0022_specification_publication` and deploy matching services/frontend. Active
+groups now prepare drafts and require an explicit publish action for each revision.
+
 Prepared: 10 November 2026. This runbook describes deployment and acceptance;
 it does not record a completed production rollout.
 

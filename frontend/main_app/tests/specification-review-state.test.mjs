@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  approvalCommand, canComplete, completionIssues, draftValidationErrors, emptyDraft, hasUnsavedChanges,
+  approvalCommand, canComplete, canPublish, publicationCommand, completionIssues, draftValidationErrors, emptyDraft, hasUnsavedChanges,
   mergeStatus, rebaseDraft, sameReviewIdentity, saveCommand, updateField, updateSelection,
 } from "../lib/specification-review-state.ts";
 import { FIELD_NAMES } from "../lib/specification-review-api.ts";
@@ -18,6 +18,27 @@ function workspace(overrides = {}) {
     ...overrides,
   };
 }
+
+test("active publication permits unchanged recommendations but requires the loaded current saved draft", () => {
+  const ready = workspace({ publication_mode: "manual", status: "ready_to_publish", published_pdf: null,
+    pdf: { ...workspace().pdf, status: "rendered", published: false, publication_identity: "publication-1" } });
+  assert.equal(canPublish(ready, emptyDraft(), "revision-1"), true);
+  assert.equal(canPublish(ready, emptyDraft()), false);
+  assert.equal(canPublish(ready, emptyDraft(), "old-pdf"), false);
+  assert.equal(canPublish(ready, updateField(emptyDraft(), "Decking", { operation: "specify_blank" }), "revision-1"), false);
+  for (const patch of [ { publication_mode: "automatic" }, { status: "preparing_draft" },
+    { status: "publishing_pdf" }, { provisional: true }, { analysis: { ready: false } },
+    { capabilities: { read: true, edit: true, approve: false } },
+    { pdf: { ...ready.pdf, publication_identity: "old-source" } },
+    { queue: { ...ready.queue, requested_generation: 5 } } ]) {
+    assert.equal(canPublish({ ...ready, ...patch }, emptyDraft(), "revision-1"), false);
+  }
+  assert.deepEqual(publicationCommand(ready, "publish-once"), {
+    expected_review_version: 3, expected_source_fingerprint: "source-1", idempotency_key: "publish-once",
+    artifact_revision: "revision-1", expected_decision_digest: "decisions-1", expected_publication_identity: "publication-1",
+  });
+  assert.throws(() => publicationCommand({ ...ready, pdf: { ...ready.pdf, publication_identity: "old" } }, "retry"), /current saved draft/);
+});
 
 test("all 18 PDF fields support distinct manual, blank, recommendation and restore commands", () => {
   assert.equal(FIELD_NAMES.length, 18);

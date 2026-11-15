@@ -751,7 +751,7 @@ def test_u_value_validation_distinguishes_units_from_additional_numbers(case, un
     assert pdf_values(translate_specification(raw, client))["Target U Value"] == "0.20"
 
 
-@pytest.mark.parametrize("group", ["topics", "group_mkpbs35c", "group_mkpbb3tx", "other"])
+@pytest.mark.parametrize("group", ["group_mkpbs35c", "group_mkpbb3tx", "other"])
 def test_excluded_groups_never_translate_or_upload_even_if_configured_active(case, group):
     case.gateway.target.group_id = group
     assert run(case) == []
@@ -763,7 +763,7 @@ def test_move_to_excluded_group_cancels_running_claim(case):
     worker.enqueue_specification(case.db, BOARD, ITEM, group_id=settings.design_processing_landing_group_id, immediate=True)
     case.db.commit()
     claim = worker.claim_specification(case.db)
-    case.gateway.target.group_id = "topics"
+    case.gateway.target.group_id = "unconfigured"
     assert worker.execute_specification(case.db, claim, gateway=case.gateway,
                                        client=case.client, storage=case.storage) == "excluded"
     assert not case.calls and not case.gateway.uploads
