@@ -445,7 +445,8 @@ ingestion retain their own policies.
 4. Review shadow artifacts and translation warnings in the private artifact bucket
    and `performance_specification_artifacts`, plus `performance_specifications.review_json`.
    Review statuses distinguish blocking `conflict`/`source_failure` from successful
-   `published_with_review`/`rendered_with_review` outputs. A fully resolved refresh
+   `published_with_review`/`rendered_with_review` outputs and non-failing
+   `source_waiting` (current extraction pending; no retry escalation). A fully resolved refresh
    clears processing diagnostics; durable reviewer decisions and approval history
    are retained. Then use `PERFORMANCE_SPECIFICATION_MODE=allowlist` and a nonempty
    `PERFORMANCE_SPECIFICATION_ALLOWLIST_ITEM_IDS` to validate a few items before

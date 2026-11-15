@@ -212,7 +212,7 @@ def test_new_live_input_invalidates_completion_while_replacement_extraction_is_p
     case.gateway.target.input_revision = "new-email-awaiting-extraction"
 
     for _ in range(2):
-        assert run(case) == ["failed"]
+        assert run(case) == ["waiting"]
         review = case.db.get(PerformanceSpecificationReview, (BOARD, ITEM), populate_existing=True)
         assert review.current_approval_id is None
         assert reviews.review_state(review) == before

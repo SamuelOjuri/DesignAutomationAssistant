@@ -349,8 +349,10 @@ def test_matching_stored_identities_cannot_publish_an_obsolete_configured_pipeli
     case.item.extracted_parameters_json = data
     case.item.latest_analyzed_pipeline_version = case.item.latest_desired_pipeline_version = obsolete
     case.db.commit()
-    assert run(case) == ["failed"] and current(case).current_revision == revision
-    assert "current configured pipeline" in current(case).last_error and len(case.gateway.uploads) == 1
+    assert run(case) == ["waiting"] and current(case).current_revision == revision
+    record = current(case)
+    assert record.last_error is None and record.review_json["status"] == "source_waiting"
+    assert "current configured pipeline" in record.review_json["reason"] and len(case.gateway.uploads) == 1
 
 
 def test_ambiguous_paper_size_publishes_review_instead_of_guessing_a3(case):

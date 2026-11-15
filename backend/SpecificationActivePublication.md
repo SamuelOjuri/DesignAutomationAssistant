@@ -76,12 +76,20 @@ prior specification attachments after a verified replacement, and stops in Compl
    items prepare drafts without publishing; existing attachments remain current.
    Older unregistered items or missing/current extraction still require explicit
    item-scoped design reconciliation; this release does not bulk-register history.
+   Until current extraction exists, the worker records a `waiting` outcome rather
+   than a failure: `review_json.status` is `source_waiting` with the reason, the
+   item gets no `last_error` or retry escalation, and it is rechecked after
+   `PERFORMANCE_SPECIFICATION_RECHECK_SECONDS`. Completed analysis wakes it at once.
 4. Validate a Landing Zone automatic publication, active initial publication with
    no corrections, save/refresh without publication, source-change recommendations,
    explicit replacement, and a move into Completed Folder during work.
 5. To pause, use the existing specification mode/master/review controls consistently.
    Keep the additive schema and retained artifacts. Do not run older publishers
-   against this workflow or downgrade while updated services are running.
+   against this workflow or downgrade while updated services are running. A disabled
+   worker exits immediately, logging `Performance specification processing is
+   disabled`; Render then restarts it repeatedly, so suspend the service instead.
+   The worker also logs INFO outcomes and waiting items; third-party libraries stay
+   at WARNING.
 
 Tests use fake Monday/model/storage gateways and isolated PostgreSQL schemas.
 The browser harness uses the actual frontend with a local mocked API. Live Monday

@@ -1091,14 +1091,41 @@ def test_latest_scoped_fallback_keeps_reference_revision_and_email_discrepancy_t
     assert "matches no single" in source["issues"]["Drawing Reference"]
 
 
-def test_old_extraction_waits_for_new_roof_aware_schema(case):
-    old = deepcopy(case.item.extracted_parameters_json)
+def without_performance_parameters(case):
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    old = deepcopy(extraction)
     old.pop("performanceParameters")
     case.item.extracted_parameters_json = old
     case.db.commit()
-    assert run(case) == ["failed"]
-    assert "evidence-aware email extraction" in current(case).last_error
-    assert not case.calls
+    return extraction
+
+
+def test_old_extraction_waits_without_failure_until_extraction_completes(case):
+    extraction = without_performance_parameters(case)
+    assert run(case) == ["waiting"]
+    assert run(case) == ["waiting"]
+    record = current(case)
+    assert record.attempt_count == 0 and record.last_error is None and not case.calls
+    assert record.review_json["status"] == "source_waiting"
+    assert "evidence-aware email extraction" in record.review_json["reason"]
+    recheck = timedelta(seconds=settings.performance_specification_recheck_seconds - 60)
+    assert worker._aware(record.scheduled_for) > worker.utc_now() + recheck
+    case.item.extracted_parameters_json = extraction
+    case.db.commit()
+    assert run(case) == ["published"]
+
+
+def test_waiting_keeps_extraction_wakeup_that_arrives_during_refresh(case, monkeypatch):
+    without_performance_parameters(case)
+    invalidate = worker.invalidate_publication_approval
+    def extraction_completed(db, review, **kwargs):
+        invalidate(db, review, **kwargs)
+        worker.enqueue_specification(db, BOARD, ITEM, immediate=True)
+    monkeypatch.setattr(worker, "invalidate_publication_approval", extraction_completed)
+    assert run(case) == ["waiting"]
+    record = current(case)
+    assert record.requested_generation > record.completed_generation
+    assert worker._aware(record.scheduled_for) <= worker.utc_now()
 
 
 def test_monday_metadata_cancellation_keeps_landing_zone_specification_queued(case):

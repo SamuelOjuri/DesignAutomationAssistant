@@ -716,6 +716,17 @@ def execute_specification(db, claim, *, gateway, client, storage):
         elif isinstance(exc, SupersededSpecification):
             record.scheduled_for = utc_now() + timedelta(seconds=settings.auto_sync_debounce_seconds)
             outcome = "superseded"
+        elif isinstance(exc, SpecificationSourceWaiting):
+            # Not a failure: completed extraction re-queues this item immediately.
+            # Recheck slowly as a fallback, never overriding a newer generation's
+            # wake-up and without retry escalation or a publication failure.
+            if record.requested_generation == generation:
+                record.scheduled_for = utc_now() + timedelta(
+                    seconds=settings.performance_specification_recheck_seconds)
+            record.last_error = None
+            record.review_json = {"status": "source_waiting", "reason": str(exc)[:2000], "source": source}
+            outcome = "waiting"
+            logger.info("Specification waiting item=%s reason=%s", item_id, exc)
         else:
             record.attempt_count += 1
             record.scheduled_for = utc_now() + timedelta(seconds=min(3600, 30 * 2 ** min(record.attempt_count, 7)))
@@ -801,7 +812,19 @@ def run_specifications_once(db, *, gateway=None, client=None, storage=None, limi
     return outcomes
 
 
+def configure_worker_logging() -> None:
+    """Show the worker's own INFO events (outcomes, disabled exits) on Render.
+
+    Third-party libraries stay at WARNING so per-request HTTP logging is not emitted.
+    Run with ``python -m``, this module logs as ``__main__`` rather than ``backend``.
+    """
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    for name in ("backend", logger.name):
+        logging.getLogger(name).setLevel(logging.INFO)
+
+
 def main():
+    configure_worker_logging()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--item-id", help="Enqueue an existing design item for a fresh scope/source check")
