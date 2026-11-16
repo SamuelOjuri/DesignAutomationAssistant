@@ -6,7 +6,8 @@ export async function proxy(req: NextRequest) {
 
   // The embedded reviewer authenticates through the Monday SDK and an in-memory
   // item-scoped bearer. It must also work when third-party cookies are blocked.
-  if (req.nextUrl.pathname === "/specification-review" || req.nextUrl.pathname.startsWith("/specification-review/")) {
+  if (req.nextUrl.pathname === "/specification-review" || req.nextUrl.pathname.startsWith("/specification-review/")
+    || req.nextUrl.pathname.startsWith("/pdfjs/")) {
     return res;
   }
 
@@ -34,5 +35,5 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|specification-review(?:/|$)).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|specification-review(?:/|$)|pdfjs/).*)"],
 };

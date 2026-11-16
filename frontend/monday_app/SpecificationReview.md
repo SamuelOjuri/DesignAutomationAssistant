@@ -25,12 +25,16 @@ memory. Board/item query parameters in the OAuth return URL cannot establish
 identity; the embedded view bootstraps again through the SDK.
 
 The review route bypasses Supabase session refresh. Its CSP allows the current
-Monday `https://*.monday.com` parent origins and same-origin/blob PDF frames;
+Monday `https://*.monday.com` parent origins and same-origin PDF.js workers;
 other application routes retain their previous headers and authentication.
 If a proxy or host adds `X-Frame-Options: DENY` / `SAMEORIGIN` or another CSP,
 remove that conflicting override for this route. Verify the response headers
 on the deployed origin. The retained PDF is fetched with the review bearer and
-displayed from a temporary object URL; no token is placed in a PDF URL.
+rendered by PDF.js from a temporary object URL; no token is placed in a PDF URL.
+The app does not embed the browser's native PDF viewer. `npm run dev` and
+`npm run build` copy the worker, fonts and decoders from the pinned npm package
+into versioned `public/pdfjs` assets. Include these generated assets in the
+deployment and allow same-origin workers in any additional host CSP.
 
 `NEXT_PUBLIC_FASTAPI_BASE_URL` may select the existing API origin, or leave it
 unset for the existing same-origin `/api/*` Netlify relay. When using a separate

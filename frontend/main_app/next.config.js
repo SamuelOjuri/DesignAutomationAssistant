@@ -7,7 +7,7 @@ const nextConfig = {
       headers: [
         {
           key: "Content-Security-Policy",
-          value: "frame-ancestors 'self' https://monday.com https://*.monday.com; frame-src 'self' blob:; object-src 'none'; base-uri 'self'",
+          value: "frame-ancestors 'self' https://monday.com https://*.monday.com; frame-src 'self' blob:; worker-src 'self'; object-src 'none'; base-uri 'self'",
         },
         { key: "Referrer-Policy", value: "no-referrer" },
         { key: "Cache-Control", value: "private, no-store" },

@@ -43,6 +43,7 @@ export default function ReviewWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfRevision, setPdfRevision] = useState<string | null>(null);
+  const [renderedPdfUrl, setRenderedPdfUrl] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [pdfRetry, setPdfRetry] = useState(0);
@@ -73,6 +74,11 @@ export default function ReviewWorkspace() {
       setConflict(true);
       setCheckedPdf(false);
     }
+  }, []);
+
+  const receivePdfRenderState = useCallback((url: string, ready: boolean) => {
+    setRenderedPdfUrl((previous) => ready ? url : previous === url ? null : previous);
+    if (!ready) setCheckedPdf(false);
   }, []);
 
   const receiveWorkspace = useCallback((next: Workspace) => {
@@ -219,7 +225,7 @@ export default function ReviewWorkspace() {
   useEffect(() => {
     const controller = new AbortController();
     let url: string | null = null;
-    setPdfUrl(null); setPdfRevision(null); setPdfError(null); setCheckedPdf(false);
+    setPdfUrl(null); setPdfRevision(null); setRenderedPdfUrl(null); setPdfError(null); setCheckedPdf(false);
     if (!api || !revision || connection !== "ready") { setPdfLoading(false); return; }
     setPdfLoading(true);
     void api.pdf(revision, controller.signal).then((blob) => {
@@ -309,7 +315,9 @@ export default function ReviewWorkspace() {
     scopeReason: workspace.scope_reason, hasSource: Boolean(workspace.source), hasPdf: Boolean(workspace.pdf || workspace.published_pdf), analysis: workspace.analysis }) : null;
   const analysisPending = Boolean(usable && (workspace.provisional || (workspace.analysis && !workspace.analysis.ready)));
   const editable = Boolean(usable && !analysisPending && workspace.capabilities.edit && connection === "ready" && !busy && !conflict);
-  const completeAllowed = Boolean(usable && !conflict && !busy && connection === "ready" && checkedPdf && canComplete(workspace, draft, pdfRevision || undefined));
+  const currentPdfUrl = pdfRevision === revision ? pdfUrl : null;
+  const previewReady = Boolean(currentPdfUrl && renderedPdfUrl === currentPdfUrl);
+  const completeAllowed = Boolean(usable && !conflict && !busy && connection === "ready" && previewReady && checkedPdf && canComplete(workspace, draft, pdfRevision || undefined));
   const manualPublication = Boolean(usable && workspace.publication_mode === "manual");
   const publishAllowed = Boolean(usable && editable && !showPublished && canPublish(workspace, draft, pdfRevision));
   const unmappedFields = usable ? FIELD_NAMES.filter((label) => {
@@ -385,7 +393,7 @@ export default function ReviewWorkspace() {
               <button className={button} aria-pressed={!showPublished} onClick={() => setShowPublished(false)}>View draft PDF</button>
               <button className={button} aria-pressed={showPublished} onClick={() => setShowPublished(true)}>View published PDF</button>
             </div>}
-            <PdfPreview pdf={visiblePdf || null} publishedPdf={workspace.published_pdf} url={pdfUrl} loading={pdfLoading} readOnly={readOnly} error={pdfError} onRetry={() => setPdfRetry((value) => value + 1)} />
+            <PdfPreview pdf={visiblePdf || null} publishedPdf={workspace.published_pdf} url={currentPdfUrl} loading={pdfLoading} readOnly={readOnly} error={pdfError} onRetry={() => setPdfRetry((value) => value + 1)} onRenderStateChange={receivePdfRenderState} />
             {manualPublication && workspace.published_pdf && workspace.status !== "complete" && workspace.status !== "awaiting_final_review" && <section className="space-y-2 rounded-lg border bg-white p-4" aria-label="Recommended publication changes">
               <h2 className="text-lg font-semibold">Recommended publication changes</h2>
               {workspace.publication_changes?.length ? <div className="overflow-x-auto"><table className="w-full text-left text-sm">
@@ -401,7 +409,7 @@ export default function ReviewWorkspace() {
               {readOnly && <p className="text-sm">Completion is unavailable while this item is read-only.</p>}
               {!readOnly && completionIssues(workspace).length > 0 && <details className="text-sm"><summary className="cursor-pointer font-medium">Decisions still needed ({completionIssues(workspace).length})</summary><ul className="mt-2 list-disc space-y-1 pl-5">{completionIssues(workspace).map((issue) => <li key={issue}>{issue}</li>)}</ul></details>}
               {unmappedFields.length > 0 && <p id="review-mapping-limitations" className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">No confirmed CAD mapping is available for: {unmappedFields.join(", ")}. These values are preserved in the PDF; completion does not establish compatibility with CAD or TRICS.</p>}
-              <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={checkedPdf} aria-describedby={unmappedFields.length ? "review-mapping-limitations" : undefined} disabled={!pdfUrl || dirty || conflict || workspace.status !== "awaiting_final_review" || connection !== "ready" || busy} onChange={(event) => setCheckedPdf(event.target.checked)} />I have checked the current published PDF, its source labels{unmappedFields.length ? " and the mapping limitations above" : ""}.</label>
+              <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={checkedPdf} aria-describedby={unmappedFields.length ? "review-mapping-limitations" : undefined} disabled={!previewReady || dirty || conflict || workspace.status !== "awaiting_final_review" || connection !== "ready" || busy} onChange={(event) => setCheckedPdf(event.target.checked)} />I have checked the current published PDF, its source labels{unmappedFields.length ? " and the mapping limitations above" : ""}.</label>
               <button className={`${button} w-full bg-primary text-primary-foreground`} disabled={!completeAllowed} onClick={() => void mutate("approve")}>Mark specification complete</button>
               {!readOnly && <p className="text-sm text-muted-foreground">Completion records this exact published PDF. Relevant source or decision changes reopen review.</p>}
             </section>

@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/copy-pdfjs-assets.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-pdfjs-assets.mjs",
     "build": "next build",
     "start": "next start",
     "test:task-polling": "node --test tests/task-polling.test.mjs",
@@ -20,6 +22,7 @@
     "clsx": "2.1.1",
     "lucide-react": "^1.47.0",
     "next": "16.1.6",
+    "pdfjs-dist": "6.5.438",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",

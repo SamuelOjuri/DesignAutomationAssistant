@@ -69,6 +69,8 @@ export function installHarness(fixtures) {
   let receipts = new Map();
   let requests = [];
   let beforeAnalysis = null;
+  let malformedPdfResponses = scenario === "pdf_error" ? 1 : 0;
+  const pdfDocuments = new Map();
   const tell = (type, data) => parent.postMessage({ source: "specification-review-harness", type, data }, location.origin);
   const report = () => tell("requests", requests);
   const record = (path, method, body, headers) => {
@@ -152,16 +154,33 @@ export function installHarness(fixtures) {
   const error = (code, status) => json({ detail: { code, message: "Mocked boundary condition" } }, status);
   function audit() { return { actor: { app_user_id: "reviewer-local", monday_user_id: "10", monday_account_id: "1" }, saved_at: new Date().toISOString(), reviewed_source: clone(current.source.identity), explanation: null }; }
   function receipt(changed, approvalId = null) { return { review_version: current.review_version, source_fingerprint: current.source_fingerprint, decision_digest: current.decision_digest, desired_publication_identity: current.desired_publication_identity, approval_id: approvalId, changed, event_id: `event-${requests.length}` }; }
-  function pdfBytes() {
-    const lines = ["Performance Specification", `Item ${context.itemId}`, ...Object.entries(current.fields).flatMap(([label, field]) => [`${label}: ${field.effective.display_value ?? "Not assigned"}`, `Source: ${field.effective.source_label}`])];
-    const escaped = lines.map((line) => line.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)").replace(/[^\x20-\x7e]/g, "?"));
-    const stream = `BT /F1 10 Tf 30 800 Td 13 TL ${escaped.map((line) => `(${line}) Tj T*`).join(" ")} ET`;
-    const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];
+  function pdfBytes(revision) {
+    const key = `${context.itemId}:${revision}`;
+    if (pdfDocuments.has(key)) return pdfDocuments.get(key);
+    // Two real pages with different vector graphics let journeys prove PDF.js
+    // painted document content, navigated pages and discarded obsolete renders.
+    const escape = (line) => line.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)").replace(/[^\x20-\x7e]/g, "?");
+    const lines = ["Performance Specification", `Item ${context.itemId} | Revision ${revision}`, ...Object.entries(current.fields).flatMap(([label, field]) => [`${label}: ${field.effective.display_value ?? "Not assigned"}`, `Source: ${field.effective.source_label}`])];
+    const revisionColor = (Array.from(key).reduce((total, char) => total + char.charCodeAt(0), 0) % 7 + 1) / 10;
+    const streams = [
+      `q ${revisionColor} 0.2 0.3 rg 30 700 180 35 re f Q BT /F1 10 Tf 30 800 Td 13 TL ${lines.map((line) => `(${escape(line)}) Tj T*`).join(" ")} ET`,
+      `q 0.1 0.3 ${revisionColor} rg 270 540 230 140 re f Q BT /F1 16 Tf 30 800 Td (${escape(`Item ${context.itemId} | Revision ${revision} | Page 2`)}) Tj ET`,
+    ];
+    const objects = [
+      "<< /Type /Catalog /Pages 2 0 R >>",
+      "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+      "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+      `<< /Length ${streams[0].length} >>\nstream\n${streams[0]}\nendstream`,
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 7 0 R >>",
+      `<< /Length ${streams[1].length} >>\nstream\n${streams[1]}\nendstream`,
+    ];
     let text = "%PDF-1.4\n";
     const offsets = [0];
     objects.forEach((object, index) => { offsets.push(text.length); text += `${index + 1} 0 obj\n${object}\nendobj\n`; });
     const start = text.length;
-    text += `xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map((offset) => String(offset).padStart(10, "0") + " 00000 n \n").join("")}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`;
+    text += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => String(offset).padStart(10, "0") + " 00000 n \n").join("")}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`;
+    pdfDocuments.set(key, text);
     return text;
   }
   window.fetch = async (input, options = {}) => {
@@ -179,7 +198,12 @@ export function installHarness(fixtures) {
     if (expired) return error("authorization_expired", 401);
     const pathMatch = url.pathname.match(/\/items\/([^/]+)\/([^/]+)/);
     if (!pathMatch || pathMatch[1] !== context.boardId || pathMatch[2] !== context.itemId) return error("reviewer_forbidden", 403);
-    if (url.pathname.includes("/pdf/")) return new Response(pdfBytes(), { headers: { "Content-Type": "application/pdf" } });
+    if (url.pathname.includes("/pdf/")) {
+      const malformed = malformedPdfResponses > 0;
+      if (malformed) malformedPdfResponses--;
+      const bytes = malformed ? "This is not a PDF" : pdfBytes(decodeURIComponent(url.pathname.split("/").at(-1)));
+      return new Response(bytes, { headers: { "Content-Type": "application/pdf" } });
+    }
     if (method === "GET") {
       if (url.pathname.endsWith("/candidates")) return json({ candidates: clone(current.candidates), review_version: current.review_version, source_fingerprint: current.source_fingerprint });
       if (url.pathname.endsWith("/status")) { const { source, fields, review, candidates, history, ...status } = clone(current); return json(status); }

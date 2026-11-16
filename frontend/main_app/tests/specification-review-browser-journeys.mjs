@@ -15,11 +15,25 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     throw new Error(`Timed out: ${message}`);
   };
   const buttons = (root = documentOf()) => Array.from(root?.querySelectorAll("button") || []);
-  const button = (label, root) => buttons(root).find((element) => element.textContent.trim() === label);
+  const button = (label, root) => buttons(root).find((element) => element.textContent.trim() === label || element.getAttribute("aria-label") === label);
   const click = async (label, root) => { stage = `clicking ${label}`; const element = button(label, root); if (!element || element.disabled) throw new Error(`Unavailable button: ${label}`); element.click(); await delay(30); };
   const fieldset = (label) => Array.from(documentOf()?.querySelectorAll("fieldset") || []).find((element) => element.querySelector("legend")?.textContent.trim() === label);
   const sourceSections = () => Array.from(documentOf()?.querySelectorAll("section") || []).filter((element) => element.querySelector(":scope > h3")?.textContent.trim() === "Source needs review");
   const sourceChecks = () => sourceSections().map((element) => element.querySelector('input[type="checkbox"]'));
+  const canvas = () => documentOf()?.querySelector('[data-testid="specification-pdf-canvas"]');
+  const renderedCanvas = (page) => {
+    const element = canvas();
+    return element?.dataset.rendered === "true" && (!page || element.getAttribute("aria-label") === `Specification PDF page ${page} of 2`) ? element : null;
+  };
+  const previewHref = () => Array.from(documentOf()?.querySelectorAll("a") || []).find((element) => element.textContent.trim() === "Open PDF in new tab")?.href;
+  const pixels = () => canvas()?.getContext("2d").getImageData(0, 0, canvas().width, canvas().height).data;
+  const hasInk = () => {
+    const data = pixels();
+    for (let index = 0; data && index < data.length; index += 4) {
+      if (data[index + 3] > 0 && (data[index] < 220 || data[index + 1] < 220 || data[index + 2] < 220)) return true;
+    }
+    return false;
+  };
   function setInput(element, value) {
     if (!element) throw new Error("Missing editable input");
     const win = frame.contentWindow;
@@ -31,7 +45,7 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
   const edit = async (label, value) => { await click("Specify value", fieldset(label)); setInput(fieldset(label).querySelector("textarea"), value); await delay(30); };
   const wake = async () => { frame.contentWindow.dispatchEvent(new frame.contentWindow.Event("focus")); await delay(120); };
   const command = async (action) => { send(action); await delay(70); await wake(); };
-  const navigate = async (nextScenario) => {
+  const navigate = async (nextScenario, expectPreview = true) => {
     scenario = nextScenario;
     stage = `navigating to ${scenario}`;
     const previous = documentOf();
@@ -42,13 +56,43 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
         && new URL(current.location.href).searchParams.get("scenario") === scenario
         && text().includes("Specification fields") && fieldset("Decking");
     }, `${scenario} workspace`);
-    await waitFor(() => documentOf()?.querySelector('iframe[title="Current specification PDF preview"]'), "PDF loaded");
+    if (expectPreview) await waitFor(() => renderedCanvas(), "PDF painted on canvas");
     await delay(200);
   };
   const save = async (expectedStatus = "Regenerating PDF") => { await click("Save corrections and regenerate PDF"); await waitFor(() => text().includes(expectedStatus) && !text().includes("Working"), expectedStatus); };
-  const publish = async () => { await command("publish"); await waitFor(() => text().includes("Awaiting final review"), "published PDF state"); await waitFor(() => documentOf().querySelector('iframe[title="Current specification PDF preview"]'), "published preview loaded"); };
+  const publish = async () => {
+    const previousHref = previewHref();
+    await command("publish");
+    await waitFor(() => text().includes("Awaiting final review"), "published PDF state");
+    await waitFor(() => previewHref() && previewHref() !== previousHref && renderedCanvas(1), "new published revision painted");
+  };
   const acceptAll = async () => { for (const label of labels) { const use = button("Use recommendation", fieldset(label)); if (use && !use.disabled) { use.click(); await delay(20); } } };
   try {
+    await navigate("new_enquiry");
+    assert(hasInk() && !documentOf().querySelector('iframe[title="Current specification PDF preview"]'), "PDF pages render real pixels without a nested native PDF iframe");
+    assert(renderedCanvas(1) && text().includes("Page 1 of 2") && button("Previous page").disabled && !button("Next page").disabled, "PDF preview starts on the first page with accessible page controls");
+    const firstPage = canvas().toDataURL();
+    await click("Next page");
+    await waitFor(() => renderedCanvas(2) && canvas().toDataURL() !== firstPage, "second PDF page painted");
+    assert(hasInk() && button("Next page").disabled && !button("Previous page").disabled, "Page navigation paints different content and respects document bounds");
+    await click("Previous page");
+    await waitFor(() => renderedCanvas(1) && canvas().toDataURL() === firstPage, "first PDF page restored");
+    const originalCanvasWidth = canvas().width;
+    await click("Zoom in");
+    await waitFor(() => renderedCanvas(1) && canvas().width > originalCanvasWidth, "zoomed PDF painted");
+    assert(hasInk(), "Zoom changes the rendered PDF resolution while keeping document content");
+    await click("Zoom out");
+    await waitFor(() => renderedCanvas(1) && canvas().width === originalCanvasWidth, "fit-width PDF restored");
+
+    await navigate("pdf_error", false);
+    await waitFor(() => text().includes("The PDF preview could not be rendered."), "invalid PDF rendering error");
+    assert(previewHref()?.startsWith("blob:") && Array.from(documentOf().querySelectorAll("a")).some((element) => element.download && element.textContent.trim() === "Download PDF"), "Render failure retains protected Open and Download links");
+    assert(!renderedCanvas() && documentOf().querySelector('input[type="checkbox"]').disabled, "An unrendered PDF cannot enable final-check acknowledgement");
+    const failedFetches = latestRequests().filter((request) => request.path.includes("/pdf/")).length;
+    await click("Retry preview");
+    await waitFor(() => renderedCanvas(1), "valid PDF rendered after retry");
+    assert(hasInk() && latestRequests().filter((request) => request.path.includes("/pdf/")).length > failedFetches, "Preview retry refetches the protected PDF and recovers from rendering failure");
+
     await navigate("new_enquiry");
     assert(labels.every((label) => fieldset(label)), "All 18 specification fields render without a Task/chat page");
     await command("analysis_pending");
@@ -61,7 +105,7 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     assert(labels.every((label) => fieldset(label)), "A lightweight progress update preserves all displayed fields");
     await command("analysis_complete");
     await waitFor(() => !button("Specify value", fieldset("Decking")).disabled, "full analysis enables review controls");
-    await waitFor(() => documentOf().querySelector('iframe[title="Current specification PDF preview"]'), "completed analysis preview loaded");
+    await waitFor(() => renderedCanvas(1), "completed analysis preview painted");
     assert(button("Mark specification complete").disabled, "Completion requires saved classification and reviewed fields");
     for (const label of labels) assert(["Use recommendation", "Specify value", "Specify blank", "Restore recommendation"].every((action) => button(action, fieldset(label))), `${label} exposes all four distinct field actions`);
     await chooseType("new_enquiry");
@@ -127,8 +171,15 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     assert(fieldset("Contact").querySelector("textarea").value === "Draft survives session expiry", "SDK rebootstrap restores access without losing draft"); await save();
 
     await edit("Surveyor", "Discard only on item switch");
+    await waitFor(() => renderedCanvas(), "previous item PDF painted");
+    await click("Next page");
+    await waitFor(() => renderedCanvas(2), "previous item second page painted");
+    const previousItemHref = previewHref();
+    const previousItemPixels = canvas().toDataURL();
     await command("switch_item");
     await waitFor(() => text().includes("Item 102") && text().includes("Northgate Library roof"), "new Monday item context");
+    await waitFor(() => renderedCanvas(1) && previewHref() !== previousItemHref, "new item PDF painted from first page");
+    assert(hasInk() && canvas().toDataURL() !== previousItemPixels, "Switching items discards the previous document and resets the current page");
     assert(!text().includes("Discard only on item switch") && !documentOf().querySelector("textarea"), "Context switch clears old item credentials and draft state");
     const requests = latestRequests();
     assert(requests.some((request) => request.path.endsWith("/session") && request.body.context.itemId === "102") && requests.some((request) => request.path.includes("/items/100/102")), "New item context bootstraps a new scoped API session");
@@ -137,7 +188,8 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     assert(button("Update Published PDF") && !button("Specify value", fieldset("Decking")).disabled, "Moving to active groups preserves editing and separates publication");
     await command("complete_group");
     await waitFor(() => text().includes("Completed Folder"), "completed group read-only");
-    assert(button("Mark specification complete").disabled && documentOf().querySelector('iframe[title="Current specification PDF preview"]'), "Completed Folder disables mutations and retains authenticated PDF");
+    await waitFor(() => renderedCanvas(), "retained completed-item PDF painted");
+    assert(button("Mark specification complete").disabled && hasInk(), "Completed Folder disables mutations and retains authenticated PDF");
 
     await navigate("active");
     await waitFor(() => button("Publish Specification PDF") && !button("Publish Specification PDF").disabled, "initial draft ready");
@@ -154,7 +206,13 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     assert(latestRequests().filter((request) => request.path.endsWith("/publish")).length === 1, "Later source changes do not automatically publish");
     await click("View published PDF");
     await waitFor(() => button("Update Published PDF").disabled, "published version inspection");
+    await waitFor(() => renderedCanvas(1), "published document painted");
+    const publishedHref = previewHref();
+    await click("Next page");
+    await waitFor(() => renderedCanvas(2), "published document second page painted");
     await click("View draft PDF");
+    await waitFor(() => previewHref() !== publishedHref && renderedCanvas(1), "draft document painted from first page");
+    assert(hasInk(), "Switching between published and draft revisions resets the rendered document");
     await edit("Decking", "Reviewed active deck");
     assert(button("Update Published PDF").disabled, "Unsaved corrections block publication");
     await click("Save corrections");
@@ -192,14 +250,16 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     assert(text().includes("AB17221_25.01 - A") && text().includes("AB17221_25.02 - B") && text().includes("Several roofs are plausible"), "Ambiguous roof candidates remain separately reviewable");
     documentOf().querySelector('input[type="radio"][value="300:302"]').click(); await delay(40); await acceptAll();
     await command("regeneration_failure"); await save("Update failed; previous PDF available");
-    assert(button("Mark specification complete").disabled && documentOf().querySelector('iframe[title="Current specification PDF preview"]'), "Regeneration failure keeps previous PDF and blocks completion");
+    await waitFor(() => renderedCanvas(), "previous PDF remains painted after regeneration failure");
+    assert(button("Mark specification complete").disabled && hasInk(), "Regeneration failure keeps previous PDF and blocks completion");
     await click("Refresh recommendations"); await waitFor(() => text().includes("Regenerating PDF"), "retry queues PDF"); await publish();
 
     // Equivalent browser accessibility checks for this dedicated form surface.
     assert(Array.from(documentOf().querySelectorAll("input,select,textarea")).every((element) => element.labels.length > 0), "Every form control has a programmatically associated label");
-    assert(Array.from(documentOf().querySelectorAll("iframe")).every((element) => element.title.trim()), "PDF preview has an accessible iframe title");
+    assert(canvas()?.getAttribute("role") === "img" && /^Specification PDF page \d+ of \d+$/.test(canvas().getAttribute("aria-label")), "Rendered PDF page has an accessible image role and page label");
     const focusButton = button("Refresh recommendations"); focusButton.focus(); assert(documentOf().activeElement === focusButton, "Review actions are keyboard focusable");
-    const oldWidth = frame.style.width; frame.style.width = "360px"; await delay(250);
+    const oldWidth = frame.style.width; const wideCanvasWidth = canvas().width; frame.style.width = "360px";
+    await waitFor(() => renderedCanvas() && canvas().width < wideCanvasWidth, "PDF resized for narrow iframe");
     assert(documentOf().documentElement.scrollWidth <= frame.contentWindow.innerWidth + 2, "Workspace fits a 360px iframe without horizontal overflow"); frame.style.width = oldWidth;
     assert(!latestRequests().some((request) => /\/tasks|handoff|chat|change_column|move_item/.test(request.path)), "Browser journeys perform no chat ingestion or Monday business mutations");
     const result = { status: "passed", assertions: results.length, results };

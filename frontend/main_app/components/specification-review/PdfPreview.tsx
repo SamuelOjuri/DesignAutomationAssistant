@@ -2,6 +2,7 @@
 
 import { useId } from "react";
 import type { PdfArtifact } from "@/lib/specification-review-api";
+import PdfCanvasPreview from "./PdfCanvasPreview";
 
 export interface PdfPreviewProps {
   pdf: PdfArtifact | null;
@@ -11,9 +12,10 @@ export interface PdfPreviewProps {
   readOnly?: boolean;
   error?: string | null;
   onRetry?: () => void;
+  onRenderStateChange?: (url: string, ready: boolean) => void;
 }
 
-export default function PdfPreview({ pdf, publishedPdf, url, loading = false, readOnly = false, error, onRetry }: PdfPreviewProps) {
+export default function PdfPreview({ pdf, publishedPdf, url, loading = false, readOnly = false, error, onRetry, onRenderStateChange }: PdfPreviewProps) {
   const id = useId();
   const privatePreview = pdf && !pdf.published;
   return (
@@ -36,8 +38,7 @@ export default function PdfPreview({ pdf, publishedPdf, url, loading = false, re
             <a href={url} target="_blank" rel="noopener noreferrer" className="rounded-md font-semibold text-primary underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">Open PDF in new tab</a>
             <a href={url} download={pdf.filename} className="rounded-md font-semibold text-primary underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">Download PDF</a>
           </div>
-          <iframe src={url} title="Current specification PDF preview" className="mt-4 h-[34rem] w-full min-w-0 rounded-lg border bg-secondary" />
-          <p className="mt-2 text-xs text-muted-foreground">If the embedded preview is unavailable, use Open PDF in new tab or Download PDF.</p>
+          <PdfCanvasPreview key={url} url={url} onRetry={onRetry} onRenderStateChange={onRenderStateChange} />
         </>
       )}
       {!pdf && !loading && <p className="mt-4 text-sm text-muted-foreground">{readOnly ? "No specification PDF is available for this item." : "The PDF will appear here when a specification has been generated."}</p>}

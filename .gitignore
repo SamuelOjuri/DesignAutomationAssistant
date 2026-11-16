@@ -84,6 +84,8 @@ output/
 producer/
 .cursor/
 **/.next/
+# PDF.js browser assets are generated from the pinned npm package before dev/build.
+/frontend/main_app/public/pdfjs/
 test_jwt.py
 
 debug_extractions/

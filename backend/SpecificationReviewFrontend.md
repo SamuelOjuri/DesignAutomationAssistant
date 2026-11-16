@@ -19,7 +19,9 @@ and explicitly allowlisted checks remain Phase 8 work.
 | `components/specification-review/ReviewWorkspace.tsx` | Item-scoped bootstrap, draft ownership, polling, save/refresh/approval commands, conflict recovery, history and authenticated PDF lifecycle. |
 | `components/specification-review/FieldEditor.tsx` | All 18 PDF fields: saved effective value/source, email facts, CRM recommendations/evidence, issues, mapping notes and distinct reviewer operations. |
 | `components/specification-review/CandidateSelector.tsx` | Cited AI request-type recommendation and internal request/project/drawing choices, retaining separate roof candidates. |
-| `components/specification-review/PdfPreview.tsx` | Published/private preview state, authenticated blob iframe and open/download fallbacks. |
+| `components/specification-review/PdfPreview.tsx` | Published/private preview state, authenticated PDF preview and open/download fallbacks. |
+| `components/specification-review/PdfCanvasPreview.tsx` | PDF.js canvas rendering, page navigation, fit-width zoom, render errors and cancellation. |
+| `scripts/copy-pdfjs-assets.mjs` | Copies the pinned PDF.js worker, fonts, CMaps and decoders to versioned same-origin assets before dev/build. |
 | `components/specification-review/ReviewStatus.tsx` | Business-facing review/publication state. |
 | `components/specification-review/review.css` | Scoped focus, skip-link and narrow-layout styling. |
 | `lib/specification-review-api.ts` | Phase 6 types, private fetches and a bearer client that cannot be rebound to another item. |
@@ -45,6 +47,19 @@ current matching PDF is pending/failed, or its protected preview has not loaded
 and been checked. The approval command identifies the exact artifact revision,
 review version, source fingerprint, decision digest and publication identity.
 The server revalidates them and remains authoritative.
+
+The PDF preview renders the same authenticated, immutable PDF bytes using PDF.js
+inside the application, avoiding the native browser PDF viewer blocked by some
+ancestor iframe sandboxes. Page navigation and 50–200% fit-width zoom keep every
+page available in narrow Monday views. The worker and supporting assets are
+self-hosted at `/pdfjs/<package-version>/`; `npm run dev` and `npm run build`
+prepare them automatically. Deploy the generated `public/pdfjs` assets with the
+frontend, and permit same-origin workers in any additional host CSP. No public
+PDF URL, CDN dependency or URL credential is introduced. Open/download links
+retain the original PDF and provide selectable text; the canvas itself is a
+visual preview. A render failure offers a fresh authenticated retry. Final
+acknowledgement requires successful rendering of the current PDF; revision/item
+changes and rendering failures clear that acknowledgement.
 
 Polling updates publication/access state without replacing unsaved text. A
 source or concurrent-review change requires explicitly loading the latest
@@ -114,6 +129,12 @@ loads. Its target is restricted to localhost and it binds only to loopback.
 controls are under `tests/specification-review-fixture.mjs` and
 `tests/specification-review-harness.mjs`; application code imports neither.
 There is no production demo or test-auth route.
+
+The harness embeds the app beneath an ancestor sandbox and supplies real
+two-page PDF fixtures. Its journeys verify painted canvas pixels, page bounds,
+zoom, malformed-PDF retry, revision/item reset and responsive resizing, rather
+than merely checking that a preview element exists. These local checks do not
+establish the deployed Monday sandbox or host headers.
 
 Use the controls to exercise these journeys:
 
@@ -229,7 +250,7 @@ production enablement remain Phase 8.
    `CORS_ALLOWED_ORIGINS`, including support for Authorization headers. Otherwise
    use the existing same-origin Netlify API relay. Check the deployed route's
    final CSP/iframe headers; hosting overrides must not block Monday framing or
-   blob PDF frames. Test with third-party cookies blocked.
+   same-origin PDF.js workers/assets. Test with third-party cookies blocked.
 
 3. **Verify privately with specification shadow.** Set the following on the
    affected services and restart them together:
@@ -288,7 +309,7 @@ production enablement remain Phase 8.
    regeneration, inspection and exact-current-PDF approval. Verify all 18 fields,
    Reviewer Specified labels, candidate choices, stale saves, source changes,
    session renewal, item switching, narrow layout and keyboard access. Check PDF
-   iframe/open/download behaviour in Monday's actual sandbox. Confirm reviewer
+   canvas/open/download behaviour in Monday's actual sandbox. Confirm reviewer
    commands make no Monday business-field/project/drawing/group mutations. Move
    the item manually and verify retained read-only document access afterward.
 
