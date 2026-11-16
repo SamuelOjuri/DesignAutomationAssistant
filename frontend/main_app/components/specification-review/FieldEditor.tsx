@@ -17,6 +17,8 @@ export interface FieldEditorProps {
   operation?: FieldOperation;
   /** Saved completion state; omit when the review cannot currently be completed. */
   reviewState?: FieldReviewState;
+  /** Element id used by the field overview to jump to and focus this card. */
+  anchorId?: string;
   disabled?: boolean;
   onChange: (operation: FieldOperation) => void;
 }
@@ -60,7 +62,7 @@ function EvidenceColumn({ icon: Icon, title, children }: { icon: LucideIcon; tit
   );
 }
 
-export default function FieldEditor({ label, field, operation, reviewState, disabled = false, onChange }: FieldEditorProps) {
+export default function FieldEditor({ label, field, operation, reviewState, anchorId, disabled = false, onChange }: FieldEditorProps) {
   const id = useId();
   const textId = `${id}-value`;
   const hintId = `${id}-hint`;
@@ -88,8 +90,8 @@ export default function FieldEditor({ label, field, operation, reviewState, disa
   ];
 
   return (
-    <fieldset aria-describedby={hintId}
-      className={cn("relative min-w-0 overflow-hidden rounded-xl border bg-card text-card-foreground shadow-xs",
+    <fieldset id={anchorId} tabIndex={anchorId ? -1 : undefined} aria-describedby={hintId}
+      className={cn("relative min-w-0 overflow-hidden rounded-xl border bg-card text-card-foreground shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
         needsAttention && "border-warning/50", operation && "border-primary/50 ring-1 ring-primary/10")}>
       {/* A floated legend renders inside the card while still naming the fieldset. */}
       <legend className="float-left w-full border-b bg-muted/40 px-4 py-2.5 text-base font-semibold leading-6 sm:pr-80">{label}</legend>

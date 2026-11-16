@@ -13,6 +13,26 @@ export function fieldReviewState(field: Pick<ReviewField, "effective" | "issues"
   return field.decision ? "saved" : "optional";
 }
 
+export type FieldOverviewTone = "attention" | "awaiting" | "unsaved" | "saved" | "optional";
+
+/** Overview status for one field; an unsaved draft operation outranks its saved state. */
+export function fieldOverviewTone(state: FieldReviewState | undefined, unsaved: boolean): FieldOverviewTone | undefined {
+  if (unsaved) return "unsaved";
+  if (state === "reconfirm" || state === "resolve") return "attention";
+  if (state === "decide") return "awaiting";
+  return state;
+}
+
+export function summarizeFieldOverview<T extends { tone?: FieldOverviewTone }>(entries: T[]) {
+  const counts: Record<FieldOverviewTone, number> = { attention: 0, awaiting: 0, unsaved: 0, saved: 0, optional: 0 };
+  for (const entry of entries) if (entry.tone) counts[entry.tone] += 1;
+  return {
+    counts,
+    ready: counts.saved + counts.optional,
+    next: entries.find((entry) => entry.tone === "attention") ?? entries.find((entry) => entry.tone === "awaiting"),
+  };
+}
+
 export function emptyDraft(): ReviewDraft {
   return { selections: {}, field_operations: {}, source_dispositions: [] };
 }

@@ -9,7 +9,7 @@ import {
 import {
   emptyDraft, hasUnsavedChanges, saveCommand, approvalCommand, canComplete, canPublish, publicationCommand,
   mergeStatus, friendlyReviewError, sameReviewIdentity, updateSelection, updateField,
-  draftValidationErrors, fieldReviewState,
+  draftValidationErrors, fieldOverviewTone, fieldReviewState,
   completionIssues, rebaseDraft, sourceIssueAddressed, updateSourceDisposition,
 } from "@/lib/specification-review-state";
 import {
@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import FieldEditor from "./FieldEditor";
+import FieldOverview, { type FieldOverviewEntry } from "./FieldOverview";
 import CandidateSelector from "./CandidateSelector";
 import PdfPreview from "./PdfPreview";
 import ReviewStatus from "./ReviewStatus";
@@ -38,6 +39,8 @@ const panelHeader = "border-b px-4 py-4 sm:px-5 [.border-b]:pb-4";
 const panelTitle = "flex items-center gap-2 text-lg font-semibold leading-tight";
 const checkRow = "flex cursor-pointer items-start gap-3 rounded-lg border bg-muted/40 p-3 text-sm has-[:disabled]:cursor-not-allowed has-[:disabled]:text-muted-foreground";
 const checkbox = "mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+const fieldAnchor = (label: string) => `review-field-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 export default function ReviewWorkspace() {
   const [sdk, setSdk] = useState<MondayReviewSdk | null>(null);
@@ -340,6 +343,21 @@ export default function ReviewWorkspace() {
   };
   const decisionsNeeded = usable && !readOnly ? completionIssues(workspace) : [];
   const showFieldStatus = Boolean(usable && !readOnly && !analysisPending);
+  const fieldEntries: (FieldOverviewEntry & { label: (typeof FIELD_NAMES)[number]; state?: ReturnType<typeof fieldReviewState> })[] = usable
+    ? FIELD_NAMES.flatMap((label) => {
+      const field = workspace.fields[label];
+      if (!field) return [];
+      const state = showFieldStatus ? fieldReviewState(field) : undefined;
+      return [{ label, anchorId: fieldAnchor(label), state, tone: fieldOverviewTone(state, Boolean(draft.field_operations[label])) }];
+    }) : [];
+  // Selection edits can set several keys at once, so they count as one change.
+  const unsavedCount = Object.keys(draft.field_operations).length + (Object.keys(draft.selections).length ? 1 : 0) + draft.source_dispositions.length;
+  const stillNeeded = showFieldStatus && decisionsNeeded.length ? plural(decisionsNeeded.length, "decision still needed", "decisions still needed") : null;
+  const saveSummary = dirty
+    ? { dot: "bg-primary", title: plural(unsavedCount, "unsaved change", "unsaved changes"), detail: [stillNeeded, "completion unavailable until saved"] }
+    : readOnly ? { dot: "border border-muted-foreground/60", title: "Editing is unavailable in this view", detail: [] }
+      : analysisPending ? { dot: "bg-info", title: "Waiting for analysis and matching to finish", detail: [] }
+        : { dot: "bg-success", title: "All changes saved", detail: [stillNeeded ?? "no outstanding decisions"] };
   const sourceContext = !usable ? null : readOnly
     ? workspace.source ? "Saved source context retained" : "No source analysis available for review"
     : workspace.provisional ? "Current extraction available; matching and documents pending"
@@ -416,7 +434,8 @@ export default function ReviewWorkspace() {
                 <h2 id="review-fields-title" className="text-xl font-semibold tracking-tight">Specification fields</h2>
                 <p className="text-sm text-muted-foreground">{analysisPending ? "Validated source recommendations are available to read. Wait for analysis and matching to finish before making corrections." : readOnly ? "Any saved field values are shown for reference. Editing is unavailable in this view." : manualPublication ? "Save corrections to prepare a draft. Publish separately when ready. Entered values and intentional blanks display Source: Reviewer Specified." : "Save corrections to regenerate the PDF. Entered values and intentional blanks display Source: Reviewer Specified."}</p>
               </div>
-              {FIELD_NAMES.map((label) => workspace.fields[label] && <FieldEditor key={label} label={label} field={workspace.fields[label]!} operation={draft.field_operations[label]} reviewState={showFieldStatus ? fieldReviewState(workspace.fields[label]!) : undefined} disabled={!editable} onChange={(operation) => changeField(label, operation)} />)}
+              {fieldEntries.length > 0 && <FieldOverview entries={fieldEntries} showStatus={showFieldStatus} />}
+              {fieldEntries.map(({ label, anchorId, state }) => <FieldEditor key={label} anchorId={anchorId} label={label} field={workspace.fields[label]!} operation={draft.field_operations[label]} reviewState={state} disabled={!editable} onChange={(operation) => changeField(label, operation)} />)}
               {!workspace.source && <p className="rounded-xl border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">{readOnly ? "No specification fields are available for this item." : "Fields will appear when current source analysis is available."}</p>}
               {workspace.source?.source_issues.map((issue) => {
                 const id = `${issue.source_id}/${issue.code}`;
@@ -438,7 +457,8 @@ export default function ReviewWorkspace() {
                 </section>;
               })}
             </section>
-            <aside className="min-w-0 space-y-4 xl:sticky xl:top-4" aria-label="PDF and completion">
+            {/* Capped above the sticky save bar; the column scrolls independently when taller. */}
+            <aside className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:-mx-1 xl:max-h-[calc(100dvh-7rem)] xl:overflow-y-auto xl:px-1 xl:pb-1" aria-label="PDF and completion">
               {manualPublication && workspace.pdf && workspace.published_pdf && workspace.pdf.revision !== workspace.published_pdf.revision && (
                 <div className="flex gap-1 rounded-lg border bg-muted p-1" role="group" aria-label="Choose specification version">
                   <Button variant="ghost" size="sm" className="flex-1 aria-pressed:bg-card aria-pressed:shadow-xs" aria-pressed={!showPublished} onClick={() => setShowPublished(false)}>View draft PDF</Button>
@@ -485,14 +505,18 @@ export default function ReviewWorkspace() {
               </section>
             </aside>
           </div>
-          <section aria-label="Save review">
-            <Card className="flex-row flex-wrap items-center gap-3 px-4 py-4 sm:px-5">
+          <section aria-label="Save review" className="sticky bottom-0 z-30 -mx-1.5 bg-linear-to-t from-background from-70% to-background/0 px-1.5 pb-3 pt-2.5">
+            <Card className="flex-row flex-wrap items-center gap-3 border-input px-4 py-3 shadow-[0_10px_30px_rgb(15_23_42/0.14),0_2px_6px_rgb(15_23_42/0.06)] sm:px-5">
+              <p className="mr-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm" role="status">
+                <span className={`size-2 shrink-0 rounded-full ${saveSummary.dot}`} aria-hidden="true" />
+                <span className="font-semibold">{saveSummary.title}</span>
+                {saveSummary.detail.filter(Boolean).map((detail) => <span key={detail} className="text-muted-foreground">{" "}· {detail}</span>)}
+              </p>
               <Button disabled={!editable || !dirty || !workspace.source_fingerprint || Object.keys(draftValidationErrors(draft)).length > 0} onClick={() => void mutate("save")}>
                 {busy ? <Spinner role="presentation" aria-hidden="true" /> : <Save aria-hidden="true" />}{busy ? "Working…" : manualPublication ? "Save corrections" : "Save corrections and regenerate PDF"}
               </Button>
               {manualPublication && <Button disabled={!publishAllowed} onClick={() => void mutate("publish")}><Send aria-hidden="true" />{workspace.published_pdf ? "Update Published PDF" : "Publish Specification PDF"}</Button>}
               <Button variant="outline" disabled={!editable || dirty || !workspace.source_fingerprint} onClick={() => void mutate("refresh")}><RefreshCw aria-hidden="true" />Refresh recommendations</Button>
-              {dirty && <p className="flex items-center gap-2 text-sm font-medium text-warning-foreground sm:ml-auto"><span className="size-2 rounded-full bg-warning" aria-hidden="true" />Unsaved corrections · completion is unavailable</p>}
             </Card>
           </section>
           <section aria-labelledby="history-title">

@@ -16,7 +16,8 @@ and explicitly allowlisted checks remain Phase 8 work.
 | Location under `frontend/main_app` | Responsibility |
 | --- | --- |
 | `app/specification-review/page.tsx` | Dedicated route, page title and no-index metadata. |
-| `components/specification-review/ReviewWorkspace.tsx` | Item-scoped bootstrap, draft ownership, polling, save/refresh/approval commands, conflict recovery, history and authenticated PDF lifecycle. |
+| `components/specification-review/ReviewWorkspace.tsx` | Item-scoped bootstrap, draft ownership, polling, save/refresh/approval commands in a sticky save bar, conflict recovery, history and authenticated PDF lifecycle. |
+| `components/specification-review/FieldOverview.tsx` | Field status summary and progress, with jump links and **Next to review** that scroll to and focus the matching field card. |
 | `components/specification-review/FieldEditor.tsx` | All 18 PDF fields: saved value beside the current recommendation, email facts, CRM recommendations/evidence, issues, mapping notes, a per-field completion badge and distinct reviewer operations. |
 | `components/specification-review/CandidateSelector.tsx` | Cited AI request-type recommendation and internal request/project/drawing choices, retaining separate roof candidates. |
 | `components/specification-review/PdfPreview.tsx` | Published/private preview state, authenticated PDF preview and open/download fallbacks. |

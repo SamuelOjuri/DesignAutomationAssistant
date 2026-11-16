@@ -34,3 +34,6 @@
 }
 
 .specification-review textarea { resize: vertical; }
+
+/* Keep jump targets clear of the top edge and focused controls clear of the sticky save bar. */
+html:has(.specification-review) { scroll-padding-top: 1rem; scroll-padding-bottom: 7rem; }

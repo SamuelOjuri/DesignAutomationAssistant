@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  approvalCommand, canComplete, canPublish, publicationCommand, completionIssues, draftValidationErrors, emptyDraft, fieldReviewState, hasUnsavedChanges,
-  mergeStatus, rebaseDraft, sameReviewIdentity, saveCommand, sourceIssueAddressed, updateField, updateSelection, updateSourceDisposition,
+  approvalCommand, canComplete, canPublish, publicationCommand, completionIssues, draftValidationErrors, emptyDraft, fieldOverviewTone, fieldReviewState, hasUnsavedChanges,
+  mergeStatus, rebaseDraft, sameReviewIdentity, saveCommand, sourceIssueAddressed, summarizeFieldOverview, updateField, updateSelection, updateSourceDisposition,
 } from "../lib/specification-review-state.ts";
 import { FIELD_NAMES } from "../lib/specification-review-api.ts";
 
@@ -208,6 +208,24 @@ test("field review state distinguishes blocking, saved and optional fields", () 
   assert.equal(fieldReviewState(field("email_context", { decision: saved })), "saved");
   assert.equal(fieldReviewState(field("unassigned")), "optional");
   assert.equal(fieldReviewState(field("default_blank")), "optional");
+});
+
+test("field overview ranks unsaved edits first and points to the next blocking field", () => {
+  assert.equal(fieldOverviewTone("saved", true), "unsaved");
+  assert.equal(fieldOverviewTone("reconfirm", false), "attention");
+  assert.equal(fieldOverviewTone("resolve", false), "attention");
+  assert.equal(fieldOverviewTone("decide", false), "awaiting");
+  assert.equal(fieldOverviewTone(undefined, false), undefined);
+  const entries = [
+    { label: "Scale", tone: "saved" }, { label: "Revision", tone: "awaiting" }, { label: "Company", tone: "attention" },
+    { label: "Contact", tone: "unsaved" }, { label: "Incoming Information", tone: "optional" }, { label: "VCL" },
+  ];
+  const summary = summarizeFieldOverview(entries);
+  assert.deepEqual(summary.counts, { attention: 1, awaiting: 1, unsaved: 1, saved: 1, optional: 1 });
+  assert.equal(summary.ready, 2);
+  assert.equal(summary.next.label, "Company");
+  assert.equal(summarizeFieldOverview(entries.filter((entry) => entry.tone !== "attention")).next.label, "Revision");
+  assert.equal(summarizeFieldOverview([{ tone: "saved" }]).next, undefined);
 });
 
 test("amendment completion requires an active selected drawing under the selected project", () => {
