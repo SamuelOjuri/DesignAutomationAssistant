@@ -8,26 +8,28 @@ export interface ReviewStatusContext {
   analysis?: AnalysisProgress | null;
 }
 
+export type ReviewStatusTone = "neutral" | "warning" | "info" | "success";
+
 export interface ReviewStatusDescription {
   title: string;
   detail: string;
-  tone: string;
+  tone: ReviewStatusTone;
 }
 
 const descriptions: Record<string, ReviewStatusDescription> = {
-  preparing_draft: { title: "Preparing draft PDF", detail: "Preparing the current recommendations and saved corrections. The published PDF remains unchanged.", tone: "bg-secondary text-foreground" },
-  ready_to_publish: { title: "Unpublished changes ready for review", detail: "Inspect the draft and recommended changes, then publish when ready. Opening this view and saving corrections do not publish in active groups.", tone: "bg-amber-50 text-amber-950" },
-  changes_recommended: { title: "Publication changes recommended", detail: "Review the latest recommendations. The published PDF remains unchanged until you publish an updated draft.", tone: "bg-amber-50 text-amber-950" },
-  publishing_pdf: { title: "Publishing PDF", detail: "Publishing the draft you requested. The previous PDF is retained until the replacement succeeds.", tone: "bg-secondary text-foreground" },
-  source_waiting: { title: "Waiting for source analysis", detail: "Current email and attachment analysis is not ready yet. This view will check for updates.", tone: "bg-secondary text-foreground" },
-  analysis_pending: { title: "Validated fields available", detail: "The current email and attachment fields are shown below. Matching and document preparation are still pending. Editing and completion become available when analysis finishes.", tone: "bg-secondary text-foreground" },
-  source_unavailable: { title: "Sources temporarily unavailable", detail: "Recommendations could not be checked. Your saved decisions and the previous PDF are retained.", tone: "bg-amber-50 text-amber-950" },
-  needs_review: { title: "Needs review", detail: "Check the request, drawing choices and field recommendations, then save your corrections.", tone: "bg-amber-50 text-amber-950" },
-  regenerating_pdf: { title: "Regenerating PDF", detail: "Saved decisions are waiting for their matching PDF. Completion is unavailable until publication succeeds.", tone: "bg-secondary text-foreground" },
-  awaiting_final_review: { title: "Awaiting final review", detail: "Check the current published PDF before marking this specification complete.", tone: "bg-accent text-primary" },
-  complete: { title: "Complete", detail: "The current published specification has been reviewed. A relevant source or decision change will reopen review.", tone: "bg-emerald-50 text-emerald-950" },
-  publication_failed: { title: "Update failed; previous PDF available", detail: "Your decisions remain saved. Retry the update before completing the specification.", tone: "bg-amber-50 text-amber-950" },
-  review_required_again: { title: "Review required again", detail: "Relevant sources have changed. Your saved decisions are retained; check them against the new context.", tone: "bg-amber-50 text-amber-950" },
+  preparing_draft: { title: "Preparing draft PDF", detail: "Preparing the current recommendations and saved corrections. The published PDF remains unchanged.", tone: "neutral" },
+  ready_to_publish: { title: "Unpublished changes ready for review", detail: "Inspect the draft and recommended changes, then publish when ready. Opening this view and saving corrections do not publish in active groups.", tone: "warning" },
+  changes_recommended: { title: "Publication changes recommended", detail: "Review the latest recommendations. The published PDF remains unchanged until you publish an updated draft.", tone: "warning" },
+  publishing_pdf: { title: "Publishing PDF", detail: "Publishing the draft you requested. The previous PDF is retained until the replacement succeeds.", tone: "neutral" },
+  source_waiting: { title: "Waiting for source analysis", detail: "Current email and attachment analysis is not ready yet. This view will check for updates.", tone: "neutral" },
+  analysis_pending: { title: "Validated fields available", detail: "The current email and attachment fields are shown below. Matching and document preparation are still pending. Editing and completion become available when analysis finishes.", tone: "neutral" },
+  source_unavailable: { title: "Sources temporarily unavailable", detail: "Recommendations could not be checked. Your saved decisions and the previous PDF are retained.", tone: "warning" },
+  needs_review: { title: "Needs review", detail: "Check the request, drawing choices and field recommendations, then save your corrections.", tone: "warning" },
+  regenerating_pdf: { title: "Regenerating PDF", detail: "Saved decisions are waiting for their matching PDF. Completion is unavailable until publication succeeds.", tone: "neutral" },
+  awaiting_final_review: { title: "Awaiting final review", detail: "Check the current published PDF before marking this specification complete.", tone: "info" },
+  complete: { title: "Complete", detail: "The current published specification has been reviewed. A relevant source or decision change will reopen review.", tone: "success" },
+  publication_failed: { title: "Update failed; previous PDF available", detail: "Your decisions remain saved. Retry the update before completing the specification.", tone: "warning" },
+  review_required_again: { title: "Review required again", detail: "Relevant sources have changed. Your saved decisions are retained; check them against the new context.", tone: "warning" },
 };
 
 const readOnlyReasons: Record<string, { title: string; reason: string }> = {
@@ -56,7 +58,7 @@ export function getReviewStatusDescription({
         "Any saved decisions are retained.",
         hasPdf ? "The retained PDF remains available to inspect." : "No PDF is available in this view.",
       ].filter(Boolean).join(" "),
-      tone: "bg-secondary text-foreground",
+      tone: "neutral",
     };
   }
   if (status === "source_unavailable" && !hasPdf) {

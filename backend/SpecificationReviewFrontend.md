@@ -17,15 +17,16 @@ and explicitly allowlisted checks remain Phase 8 work.
 | --- | --- |
 | `app/specification-review/page.tsx` | Dedicated route, page title and no-index metadata. |
 | `components/specification-review/ReviewWorkspace.tsx` | Item-scoped bootstrap, draft ownership, polling, save/refresh/approval commands, conflict recovery, history and authenticated PDF lifecycle. |
-| `components/specification-review/FieldEditor.tsx` | All 18 PDF fields: saved effective value/source, email facts, CRM recommendations/evidence, issues, mapping notes and distinct reviewer operations. |
+| `components/specification-review/FieldEditor.tsx` | All 18 PDF fields: saved value beside the current recommendation, email facts, CRM recommendations/evidence, issues, mapping notes, a per-field completion badge and distinct reviewer operations. |
 | `components/specification-review/CandidateSelector.tsx` | Cited AI request-type recommendation and internal request/project/drawing choices, retaining separate roof candidates. |
 | `components/specification-review/PdfPreview.tsx` | Published/private preview state, authenticated PDF preview and open/download fallbacks. |
 | `components/specification-review/PdfCanvasPreview.tsx` | PDF.js canvas rendering, page navigation, fit-width zoom, render errors and cancellation. |
 | `scripts/copy-pdfjs-assets.mjs` | Copies the pinned PDF.js worker, fonts, CMaps and decoders to versioned same-origin assets before dev/build. |
 | `components/specification-review/ReviewStatus.tsx` | Business-facing review/publication state. |
-| `components/specification-review/review.css` | Scoped focus, skip-link and narrow-layout styling. |
+| `components/specification-review/review.css` | Neutral theme tokens (including success/warning/info/brand) scoped to the review workspace so other pages keep the app theme. |
+| `components/ui/*` | shadcn/ui primitives (Tailwind v4 registry) used by the review: button, badge, card, alert, label, textarea, native select, skeleton and spinner. Native form controls are kept for accessible labels and the browser journeys. |
 | `lib/specification-review-api.ts` | Phase 6 types, private fetches and a bearer client that cannot be rebound to another item. |
-| `lib/specification-review-state.ts` | Draft validation, exact identities, command construction, safe status merging, conflict rebasing and completion blockers. |
+| `lib/specification-review-state.ts` | Draft validation, exact identities, command construction, safe status merging, conflict rebasing, per-field review state and completion blockers. |
 | `lib/specification-review-monday.ts` | Official SDK loading, context/session reads, context subscription, cancellation/timeouts and top-level OAuth opening. |
 
 The editor offers **Use recommendation**, **Specify value**, **Specify blank**

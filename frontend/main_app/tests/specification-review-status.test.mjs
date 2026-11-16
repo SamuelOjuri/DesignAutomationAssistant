@@ -66,7 +66,7 @@ test("normal source waiting preserves the existing description without claiming 
   const description = getReviewStatusDescription({ status: "source_waiting" });
   assert.equal(description.title, "Waiting for source analysis");
   assert.equal(description.detail, "Current email and attachment analysis is not ready yet. This view will check for updates.");
-  assert.equal(description.tone, "bg-secondary text-foreground");
+  assert.equal(description.tone, "neutral");
   assert.doesNotMatch(description.detail, /queued|running|retained PDF/i);
 });
 

@@ -1,8 +1,36 @@
-.specification-review { overflow-wrap: anywhere; }
-.specification-review :is(button, a, input, select, textarea):focus-visible { outline: 3px solid hsl(var(--ring)); outline-offset: 3px; }
-.specification-review :is(input, select, textarea) { max-width: 100%; }
+/*
+ * Specification Review uses a neutral theme scoped to this workspace so selected,
+ * primary and error states stay distinct. Other pages keep the app theme.
+ */
+.specification-review {
+  --background: 220 20% 97%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 222 47% 11%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 220 14% 95%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 9% 38%;
+  --accent: 220 14% 93%;
+  --accent-foreground: 222 47% 11%;
+  --destructive: 0 72% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 13% 87%;
+  --input: 220 11% 75%;
+  --ring: 221 83% 53%;
+  --success: 158 64% 32%;
+  --success-foreground: 160 84% 18%;
+  --warning: 36 92% 46%;
+  --warning-foreground: 25 80% 24%;
+  --info: 221 83% 53%;
+  --info-foreground: 224 64% 33%;
+  --brand: 3 61% 39%;
+  --radius: 0.625rem;
+  overflow-wrap: anywhere;
+}
+
 .specification-review textarea { resize: vertical; }
-.review-skip { position: fixed; top: -100px; left: 1rem; z-index: 50; background: white; padding: .75rem; }
-.review-skip:focus { top: 1rem; }
-.review-button { min-height: 44px; }
-@media (max-width: 480px) { .specification-review { padding: .75rem; } .specification-review .review-button { white-space: normal; } }

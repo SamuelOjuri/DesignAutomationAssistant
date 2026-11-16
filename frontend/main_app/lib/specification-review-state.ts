@@ -1,7 +1,17 @@
 import type {
-  ApproveCommand, PublishCommand, FieldName, FieldOperation, ReviewDraft, ReviewSelections,
+  ApproveCommand, PublishCommand, FieldName, FieldOperation, ReviewDraft, ReviewField, ReviewSelections,
   ReviewStatus, ReviewStatusSnapshot, ReviewWorkspace, SaveDecisionsCommand, SourceIssue,
 } from "./specification-review-api.ts";
+
+export type FieldReviewState = "reconfirm" | "resolve" | "decide" | "saved" | "optional";
+
+/** Per-field completion state for saved review data; reconfirm/resolve/decide block completion. */
+export function fieldReviewState(field: Pick<ReviewField, "effective" | "issues" | "decision">): FieldReviewState {
+  if (field.effective.requires_reconfirmation) return "reconfirm";
+  if (field.effective.source === "unavailable" || (field.issues.length > 0 && !field.decision)) return "resolve";
+  if (!["reviewer_specified", "unassigned", "default_blank"].includes(field.effective.source) && !field.decision) return "decide";
+  return field.decision ? "saved" : "optional";
+}
 
 export function emptyDraft(): ReviewDraft {
   return { selections: {}, field_operations: {}, source_dispositions: [] };
@@ -116,9 +126,10 @@ export function completionIssues(workspace: ReviewWorkspace): string[] {
     issues.push("Select a currently active drawing for this project.");
   }
   for (const [label, field] of Object.entries(workspace.fields)) {
-    if (field.effective.requires_reconfirmation) issues.push(`Reconfirm ${label} against the current sources.`);
-    else if (field.effective.source === "unavailable" || (field.issues.length > 0 && !field.decision)) issues.push(`Resolve ${label}.`);
-    else if (!["reviewer_specified", "unassigned", "default_blank"].includes(field.effective.source) && !field.decision) issues.push(`Accept or specify ${label}.`);
+    const state = fieldReviewState(field);
+    if (state === "reconfirm") issues.push(`Reconfirm ${label} against the current sources.`);
+    else if (state === "resolve") issues.push(`Resolve ${label}.`);
+    else if (state === "decide") issues.push(`Accept or specify ${label}.`);
   }
   for (const issue of source.source_issues) {
     if (!sourceIssueAddressed(workspace, issue)) issues.push(`Review source issue: ${issue.detail}`);

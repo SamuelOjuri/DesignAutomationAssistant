@@ -23,6 +23,7 @@
     "lucide-react": "^1.47.0",
     "next": "16.1.6",
     "pdfjs-dist": "6.5.438",
+    "radix-ui": "^1.8.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",

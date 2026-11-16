@@ -1,15 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, CircleAlert, Minus, Plus } from "lucide-react";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
 
 interface PdfCanvasPreviewProps {
   url: string;
   onRetry?: () => void;
   onRenderStateChange?: (url: string, ready: boolean) => void;
 }
-
-const control = "review-button rounded-md border bg-card px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50";
 
 /** Render the authenticated in-memory PDF without invoking a browser PDF plugin. */
 export default function PdfCanvasPreview({ url, onRetry, onRenderStateChange }: PdfCanvasPreviewProps) {
@@ -108,29 +112,42 @@ export default function PdfCanvasPreview({ url, onRetry, onRenderStateChange }: 
   }, [pdf, pageNumber, zoom, width, failed, renderKey, url, onRenderStateChange]);
 
   return (
-    <div className="mt-4 min-w-0">
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="PDF preview controls">
-        <button type="button" className={control} aria-label="Previous page" disabled={!pdf || failed || pageNumber <= 1} onClick={() => setPageNumber((page) => page - 1)}>Previous</button>
-        <span className="text-sm" aria-live="polite">{pdf ? `Page ${pageNumber} of ${pdf.numPages}` : "Loading pages"}</span>
-        <button type="button" className={control} aria-label="Next page" disabled={!pdf || failed || pageNumber >= pdf.numPages} onClick={() => setPageNumber((page) => page + 1)}>Next</button>
-        <button type="button" className={control} aria-label="Zoom out" disabled={!pdf || failed || zoom <= 0.5} onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}>−</button>
-        <span className="text-sm" aria-label="PDF zoom">{Math.round(zoom * 100)}%</span>
-        <button type="button" className={control} aria-label="Zoom in" disabled={!pdf || failed || zoom >= 2} onClick={() => setZoom((value) => Math.min(2, value + 0.25))}>+</button>
-        <button type="button" className={control} disabled={!pdf || failed || zoom === 1} onClick={() => setZoom(1)}>Fit width</button>
+    <div className="min-w-0 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/60 p-1.5" role="group" aria-label="PDF preview controls">
+        <div className="flex items-center gap-1">
+          <Button type="button" variant="outline" size="icon-sm" aria-label="Previous page" disabled={!pdf || failed || pageNumber <= 1} onClick={() => setPageNumber((page) => page - 1)}><ChevronLeft aria-hidden="true" /></Button>
+          <span className="min-w-24 px-1 text-center text-sm font-medium tabular-nums" aria-live="polite">{pdf ? `Page ${pageNumber} of ${pdf.numPages}` : "Loading pages"}</span>
+          <Button type="button" variant="outline" size="icon-sm" aria-label="Next page" disabled={!pdf || failed || pageNumber >= pdf.numPages} onClick={() => setPageNumber((page) => page + 1)}><ChevronRight aria-hidden="true" /></Button>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button type="button" variant="outline" size="icon-sm" aria-label="Zoom out" disabled={!pdf || failed || zoom <= 0.5} onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}><Minus aria-hidden="true" /></Button>
+          <span className="w-12 text-center text-sm tabular-nums" aria-label="PDF zoom">{Math.round(zoom * 100)}%</span>
+          <Button type="button" variant="outline" size="icon-sm" aria-label="Zoom in" disabled={!pdf || failed || zoom >= 2} onClick={() => setZoom((value) => Math.min(2, value + 0.25))}><Plus aria-hidden="true" /></Button>
+          <Button type="button" variant="outline" size="sm" disabled={!pdf || failed || zoom === 1} onClick={() => setZoom(1)}>Fit width</Button>
+        </div>
       </div>
       {failed ? (
-        <div className="mt-3 rounded-md border border-destructive/40 bg-accent p-3 text-sm" role="alert">
-          <p>The PDF preview could not be rendered. You can still open or download the PDF.</p>
-          {onRetry && <button type="button" className={`${control} mt-2`} onClick={onRetry}>Retry preview</button>}
-        </div>
-      ) : <p className="my-2 text-xs text-muted-foreground" role="status">{rendered ? `Showing page ${pageNumber} of ${pdf?.numPages}.` : "Rendering PDF preview…"}</p>}
-      <div ref={viewportRef} className="max-h-[34rem] min-h-48 overflow-auto rounded-lg border bg-secondary p-3" style={{ scrollbarGutter: "stable" }} role="region" aria-label="Specification PDF pages" tabIndex={0} aria-busy={!rendered && !failed}>
+        <Alert variant="destructive" className="bg-card" role="alert">
+          <CircleAlert className="size-4" aria-hidden="true" />
+          <AlertDescription className="space-y-2">
+            <p>The PDF preview could not be rendered. You can still open or download the PDF.</p>
+            {onRetry && <Button type="button" variant="outline" size="sm" onClick={onRetry}>Retry preview</Button>}
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <p className={cn(rendered ? "sr-only" : "flex items-center gap-2 text-xs text-muted-foreground")} role="status">
+          {!rendered && <Spinner role="presentation" aria-hidden="true" className="size-3.5" />}
+          {rendered ? `Showing page ${pageNumber} of ${pdf?.numPages}.` : "Rendering PDF preview…"}
+        </p>
+      )}
+      <div ref={viewportRef} className="max-h-[34rem] min-h-48 overflow-auto rounded-lg border bg-muted p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" style={{ scrollbarGutter: "stable" }} role="region" aria-label="Specification PDF pages" tabIndex={0} aria-busy={!rendered && !failed}>
+        {!rendered && !failed && <Skeleton className="mx-auto aspect-[1/1.414] w-full max-w-md bg-card" />}
         {/* A new canvas per page/size prevents overlapping PDF.js render tasks. */}
-        <canvas key={renderKey} ref={canvasRef} role="img" aria-label={`Specification PDF page ${pageNumber} of ${pdf?.numPages ?? "unknown"}`} data-testid="specification-pdf-canvas" data-rendered={rendered ? "true" : "false"} className={`mx-auto bg-white shadow-sm ${rendered ? "" : "hidden"}`}>
+        <canvas key={renderKey} ref={canvasRef} role="img" aria-label={`Specification PDF page ${pageNumber} of ${pdf?.numPages ?? "unknown"}`} data-testid="specification-pdf-canvas" data-rendered={rendered ? "true" : "false"} className={`mx-auto rounded-sm bg-white shadow-md ring-1 ring-black/5 ${rendered ? "" : "hidden"}`}>
           Use Open PDF in new tab or Download PDF to read this document.
         </canvas>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">Use the page controls to review the document. Open or download the PDF for selectable text.</p>
+      <p className="text-xs text-muted-foreground">Use the page controls to review the document. Open or download the PDF for selectable text.</p>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  approvalCommand, canComplete, canPublish, publicationCommand, completionIssues, draftValidationErrors, emptyDraft, hasUnsavedChanges,
+  approvalCommand, canComplete, canPublish, publicationCommand, completionIssues, draftValidationErrors, emptyDraft, fieldReviewState, hasUnsavedChanges,
   mergeStatus, rebaseDraft, sameReviewIdentity, saveCommand, sourceIssueAddressed, updateField, updateSelection, updateSourceDisposition,
 } from "../lib/specification-review-state.ts";
 import { FIELD_NAMES } from "../lib/specification-review-api.ts";
@@ -195,6 +195,19 @@ test("completion requires a saved request type and explicit field choices while 
   reviewed.fields.Decking.effective.source = "reviewer_specified";
   reviewed.fields.Decking.decision = { decision: { operation: "specify_blank" } };
   assert.deepEqual(completionIssues(reviewed), []);
+});
+
+test("field review state distinguishes blocking, saved and optional fields", () => {
+  const field = (source, { decision = null, issues = [], reconfirm = false } = {}) => ({
+    effective: { source, requires_reconfirmation: reconfirm }, issues, decision });
+  const saved = { decision: { operation: "accept_recommendation" } };
+  assert.equal(fieldReviewState(field("email_context", { decision: saved, reconfirm: true })), "reconfirm");
+  assert.equal(fieldReviewState(field("unavailable")), "resolve");
+  assert.equal(fieldReviewState(field("monday_crm", { issues: [{ code: "conflict", detail: "Conflict" }] })), "resolve");
+  assert.equal(fieldReviewState(field("email_context")), "decide");
+  assert.equal(fieldReviewState(field("email_context", { decision: saved })), "saved");
+  assert.equal(fieldReviewState(field("unassigned")), "optional");
+  assert.equal(fieldReviewState(field("default_blank")), "optional");
 });
 
 test("amendment completion requires an active selected drawing under the selected project", () => {
