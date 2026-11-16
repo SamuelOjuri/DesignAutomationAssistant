@@ -1,6 +1,6 @@
 import type {
   ApproveCommand, PublishCommand, FieldName, FieldOperation, ReviewDraft, ReviewSelections,
-  ReviewStatus, ReviewStatusSnapshot, ReviewWorkspace, SaveDecisionsCommand,
+  ReviewStatus, ReviewStatusSnapshot, ReviewWorkspace, SaveDecisionsCommand, SourceIssue,
 } from "./specification-review-api.ts";
 
 export function emptyDraft(): ReviewDraft {
@@ -20,6 +20,21 @@ export function updateSelection(draft: ReviewDraft, patch: Partial<ReviewSelecti
   // A drawing from another project must never silently survive a project choice.
   if ("selected_project" in patch && !("selected_drawing" in patch)) selections.selected_drawing = null;
   return { ...draft, selections };
+}
+
+/** Confirmations apply only to the source version the reviewer checked. */
+export function sourceIssueAddressed(workspace: ReviewWorkspace, issue: SourceIssue): boolean {
+  const source = workspace.source;
+  return Boolean(source && workspace.review.source_dispositions.some((entry) =>
+    entry.source_id === issue.source_id && entry.issue_code === issue.code
+    && (entry.addressed ?? Boolean(entry.explanation?.trim()))
+    && Object.entries(source.identity).every(([key, value]) => entry.audit.reviewed_source[key as keyof typeof source.identity] === value)));
+}
+
+export function updateSourceDisposition(draft: ReviewDraft, workspace: ReviewWorkspace, issue: SourceIssue, addressed: boolean): ReviewDraft {
+  const remaining = draft.source_dispositions.filter((entry) => !(entry.source_id === issue.source_id && entry.issue_code === issue.code));
+  return { ...draft, source_dispositions: addressed === sourceIssueAddressed(workspace, issue) ? remaining
+    : [...remaining, { source_id: issue.source_id, issue_code: issue.code, addressed }] };
 }
 
 /** Explicit conflict recovery preserves typed corrections; recommendations must be reviewed again. */
@@ -74,7 +89,6 @@ export function commandIdentity(workspace: ReviewStatusSnapshot, idempotencyKey:
 
 export function saveCommand(workspace: ReviewWorkspace, draft: ReviewDraft, idempotencyKey: string): SaveDecisionsCommand {
   if (Object.keys(draftValidationErrors(draft)).length) throw new Error("Check the highlighted field entries.");
-  if (draft.source_dispositions.some((entry) => !entry.explanation.trim())) throw new Error("Explain each source issue disposition before saving.");
   return { schema_version: 1, ...commandIdentity(workspace, idempotencyKey),
     selections: { ...draft.selections }, field_operations: structuredClone(draft.field_operations),
     source_dispositions: structuredClone(draft.source_dispositions) };
@@ -107,9 +121,7 @@ export function completionIssues(workspace: ReviewWorkspace): string[] {
     else if (!["reviewer_specified", "unassigned", "default_blank"].includes(field.effective.source) && !field.decision) issues.push(`Accept or specify ${label}.`);
   }
   for (const issue of source.source_issues) {
-    const addressed = workspace.review.source_dispositions.some((entry) => entry.source_id === issue.source_id && entry.issue_code === issue.code
-      && Object.entries(source.identity).every(([key, value]) => entry.audit.reviewed_source[key as keyof typeof source.identity] === value));
-    if (!addressed) issues.push(`Review source issue: ${issue.detail}`);
+    if (!sourceIssueAddressed(workspace, issue)) issues.push(`Review source issue: ${issue.detail}`);
   }
   return issues;
 }

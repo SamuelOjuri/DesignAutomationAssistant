@@ -36,6 +36,22 @@ reuse an earlier click to publish changed content. Saved overrides remain retain
 and can require reconfirmation. **Mark specification complete** approves the exact
 published PDF separately. Historical PDFs and approvals remain retained.
 
+Each **Source needs review** warning has an **I confirm this source issue has been
+addressed** checkbox. Review the flagged file or missing information, check the
+box, and use **Save corrections** to record the confirmation. No written
+explanation is required. Saved confirmations retain the reviewer, time and source
+version, and existing explanation-based reviews remain valid for their reviewed
+sources. Uncheck and save to withdraw a confirmation. Source changes require
+renewed confirmation, and every current warning must be confirmed before marking
+the specification complete. The warnings remain visible; checkboxes do not read
+unsupported files or change specification fields.
+
+Deploy backend support before the updated frontend: checkbox commands include
+`addressed: true` or `addressed: false`, which older backends do not accept.
+These values use the existing JSON storage and need no database migration.
+Older backends also cannot read saved boolean acknowledgements, so retain this
+contract support when rolling back other changes.
+
 ## API and persistence
 
 `POST /api/specification-review/items/{board_id}/{item_id}/publish` accepts

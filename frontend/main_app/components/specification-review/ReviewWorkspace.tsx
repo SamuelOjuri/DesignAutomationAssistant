@@ -10,7 +10,7 @@ import {
   emptyDraft, hasUnsavedChanges, saveCommand, approvalCommand, canComplete, canPublish, publicationCommand,
   mergeStatus, friendlyReviewError, sameReviewIdentity, updateSelection, updateField,
   draftValidationErrors,
-  completionIssues, rebaseDraft,
+  completionIssues, rebaseDraft, sourceIssueAddressed, updateSourceDisposition,
 } from "@/lib/specification-review-state";
 import {
   loadMondayReviewSdk, getMondayReviewSession, listenMondayReviewContext,
@@ -365,15 +365,18 @@ export default function ReviewWorkspace() {
               const id = `${issue.source_id}/${issue.code}`;
               const disposition = draft.source_dispositions.find((entry) => entry.source_id === issue.source_id && entry.issue_code === issue.code);
               const saved = workspace.review.source_dispositions.find((entry) => entry.source_id === issue.source_id && entry.issue_code === issue.code);
+              const addressed = sourceIssueAddressed(workspace, issue);
               return <section key={id} className="space-y-2 rounded-md border border-amber-300 bg-white p-4">
                 <h3 className="font-medium">Source needs review</h3><p className="text-sm">{issue.detail}</p>
-                {saved && <p className="text-sm">Previous disposition: {saved.explanation}</p>}
-                <label className="block text-sm">Reviewed disposition for {issue.source_id}
-                  <textarea className="mt-1 w-full rounded border p-2" rows={2} maxLength={4000} disabled={!editable} value={disposition?.explanation || ""} placeholder="Explain how you checked or addressed this source issue" onChange={(event) => {
-                    const explanation = event.target.value;
-                    setDraft((value) => ({ ...value, source_dispositions: [...value.source_dispositions.filter((entry) => !(entry.source_id === issue.source_id && entry.issue_code === issue.code)), ...(explanation ? [{ source_id: issue.source_id, issue_code: issue.code, explanation }] : [])] }));
+                <label className="flex items-start gap-2 text-sm">
+                  <input type="checkbox" className="mt-1" disabled={!editable} checked={disposition?.addressed ?? addressed} onChange={(event) => {
+                    const checked = event.target.checked;
+                    setDraft((value) => updateSourceDisposition(value, workspace, issue, checked));
+                    setCheckedPdf(false);
                   }} />
+                  I confirm this source issue has been addressed.
                 </label>
+                {saved && (saved.addressed ?? Boolean(saved.explanation?.trim())) && !addressed && <p className="text-sm text-muted-foreground">The sources have changed. Review this issue again before confirming it.</p>}
               </section>;
             })}
           </section>
@@ -405,7 +408,7 @@ export default function ReviewWorkspace() {
           </aside>
         </div>
         <section className="flex flex-wrap items-center gap-3 rounded-lg border bg-white p-4" aria-label="Save review">
-          <button className={`${button} bg-primary text-primary-foreground`} disabled={!editable || !dirty || !workspace.source_fingerprint || Object.keys(draftValidationErrors(draft)).length > 0 || draft.source_dispositions.some((entry) => !entry.explanation.trim())} onClick={() => void mutate("save")}>{busy ? "Working…" : manualPublication ? "Save corrections" : "Save corrections and regenerate PDF"}</button>
+          <button className={`${button} bg-primary text-primary-foreground`} disabled={!editable || !dirty || !workspace.source_fingerprint || Object.keys(draftValidationErrors(draft)).length > 0} onClick={() => void mutate("save")}>{busy ? "Working…" : manualPublication ? "Save corrections" : "Save corrections and regenerate PDF"}</button>
           {manualPublication && <button className={`${button} bg-primary text-primary-foreground`} disabled={!publishAllowed} onClick={() => void mutate("publish")}>{workspace.published_pdf ? "Update Published PDF" : "Publish Specification PDF"}</button>}
           <button className={button} disabled={!editable || dirty || !workspace.source_fingerprint} onClick={() => void mutate("refresh")}>Refresh recommendations</button>
           {dirty && <p className="text-sm">Unsaved corrections · completion is unavailable</p>}

@@ -2,6 +2,20 @@
 export const FIELD_NAMES = ["Scale", "Page Size", "Drawing Reference", "Drawing Title", "Bauder Contract Number", "Bauder Roof Num", "Incoming Information", "Revision", "Date Received", "Company", "Contact", "Surveyor", "Target U Value", "Target Min U Value", "Membrane", "Tapered Insulation", "VCL", "Decking"];
 
 export function createFixture(scenario = "new_enquiry", itemId = "101") {
+  if (scenario === "source_reviews") {
+    const result = createFixture("new_enquiry", itemId);
+    result.source.source_issues = [
+      { source_id: "archive:member:1", code: "unsupported_archive_member", detail: "roof_scan.mtl was not read; review this material file manually if needed." },
+      { source_id: "archive:member:2", code: "unsupported_archive_member", detail: "roof_scan.obj was not read; review this model manually if needed." },
+      { source_id: "request:missing-client-email", code: "missing_client_email", detail: "No client email was provided; confirm the requester and requested work." },
+    ];
+    result.review.source_dispositions = [{ source_id: "archive:member:1", issue_code: "unsupported_archive_member",
+      explanation: "Checked the material file manually before this update.", audit: {
+        actor: { app_user_id: "reviewer-local", monday_user_id: "10", monday_account_id: "1" },
+        saved_at: "2026-11-09T10:00:00Z", reviewed_source: structuredClone(result.source.identity), explanation: null,
+      } }];
+    return result;
+  }
   if (scenario === "active") {
     const result = createFixture("new_enquiry", itemId);
     result.publication_mode = "manual";
@@ -208,7 +222,11 @@ export function installHarness(fixtures) {
         const manual = ["specify_value", "specify_blank"].includes(operation.operation);
         field.effective = { ...field.effective, display_value: operation.operation === "specify_value" ? operation.display_value : operation.operation === "specify_blank" ? "" : field.proposal.display_value, source: manual ? "reviewer_specified" : field.proposal.source, source_label: manual ? "Reviewer Specified" : field.proposal.source === "email_context" ? "Email Context" : field.proposal.source === "monday_crm" ? "Monday CRM recommendation" : field.proposal.source === "unassigned" ? "Not assigned" : "Default blank", reviewer_accepted: operation.operation === "accept_recommendation", requires_reconfirmation: false };
       }
-      for (const disposition of body.source_dispositions || []) current.review.source_dispositions.push({ ...disposition, audit: audit() });
+      for (const disposition of body.source_dispositions || []) {
+        current.review.source_dispositions = current.review.source_dispositions.filter((entry) =>
+          entry.source_id !== disposition.source_id || entry.issue_code !== disposition.issue_code);
+        current.review.source_dispositions.push({ ...disposition, audit: audit() });
+      }
       current.review_version++; current.review.review_version = current.review_version;
       current.decision_digest = `decisions-${context.itemId}-${current.review_version}`;
       current.desired_publication_identity = `publication-${context.itemId}-${current.review_version}`;

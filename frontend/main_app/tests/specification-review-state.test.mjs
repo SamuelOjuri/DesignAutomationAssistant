@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   approvalCommand, canComplete, canPublish, publicationCommand, completionIssues, draftValidationErrors, emptyDraft, hasUnsavedChanges,
-  mergeStatus, rebaseDraft, sameReviewIdentity, saveCommand, updateField, updateSelection,
+  mergeStatus, rebaseDraft, sameReviewIdentity, saveCommand, sourceIssueAddressed, updateField, updateSelection, updateSourceDisposition,
 } from "../lib/specification-review-state.ts";
 import { FIELD_NAMES } from "../lib/specification-review-api.ts";
 
@@ -224,12 +224,56 @@ test("source changes require reconfirmed choices and current source dispositions
   assert.deepEqual(completionIssues(reviewed), []);
 });
 
+test("source issue checkboxes save explicit acknowledgements and revocations without prose", () => {
+  const reviewed = reviewedWorkspace();
+  const issue = { source_id: "attachment-1", code: "unread_file", detail: "Unread attachment" };
+  reviewed.source.source_issues.push(issue);
+  assert.equal(sourceIssueAddressed(reviewed, issue), false);
+  const draft = updateSourceDisposition(emptyDraft(), reviewed, issue, true);
+  assert.deepEqual(saveCommand(reviewed, draft, "confirm-source").source_dispositions, [
+    { source_id: issue.source_id, issue_code: issue.code, addressed: true },
+  ]);
+  assert.equal(canComplete(reviewed, draft, "revision-1"), false, "Unsaved confirmation cannot complete review");
+  assert.deepEqual(updateSourceDisposition(draft, reviewed, issue, false), emptyDraft(), "Unticking an unsaved confirmation cancels it");
+  reviewed.review.source_dispositions.push({ source_id: issue.source_id, issue_code: issue.code,
+    addressed: true, audit: { reviewed_source: reviewed.source.identity } });
+  assert.equal(sourceIssueAddressed(reviewed, issue), true);
+  assert.deepEqual(completionIssues(reviewed), []);
+  const revoked = updateSourceDisposition(emptyDraft(), reviewed, issue, false);
+  assert.deepEqual(saveCommand(reviewed, revoked, "revoke-source").source_dispositions, [
+    { source_id: issue.source_id, issue_code: issue.code, addressed: false },
+  ]);
+  assert.deepEqual(updateSourceDisposition(revoked, reviewed, issue, true), emptyDraft(), "Reticking cancels an unsaved revocation");
+  reviewed.review.source_dispositions[0].addressed = false;
+  assert.equal(sourceIssueAddressed(reviewed, issue), false);
+  assert.deepEqual(completionIssues(reviewed), ["Review source issue: Unread attachment"]);
+});
+
+test("source confirmations retain legacy notes but require the current complete source identity", () => {
+  const reviewed = reviewedWorkspace();
+  const issue = { source_id: "attachment-1", code: "unread_file", detail: "Unread attachment" };
+  reviewed.source.source_issues.push(issue);
+  const saved = { source_id: issue.source_id, issue_code: issue.code, explanation: "Previously checked manually",
+    audit: { reviewed_source: { ...reviewed.source.identity } } };
+  reviewed.review.source_dispositions.push(saved);
+  assert.equal(sourceIssueAddressed(reviewed, issue), true, "Existing explanation-only reviews remain addressed");
+  for (const key of Object.keys(reviewed.source.identity)) {
+    saved.audit.reviewed_source = { ...reviewed.source.identity, [key]: "superseded" };
+    assert.equal(sourceIssueAddressed(reviewed, issue), false, `${key} change requires renewed confirmation`);
+    const draft = updateSourceDisposition(emptyDraft(), reviewed, issue, true);
+    assert.equal(draft.source_dispositions[0].addressed, true);
+  }
+  saved.audit.reviewed_source = { ...reviewed.source.identity };
+  saved.explanation = "  ";
+  assert.equal(sourceIssueAddressed(reviewed, issue), false, "An empty legacy record does not count as a confirmation");
+});
+
 test("explicit draft rebasing preserves manual text, blanks and restore but drops stale acceptances and source acknowledgements", () => {
   const draft = {
     selections: { selected_request_type: "amendment" },
     field_operations: { Contact: { operation: "specify_value", display_value: "Keep my text" }, Revision: { operation: "specify_blank" },
       Decking: { operation: "restore_recommendation" }, Company: { operation: "accept_recommendation", proposal_id: "old-proposal" } },
-    source_dispositions: [{ source_id: "file", issue_code: "unread", explanation: "Old acknowledgement" }],
+    source_dispositions: [{ source_id: "file", issue_code: "unread", addressed: true }],
   };
   const rebased = rebaseDraft(draft);
   assert.deepEqual(rebased.field_operations, { Contact: draft.field_operations.Contact, Revision: draft.field_operations.Revision, Decking: draft.field_operations.Decking });

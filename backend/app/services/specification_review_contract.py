@@ -351,10 +351,21 @@ FieldCommand = Annotated[
 class SourceDispositionCommand(ReviewModel):
     source_id: NonemptyText
     issue_code: NonemptyText
-    explanation: NonemptyText
+    addressed: bool = Field(default=True, strict=True)
+    explanation: NonemptyText | None = None
+
+    @model_validator(mode="after")
+    def check_acknowledgement(self):
+        if "addressed" not in self.model_fields_set and self.explanation is None:
+            # Older clients submitted a prose disposition instead of a checkbox.
+            # An empty new command must never silently acknowledge a warning.
+            raise ValueError("Explicitly acknowledge or reopen the source issue")
+        return self
 
 
 class SourceDisposition(SourceDispositionCommand):
+    # Historical saved prose dispositions already acknowledged the warning.
+    addressed: bool = Field(default=True, strict=True)
     audit: DecisionAudit
 
 

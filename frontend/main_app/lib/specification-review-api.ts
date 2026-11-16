@@ -58,8 +58,10 @@ export type FieldOperation = { operation: "accept_recommendation"; proposal_id: 
   | { operation: "specify_blank" }
   | { operation: "restore_recommendation" };
 export type SourceIssue = { source_id: string; code: string; detail: string };
-export type SourceDispositionCommand = { source_id: string; issue_code: string; explanation: string };
-export type SourceDisposition = SourceDispositionCommand & { audit: DecisionAudit };
+export type SourceDispositionCommand = { source_id: string; issue_code: string; addressed: boolean };
+export type SourceDisposition = {
+  source_id: string; issue_code: string; addressed?: boolean; explanation?: string | null; audit: DecisionAudit;
+};
 export type ReviewSelections = {
   selected_request_type: RequestType | null; selected_project: MondayRecord | null; selected_drawing: MondayRecord | null;
 };

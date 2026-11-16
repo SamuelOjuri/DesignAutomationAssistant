@@ -335,6 +335,10 @@ def _command_digest(kind, command):
     if isinstance(command, SaveReviewDecisions):
         # Selection omission is a patch; explicit null is a deliberate clear.
         body["selections"] = command.selections.model_dump(mode="json", exclude_unset=True) if command.selections is not None else None
+        for disposition in body["source_dispositions"]:
+            if disposition["addressed"] and disposition["explanation"] is not None:
+                # Retried legacy prose commands keep their original receipt digest.
+                disposition.pop("addressed")
         body["source_dispositions"] = sorted(body["source_dispositions"], key=lambda entry: (entry["source_id"], entry["issue_code"]))
     return review_digest({"command": kind, "body": body})
 
@@ -416,7 +420,12 @@ def save_review_decisions(db, *, board_id, item_id, actor: ReviewActor,
             key = (disposition.source_id, disposition.issue_code)
             if key not in issues:
                 raise ReviewConflict("source_changed", "Source issue is not part of the current recommendations")
-            dispositions[key] = SourceDisposition(**disposition.model_dump(), audit=audit)
+            previous = dispositions.get(key)
+            values = disposition.model_dump()
+            if values["explanation"] is None and previous is not None:
+                # Checkbox updates preserve any historical prose disposition.
+                values["explanation"] = previous.explanation
+            dispositions[key] = SourceDisposition(**values, audit=audit)
         after.source_dispositions = [dispositions[key] for key in sorted(dispositions)]
         changed = decision_digest(before) != decision_digest(after)
         if changed:
@@ -454,7 +463,7 @@ def _approval_ready(state, source, metadata):
         if field["source"] not in {"reviewer_specified", "unassigned", "default_blank"} and label not in state.field_decisions:
             raise ReviewConflict("stale_review", "Accept or specify each populated recommendation")
     addressed = {(entry.source_id, entry.issue_code) for entry in state.source_dispositions
-                 if entry.audit.reviewed_source == source.identity}
+                 if entry.addressed and entry.audit.reviewed_source == source.identity}
     if any((issue.source_id, issue.code) not in addressed for issue in source.source_issues):
         raise ReviewConflict("source_unavailable", "Review outstanding source issues")
 

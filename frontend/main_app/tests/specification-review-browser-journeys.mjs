@@ -18,6 +18,8 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
   const button = (label, root) => buttons(root).find((element) => element.textContent.trim() === label);
   const click = async (label, root) => { stage = `clicking ${label}`; const element = button(label, root); if (!element || element.disabled) throw new Error(`Unavailable button: ${label}`); element.click(); await delay(30); };
   const fieldset = (label) => Array.from(documentOf()?.querySelectorAll("fieldset") || []).find((element) => element.querySelector("legend")?.textContent.trim() === label);
+  const sourceSections = () => Array.from(documentOf()?.querySelectorAll("section") || []).filter((element) => element.querySelector(":scope > h3")?.textContent.trim() === "Source needs review");
+  const sourceChecks = () => sourceSections().map((element) => element.querySelector('input[type="checkbox"]'));
   function setInput(element, value) {
     if (!element) throw new Error("Missing editable input");
     const win = frame.contentWindow;
@@ -161,6 +163,29 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     await click("Update Published PDF");
     await waitFor(() => text().includes("Awaiting final review"), "explicit replacement publication");
     assert(latestRequests().filter((request) => request.path.endsWith("/publish")).length === 2, "Each active publication requires a separate explicit request");
+
+    await navigate("source_reviews");
+    assert(sourceSections().length === 3 && sourceChecks().every(Boolean), "Each flagged source has its own confirmation checkbox");
+    assert(sourceSections().every((element) => !element.querySelector("textarea") && element.textContent.includes("I confirm this source issue has been addressed.")), "Source review requires a labelled checkbox without an explanation textbox");
+    assert(sourceChecks()[0].checked && !sourceChecks()[1].checked && !sourceChecks()[2].checked, "A current legacy review remains checked while unreviewed sources need confirmation");
+    await chooseType("new_enquiry"); await acceptAll();
+    sourceChecks()[1].click(); sourceChecks()[2].click(); await delay(40);
+    await save();
+    const confirmedSources = latestRequests().filter((request) => request.path.endsWith("/decisions")).at(-1).body.source_dispositions;
+    assert(confirmedSources.length === 2 && confirmedSources.every((entry) => entry.addressed === true && !("explanation" in entry)), "Checking source warnings saves boolean confirmations without written explanations");
+    await waitFor(() => sourceChecks().every((element) => element.checked), "saved source confirmations retained");
+    assert(sourceSections().length === 3, "Confirmed source warnings remain visible for reference");
+    sourceChecks()[1].click(); await delay(40); await save();
+    const revokedSource = latestRequests().filter((request) => request.path.endsWith("/decisions")).at(-1).body.source_dispositions;
+    assert(revokedSource.length === 1 && revokedSource[0].addressed === false, "Unticking a saved source confirmation sends an explicit revocation");
+    await waitFor(() => !sourceChecks()[1].checked, "revoked source remains unchecked");
+    assert(text().includes("Review source issue: roof_scan.obj"), "A revoked source confirmation requires review again before completion");
+    await command("sources_change");
+    await waitFor(() => sourceChecks().every((element) => !element.checked), "changed sources require renewed confirmations");
+    assert(text().includes("The sources have changed. Review this issue again before confirming it."), "Source changes explain why previous confirmations need renewal");
+    await command("complete_group");
+    await waitFor(() => sourceChecks().every((element) => element.disabled), "excluded item source controls are read-only");
+    assert(sourceChecks().every((element) => element.labels.length > 0), "Source confirmation checkboxes have associated accessible labels");
 
     await navigate("ambiguous");
     await chooseType("amendment"); documentOf().querySelector('input[type="radio"][value="200:201"]').click(); await delay(40);

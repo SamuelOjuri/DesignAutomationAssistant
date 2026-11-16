@@ -54,6 +54,9 @@ def decision_digest(state: ReviewDecisionState) -> str:
                 "issue_code": disposition.issue_code,
                 "explanation": disposition.explanation,
                 "reviewed_source": disposition.audit.reviewed_source.model_dump(mode="json"),
+                # True is the historical meaning of a saved prose disposition.
+                # Keep its digest stable; an explicit uncheck changes meaning.
+                **({"addressed": False} if not disposition.addressed else {}),
             } for disposition in state.source_dispositions
         ], key=lambda entry: (entry["source_id"], entry["issue_code"])),
     })
