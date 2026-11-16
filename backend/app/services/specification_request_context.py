@@ -64,7 +64,9 @@ def email_messages(text):
     # Apple reply headers are boundaries too, even when they cannot establish
     # recipients for selecting a new client request.
     apple = r"On (.+?), at (\d{1,2}:\d{2}(?::\d{2})?), (.+?<[^>]+>) wrote:"
-    starts = [match.start() for match in re.finditer(r"(?mi)^(?:From:(?:[ \t]|\n)|" + apple + r")", text)]
+    # Outlook HTML uses non-breaking spaces after header labels. Recognize
+    # those delimiters without rewriting the source text used for citations.
+    starts = [match.start() for match in re.finditer(r"(?mi)^(?:From:(?:[ \t\u00a0]|\n)|" + apple + r")", text)]
     messages = []
     for index, start in enumerate(starts):
         block = text[start:starts[index + 1] if index + 1 < len(starts) else len(text)]
@@ -86,7 +88,7 @@ def email_messages(text):
             if not line.strip():
                 after_blank = True
                 continue  # Outlook puts blank lines between forwarded headers.
-            match = re.match(r"^(From|To|Cc|Bcc|Subject|Date|Sent|Importance):[ \t]*(.*)$", line, re.I)
+            match = re.match(r"^(From|To|Cc|Bcc|Subject|Date|Sent|Importance):[ \t\u00a0]*(.*)$", line, re.I)
             if match:
                 key = match[1].lower()
                 values.setdefault(key, []).append(match[2])
