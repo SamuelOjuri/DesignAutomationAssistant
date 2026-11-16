@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import hashlib
 from html.parser import HTMLParser
 import io
+import logging
 from pathlib import Path
 import tempfile
 from zipfile import BadZipFile, ZipFile
@@ -22,13 +23,16 @@ from pypdf.errors import PdfReadError
 from ..gemini_requests import GeminiRequestFailure, source_failure_details as gemini_failure_details
 from ..spreadsheet_extraction import extract_spreadsheet_documents, is_spreadsheet
 from ..specification_semantics import (
-    ANIMATED_IMAGE_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS, COMPLETE_SOURCE_STATUSES, DWG_SKIP_STATUS,
-    ENCRYPTED_PDF_SKIP_STATUS, PROVIDER_RECITATION_REVIEW_STATUS, UNSUPPORTED_SOURCE_SKIP_STATUS,
+    ANIMATED_IMAGE_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS, ARCHIVE_MEMBER_REVIEW_STATUS,
+    COMPLETE_SOURCE_STATUSES, DWG_SKIP_STATUS,
+    ENCRYPTED_PDF_SKIP_STATUS, OVERSIZED_ARCHIVE_REVIEW_STATUS,
+    PROVIDER_RECITATION_REVIEW_STATUS, UNSUPPORTED_SOURCE_SKIP_STATUS,
 )
 from ..specification_image_text import literal_image_regions
 from ..source_text import clean_source_text
 
 
+logger = logging.getLogger(__name__)
 MAX_SOURCE_BYTES = 40 * 1024 * 1024
 MAX_ARCHIVE_EXPANDED_BYTES = 100 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 200
@@ -72,6 +76,50 @@ class SourceDocumentError(ValueError):
         super().__init__(message)
 
 
+class OversizedArchiveReview(SourceDocumentError):
+    """An unchanged ZIP size policy requires manual source review, not a retry."""
+
+
+def _oversized_archive_error():
+    return OversizedArchiveReview("source_size_limit",
+        "ZIP exceeds the 40 MiB processing limit and was not extracted. "
+        "Review the original ZIP manually and record necessary specification corrections, "
+        "or supply smaller files for processing.")
+
+
+def _mark_archive_review(record, error):
+    record["status"] = OVERSIZED_ARCHIVE_REVIEW_STATUS
+    record["error"] = error.details
+    logger.info("ZIP requires manual review: source_id=%s size_bytes=%s limit_bytes=%s",
+                record["sourceId"], record["sizeBytes"], MAX_SOURCE_BYTES)
+    return record
+
+
+def oversized_archive_file_record(path, filename, *, source_id, file_extension=None):
+    """Audit an oversized downloaded ZIP without loading its bytes into memory.
+
+    The caller verifies the streamed hash/size against its download identity.
+    The archive is never opened; this is a manual-review referral, not extraction.
+    """
+    if (Path(filename).suffix.lower() != ".zip"
+            and str(file_extension or "").strip().lower() not in {"zip", ".zip"}):
+        return None
+    path = Path(path)
+    if path.stat().st_size <= MAX_SOURCE_BYTES:
+        return None
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+            size += len(chunk)
+    return _mark_archive_review({
+        "sourceId": source_id, "filename": filename, "sourceType": "attachment",
+        "contentSha256": digest.hexdigest(), "sizeBytes": size,
+        "observedAt": None, "text": "",
+    }, _oversized_archive_error())
+
+
 class UnsupportedSourceFormat(SourceDocumentError):
     def __init__(self):
         super().__init__("unsupported_source_format", "Unsupported source format; skipped during extraction.")
@@ -88,6 +136,14 @@ def _document_skip_status(filename):
 
 def _archive_member_skip_status(filename):
     return None if Path(filename).suffix.lower() == ".zip" else _document_skip_status(filename)
+
+
+def _archive_member_metadata_only(filename):
+    # These unsupported TaperedView mesh/material files are retained for manual
+    # inspection. Reading their uncompressed bytes would add no model evidence.
+    # Other unsupported formats keep the existing hashed/expansion-bounded path.
+    return (Path(filename).suffix.lower() in {".obj", ".mtl"}
+            and _archive_member_skip_status(filename) == UNSUPPORTED_SOURCE_SKIP_STATUS)
 
 
 def source_failure_details(exc):
@@ -202,7 +258,12 @@ def extract_document(content: bytes, filename: str, extractor, *, extraction_met
             path.write_bytes(content)
             documents = extract_spreadsheet_documents(str(path), filename, visible_only=True, preserve_full_cells=True,
                                                       max_file_bytes=MAX_SOURCE_BYTES,
-                                                      max_sheets=MAX_DESIGN_WORKSHEETS)
+                                                      max_sheets=MAX_DESIGN_WORKSHEETS, truncate_sheets=True)
+        if extraction_metadata is not None and any(
+                doc["section"] == "spreadsheet:worksheet-limit" for doc in documents):
+            extraction_metadata["spreadsheetExtraction"] = {
+                "worksheetLimit": MAX_DESIGN_WORKSHEETS, "visibleOnly": True, "truncated": True,
+            }
         notices = [doc["notice"] for doc in documents if doc["section"] == "spreadsheet:extraction-notice"]
         if notices:
             advice = ("Recalculate and save uncached formulas in Excel, or supply a smaller readable export."
@@ -284,7 +345,8 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
         if (Path(filename).suffix.lower() == ".zip"
                 or str(file_extension or "").strip().lower() in {"zip", ".zip"}):
             budget = _archive_budget if _archive_budget is not None else _ArchiveBudget()
-            _extract_archive(content, filename, extractor, source_id, observed_at, budget, _archive_depth, records, on_source)
+            _extract_archive(content, filename, extractor, source_id, observed_at, budget, _archive_depth,
+                             records, on_source, archive_sha256=record["contentSha256"])
             record["status"] = ARCHIVE_EXPANDED_STATUS
         else:
             text = extract_document(content, filename, extractor, extraction_metadata=record)
@@ -316,6 +378,8 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
         record["status"] = UNSUPPORTED_SOURCE_SKIP_STATUS
     except EncryptedPdfSkipped:
         record["status"] = ENCRYPTED_PDF_SKIP_STATUS
+    except OversizedArchiveReview as exc:
+        _mark_archive_review(record, exc)
     except Exception as exc:
         record["status"] = (PROVIDER_RECITATION_REVIEW_STATUS if _provider_recitation(exc)
                             else "failed:" + type(exc).__name__)
@@ -327,9 +391,10 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
     return records
 
 
-def _extract_archive(content, filename, extractor, source_id, observed_at, budget, depth, records, on_source=None):
+def _extract_archive(content, filename, extractor, source_id, observed_at, budget, depth, records,
+                     on_source=None, *, archive_sha256):
     if len(content) > MAX_SOURCE_BYTES:
-        raise SourceDocumentError("source_size_limit", "ZIP exceeds the 40 MiB source size limit; split the archive.")
+        raise _oversized_archive_error()
     if depth >= MAX_ARCHIVE_DEPTH:
         raise SourceDocumentError("archive_depth_limit", "ZIP exceeds the three-level nesting limit; flatten the archive.")
     try:
@@ -341,10 +406,20 @@ def _extract_archive(content, filename, extractor, source_id, observed_at, budge
             files = [entry for entry in entries if not entry.is_dir()]
             if not files:
                 raise SourceDocumentError("empty_archive", "ZIP contains no documents; supply an archive with readable documents.")
-            if any(entry.file_size > MAX_SOURCE_BYTES and _archive_member_skip_status(entry.filename) is None
-                   for entry in files):
+            oversized = [entry for entry in files if entry.file_size > MAX_SOURCE_BYTES
+                         and _archive_member_skip_status(entry.filename) is None]
+            if oversized:
+                if all(Path(entry.filename).suffix.lower() == ".zip" for entry in oversized):
+                    raise OversizedArchiveReview("archive_member_size_limit",
+                        "ZIP contains a nested ZIP exceeding the 40 MiB processing limit and was not extracted. "
+                        "Review the original ZIP manually and record necessary specification corrections, "
+                        "or supply smaller files for processing.")
                 raise SourceDocumentError("archive_member_size_limit", "ZIP contains a supported file exceeding the 40 MiB source size limit; supply smaller documents.")
-            budget.expanded_bytes += sum(entry.file_size for entry in files)
+            # Only OBJ/MTL entries below stay compressed and therefore incur no
+            # expansion work. All other members, including ordinary unsupported
+            # formats, still count against the unchanged shared byte allowance.
+            budget.expanded_bytes += sum(entry.file_size for entry in files
+                                         if not _archive_member_metadata_only(entry.filename))
             if budget.expanded_bytes > MAX_ARCHIVE_EXPANDED_BYTES:
                 raise SourceDocumentError("archive_expansion_limit", "ZIP exceeds the 100 MiB total expansion limit including nested archives; split the archive.")
             if any(entry.flag_bits & 1 for entry in files):
@@ -356,6 +431,23 @@ def _extract_archive(content, filename, extractor, source_id, observed_at, budge
                         on_source({"sourceId": f"{source_id}:member:{index}", "status": "pending"})
             for index, entry in enumerate(entries):
                 if entry.is_dir():
+                    continue
+                if _archive_member_metadata_only(entry.filename):
+                    # No member hash or CRC validation is claimed: the identity
+                    # is the verified containing archive plus its central-directory
+                    # index/CRC and declared size. Duplicate names remain distinct.
+                    record = {
+                        "sourceId": f"{source_id}:member:{index}",
+                        "filename": f"{filename}!/{entry.filename}", "sourceType": "attachment",
+                        "contentSha256": None, "sizeBytes": entry.file_size,
+                        "observedAt": observed_at, "status": ARCHIVE_MEMBER_REVIEW_STATUS, "text": "",
+                        "parentSourceId": source_id, "archiveContentSha256": archive_sha256,
+                        "archiveMemberIndex": index, "archiveMemberCrc32": format(entry.CRC, "08x"),
+                        "archiveMemberSizeVerified": False,
+                    }
+                    records.append(record)
+                    if on_source is not None:
+                        on_source(record)
                     continue
                 # Read by ZipInfo, not name: duplicate filenames remain separate
                 # evidence sources. Skipped formats are read only for their audit

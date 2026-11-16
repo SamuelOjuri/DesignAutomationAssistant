@@ -11,7 +11,8 @@ from zoneinfo import ZoneInfo
 from dateutil.parser import isoparse, parse as parse_datetime
 
 from .specification_semantics import (
-    COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, FIELD_DEFINITIONS, REFERENCE_FIELDS, REFERENCE_TEXT_PATTERN,
+    COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION, FIELD_DEFINITIONS, MISSING_CLIENT_EMAIL_REVIEW_STATUS,
+    REFERENCE_FIELDS, REFERENCE_TEXT_PATTERN,
     U_VALUE_FIELDS, SpecificationEvidence, SpecificationRequestNote, drawing_reference_key, missing,
     normalize_reference_dashes, normalize_unit_spacing, scale_ratio, tp_reference_revision,
 )
@@ -324,6 +325,7 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         raise ValueError("Source manifest is empty or contains duplicate identities")
     assessed = set(extraction.get("specificationAssessedFields") or [])
     client_request = select_client_request(manifest)
+    missing_client_email = any(source.get("status") == MISSING_CLIENT_EMAIL_REVIEW_STATUS for source in manifest)
     candidates = defaultdict(list)
     rejected = defaultdict(list)
     excluded = defaultdict(list)
@@ -344,6 +346,10 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         if evidence["role"] != "requested" and not baseline_reference and not described_deck:
             continue  # Non-request facts are retained in extraction, not published.
         source = sources.get(evidence["source_id"])
+        if missing_client_email and label in CLIENT_FIELDS:
+            excluded[label].append({**evidence,
+                "reason": "No client email was provided; client identity and request date require reviewer confirmation"})
+            continue
         if (source is not None and label in CLIENT_FIELDS
                 and not client_evidence_applies(evidence, source, sources, client_request, _contains_excerpt)):
             excluded[label].append({**evidence, "reason": "Evidence does not belong to the selected client request"})

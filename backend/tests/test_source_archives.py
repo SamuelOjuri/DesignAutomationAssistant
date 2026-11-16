@@ -240,7 +240,9 @@ def test_archive_limits_block_before_reading_documents(monkeypatch, limit, maxim
         pytest.fail("Document reader should not run for an oversized archive")
     monkeypatch.setattr(sources, "extract_document", unexpected)
     records = sources.extract_source_records(content, "request.zip", None, source_id="zip:1")
-    assert len(records) == 1 and records[0]["status"] == "failed:SourceDocumentError"
+    assert len(records) == 1
+    assert records[0]["status"] == (
+        "review:oversized_archive" if code == "source_size_limit" else "failed:SourceDocumentError")
     assert records[0]["error"]["code"] == code
 
 

@@ -6,10 +6,12 @@ from contextlib import ExitStack
 from datetime import date, datetime, time
 import logging
 import os
+import posixpath
 from zipfile import ZipFile
 
+from defusedxml import ElementTree
 import openpyxl
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import coordinate_to_tuple, get_column_letter
 import xlrd
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,12 @@ class ExtractionLimit(ValueError):
     pass
 
 
+class WorksheetLimit(ExtractionLimit):
+    def __init__(self, limit: int):
+        self.limit = limit
+        super().__init__("Workbook exceeds the worksheet limit.")
+
+
 def is_spreadsheet(filename: str) -> bool:
     return filename.lower().endswith(SPREADSHEET_EXTENSIONS)
 
@@ -46,15 +54,80 @@ def _format_value(value) -> str:
     return " ".join(str(value).replace("\x00", "").split())
 
 
+def _xlsx_sheet_paths(archive: ZipFile) -> dict[str, str]:
+    """Resolve public package relationships without relying on reader internals."""
+    package_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+    document_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    sheet_ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    members = set(archive.namelist())
+
+    def member_path(parent, relation):
+        if relation.get("TargetMode") == "External":
+            raise ValueError("External workbook relationships are unsupported")
+        target = relation.attrib["Target"]
+        member = posixpath.normpath(posixpath.join(posixpath.dirname(parent), target))
+        if member.startswith("/"):
+            member = member[1:]
+        if member == ".." or member.startswith("../") or member not in members:
+            raise ValueError("Invalid workbook relationship")
+        return member
+
+    package = ElementTree.fromstring(archive.read("_rels/.rels"))
+    workbook_relation = next(relation for relation in package.findall(package_ns + "Relationship")
+                             if relation.attrib["Type"].endswith("/officeDocument"))
+    workbook_path = member_path("", workbook_relation)
+    workbook = ElementTree.fromstring(archive.read(workbook_path))
+    relationships_path = posixpath.join(posixpath.dirname(workbook_path), "_rels",
+                                       posixpath.basename(workbook_path) + ".rels")
+    relationships = ElementTree.fromstring(archive.read(relationships_path))
+    paths = {relation.attrib["Id"]: member_path(workbook_path, relation)
+             for relation in relationships.findall(package_ns + "Relationship")
+             if relation.attrib["Type"].endswith("/worksheet")}
+    return {sheet.attrib["name"]: paths[sheet.attrib[document_ns + "id"]]
+            for sheet in workbook.findall(sheet_ns + "sheets/" + sheet_ns + "sheet")
+            if sheet.attrib[document_ns + "id"] in paths}
+
+
+def _xlsx_empty_string_cache_rows(archive: ZipFile, member: str):
+    """Stream cache metadata alongside the readers, including shared formulas.
+
+    openpyxl returns None for both an absent cache and an explicit cached empty
+    string. Only the latter (t="str" with a present, empty v) is a valid blank.
+    Streaming one row at a time keeps the existing scan limits effective.
+    """
+    namespace = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    previous_row = 0
+    with archive.open(member) as source:
+        for _, row in ElementTree.iterparse(source, events=("end",)):
+            if row.tag != namespace + "row":
+                continue
+            row_number = int(row.get("r", previous_row + 1))
+            previous_row = row_number
+            cells = set()
+            column = 0
+            for cell in row.findall(namespace + "c"):
+                # Cell references are optional; match the reader's inferred
+                # sequential column when a producer leaves one out.
+                coordinate = cell.get("r")
+                column = coordinate_to_tuple(coordinate)[1] if coordinate else column + 1
+                cached = cell.find(namespace + "v")
+                if (cell.get("t") == "str" and cell.find(namespace + "f") is not None
+                        and cached is not None and cached.text in (None, "")):
+                    cells.add(coordinate or f"{get_column_letter(column)}{row_number}")
+            row.clear()
+            yield row_number, cells
+
+
 def _xlsx_rows(path: str, warnings: set[str], *, visible_only: bool = False, max_sheets: int | None = None):
     sheet_limit = MAX_SHEETS if max_sheets is None else max_sheets
-    with ZipFile(path) as archive:
-        if sum(entry.file_size for entry in archive.infolist()) > MAX_UNCOMPRESSED_BYTES:
-            raise ExtractionLimit("Workbook exceeds the uncompressed size limit.")
 
     # Read both cached results and formulas, so formulas without a cached value
     # are reported explicitly rather than silently disappearing from the evidence.
     with ExitStack() as stack:
+        archive = stack.enter_context(ZipFile(path))
+        if sum(entry.file_size for entry in archive.infolist()) > MAX_UNCOMPRESSED_BYTES:
+            raise ExtractionLimit("Workbook exceeds the uncompressed size limit.")
+        sheet_paths = _xlsx_sheet_paths(archive)
         books = []
         for data_only in (True, False):
             source = stack.enter_context(open(path, "rb"))  # Temp paths have no extension.
@@ -64,24 +137,31 @@ def _xlsx_rows(path: str, warnings: set[str], *, visible_only: bool = False, max
             stack.callback(book.close)
             books.append(book)
         values_book, formulas_book = books
-        for sheet_index, values_sheet in enumerate(values_book.worksheets):
-            if visible_only and values_sheet.sheet_state != "visible":
-                continue  # Hidden option catalogues are not selected form values.
+        # Hidden option catalogues are not selected form values and do not use
+        # the visible worksheet allowance.
+        sheets = [sheet for sheet in values_book.worksheets if not visible_only or sheet.sheet_state == "visible"]
+        for sheet_index, values_sheet in enumerate(sheets):
             if sheet_index >= sheet_limit:
-                raise ExtractionLimit("Workbook exceeds the worksheet limit.")
+                raise WorksheetLimit(sheet_limit)
             formulas_sheet = formulas_book[values_sheet.title]
             # Some producers incorrectly declare A1:A1 as the used range.
             values_sheet.reset_dimensions()
             formulas_sheet.reset_dimensions()
+            cache_rows = _xlsx_empty_string_cache_rows(archive, sheet_paths[values_sheet.title])
+            stack.callback(cache_rows.close)
+            cache_row, empty_caches = next(cache_rows, (None, set()))
             for row_number, (values, formulas) in enumerate(
                 zip(values_sheet.iter_rows(), formulas_sheet.iter_rows()), start=1,
             ):
+                while cache_row is not None and cache_row < row_number:
+                    cache_row, empty_caches = next(cache_rows, (None, set()))
                 if len(values) > MAX_COLUMNS:
                     warnings.add("Columns beyond the column limit were omitted.")
                 cells = []
                 for value_cell, formula_cell in zip(values[:MAX_COLUMNS], formulas[:MAX_COLUMNS]):
                     value = _format_value(value_cell.value)
-                    if formula_cell.data_type == "f" and value_cell.value is None:
+                    if (formula_cell.data_type == "f" and value_cell.value is None
+                            and not (cache_row == row_number and formula_cell.coordinate in empty_caches)):
                         formula = _format_value(formula_cell.value)
                         value = f"Formula {formula} [cached result unavailable; not calculated]"
                         warnings.add("Some formula results are unavailable; formulas were not calculated.")
@@ -93,13 +173,15 @@ def _xls_rows(path: str, warnings: set[str], *, visible_only: bool = False, max_
     sheet_limit = MAX_SHEETS if max_sheets is None else max_sheets
     book = xlrd.open_workbook(path, on_demand=True, ragged_rows=True)
     try:
+        included_sheets = 0
         for sheet_index in range(book.nsheets):
-            if sheet_index >= sheet_limit:
-                raise ExtractionLimit("Workbook exceeds the worksheet limit.")
             sheet = book.sheet_by_index(sheet_index)
             try:
                 if visible_only and sheet.visibility:
                     continue
+                if included_sheets >= sheet_limit:
+                    raise WorksheetLimit(sheet_limit)
+                included_sheets += 1
                 if sheet.ncols > MAX_COLUMNS:
                     warnings.add("Columns beyond the column limit were omitted.")
                 for row_index in range(sheet.nrows):
@@ -126,7 +208,8 @@ def _xls_rows(path: str, warnings: set[str], *, visible_only: bool = False, max_
 def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: bool = False,
                                   preserve_full_cells: bool = False,
                                   max_file_bytes: int | None = None,
-                                  max_sheets: int | None = None) -> list[dict[str, str]]:
+                                  max_sheets: int | None = None,
+                                  truncate_sheets: bool = False) -> list[dict[str, str]]:
     """Return bounded, source-labelled text chunks, including any extraction limits.
 
     Bad/encrypted workbooks remain downloadable: parsing failures become a source
@@ -137,9 +220,12 @@ def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: boo
     A caller may raise its source file or worksheet allowance without changing
     search's defaults; decompression, row, cell and text limits still apply
     independently.
+    With truncate_sheets, excess worksheets are an explicit, informational scope
+    limit instead of an extraction failure; all other limits still report errors.
     """
     documents: list[dict[str, str]] = []
     warnings: set[str] = set()
+    worksheet_notice = None
     filename_label = _format_value(filename)[:180]
     current_sheet = None
     prefix = ""
@@ -220,13 +306,31 @@ def extract_spreadsheet_documents(path: str, filename: str, *, visible_only: boo
                         continuation = True
         flush()
     except ExtractionLimit as exc:
-        warnings.add(str(exc))
-        if body and len(documents) < MAX_DOCUMENTS - 1:
-            flush()
+        if isinstance(exc, WorksheetLimit) and truncate_sheets:
+            scope = "visible worksheets" if visible_only else "worksheets"
+            worksheet_notice = (f"Only the first {exc.limit} {scope} were extracted; "
+                                f"the remaining {scope} were omitted.")
+        else:
+            warnings.add(str(exc))
+        if body:
+            try:
+                flush()
+            except ExtractionLimit as text_limit:
+                # An accepted sheet cutoff must not conceal a pending chunk
+                # that could not fit within the independent text budget.
+                warnings.add(str(text_limit))
     except Exception:
         logger.exception("[SPREADSHEET] Could not read %s", filename)
         # Keep already completed chunks but do not pass partially parsed rows on.
         warnings.add("Workbook could not be fully read; it may be corrupt, encrypted, or unsupported.")
+
+    if worksheet_notice and documents and not warnings:
+        documents.append({
+            "text": f"Workbook: {filename_label}\nExtraction scope: {worksheet_notice}",
+            "section": "spreadsheet:worksheet-limit",
+            "notice": worksheet_notice,
+        })
+        logger.info("[SPREADSHEET] %s: %s", filename, worksheet_notice)
 
     if warnings or not documents:
         detail = " ".join(sorted(warnings)) if warnings else "No populated worksheet cells were found."

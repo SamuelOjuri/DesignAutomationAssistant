@@ -481,6 +481,6 @@ def _target_readiness(
         return "ineligible"
     if snapshot.missing_name:
         return "waiting_for_name"
-    if snapshot.missing_email:
+    if snapshot.missing_inputs:
         return "waiting_for_email"
     return "ready"

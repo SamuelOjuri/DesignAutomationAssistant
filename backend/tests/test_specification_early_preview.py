@@ -185,7 +185,7 @@ def test_old_job_progress_is_not_reported_for_current_input(pending):
 
 def test_pipeline_exposes_preview_at_render_hook_before_legacy_documents_exist(pending, monkeypatch):
     now = datetime.now(timezone.utc)
-    pending.gateway.target.missing_name = pending.gateway.target.missing_email = False
+    pending.gateway.target.missing_name = pending.gateway.target.missing_email = pending.gateway.target.missing_inputs = False
     job = DesignProcessingJob(board_id=pending.item.board_id, item_id=pending.item.item_id,
         trigger_type="source_changed", execution_kind="analysis", status="running", stage="matching",
         execution_input_revision=pending.item.latest_desired_input_revision,

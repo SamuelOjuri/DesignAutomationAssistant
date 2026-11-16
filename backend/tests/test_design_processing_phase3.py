@@ -178,7 +178,7 @@ def test_same_email_column_zip_is_supplementary_without_source_column_configurat
 @pytest.mark.parametrize("filename,extension", [
     ("roof-plans.zip", "zip"), ("roof-plans.ZIP", "eml"), ("downloaded-roof-plans", ".ZiP"),
 ])
-def test_zip_only_email_column_still_requires_a_real_email(monkeypatch, filename, extension):
+def test_zip_only_email_column_has_revision_without_claiming_email_presence(monkeypatch, filename, extension):
     monkeypatch.setattr(settings, "design_processing_source_file_column_ids", [])
     archive = _asset("2", filename)
     archive["file_extension"] = extension
@@ -186,7 +186,8 @@ def test_zip_only_email_column_still_requires_a_real_email(monkeypatch, filename
         files=[{"assetId": "2", "name": filename}], assets=[archive],
     ))
     assert target.missing_email is True
-    assert target.input_revision is None
+    assert target.missing_inputs is False
+    assert target.input_revision is not None
     assert [asset.filename for asset in target.supplementary_assets] == [filename]
 
 

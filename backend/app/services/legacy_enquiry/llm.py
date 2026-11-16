@@ -19,7 +19,8 @@ from .parameter_extraction import (
     PARAMETER_EXTRACTION_PROMPT,
 )
 from ..specification_semantics import (
-    COMPLETE_SOURCE_STATUSES, FIELD_DEFINITIONS, REVIEW_SOURCE_STATUSES, canonical_label, missing,
+    COMPLETE_SOURCE_STATUSES, FIELD_DEFINITIONS, MISSING_CLIENT_EMAIL_REVIEW_STATUS,
+    REVIEW_SOURCE_STATUSES, canonical_label, missing,
 )
 from ..specification_image_text import IMAGE_TRANSCRIPTION_PROMPT
 from ..specification_request_context import request_context_summary, select_client_request
@@ -80,7 +81,8 @@ class LegacyGeminiClient:
     def extract_design_parameters(self, context: str, *, source_manifest=None) -> DesignParameterExtraction:
         from ..specification_recovery import (
             drop_blank_evidence, evidence_diagnostics, extraction_payload, merge_recovery,
-            repair_note_list_formatting, repair_image_company_citations, repair_message_dates, bound_verified_request_notes,
+            repair_note_list_formatting, repair_note_prose_dashes, repair_image_company_citations,
+            repair_message_dates, bound_verified_request_notes,
             repair_template_markers,
         )
         from ..performance_specification_evidence import (
@@ -103,13 +105,30 @@ class LegacyGeminiClient:
         prose, not an alternative spelling or legal-name authority.
         """
         requester = GeminiJSONRequester(self.generate_content, self.model, self.parameter_extraction_config, DesignParameterExtraction)
+        missing_client = any(source.get("status") == MISSING_CLIENT_EMAIL_REVIEW_STATUS
+                             for source in source_manifest or [])
+        if missing_client:
+            prompt += ("\nNo client email was provided. Extract supported technical facts from the files, "
+                       "using request_role=document and no message_date unless the source actually establishes it. "
+                       "Company, Contact, Date Received and Hour Received must remain null; document issuer, "
+                       "survey contact, visit date, export date and file upload time do not establish client-request "
+                       "identity or chronology. Request intent requires reviewer classification.\n")
+
+        def client_identity(result):
+            if missing_client:
+                # Survey/document contacts and visit/export dates do not establish
+                # who sent a client request or when it was received.
+                result.company = result.contact = result.date_received = result.hour_received = None
+                result.specification_evidence = [e for e in result.specification_evidence
+                                                if e.field not in {"Company", "Contact", "Date Received"}]
+            return result
 
         def request(contents, stage):
             response = requester(contents, stage=stage)
             parsed = getattr(response, "parsed", None)
             if isinstance(parsed, DesignParameterExtraction):
                 require_json_safe_text(parsed.model_dump())
-                return parsed
+                return client_identity(parsed)
             if isinstance(parsed, Mapping):
                 require_json_safe_text(parsed)
             else:
@@ -127,7 +146,7 @@ class LegacyGeminiClient:
                 raise SpecificationEvidenceError("Invalid parameter extraction response: " + json.dumps(issues),
                     {"schemaIssues": issues, "response": bounded, "sourceManifest": source_manifest or []}) from None
             result._evidence_repairs.extend(repairs + dropped)
-            return result
+            return client_identity(result)
 
         result = request(prompt, "parameter_extraction")
 
@@ -162,6 +181,7 @@ class LegacyGeminiClient:
             repair_image_company_citations(result, source_manifest)
             repair_template_markers(result, source_manifest)
             repair_note_list_formatting(result, source_manifest)
+            repair_note_prose_dashes(result, source_manifest)
             _, diagnostics = evidence_diagnostics(result, source_manifest)
             gaps |= set(diagnostics)
             note_diagnostics = request_note_diagnostics(extraction_payload(result, source_manifest))

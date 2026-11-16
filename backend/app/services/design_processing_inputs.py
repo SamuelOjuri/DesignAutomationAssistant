@@ -60,6 +60,18 @@ class DesignProcessingTargetSnapshot:
     def missing_email(self) -> bool:
         return not self.email_assets
 
+    @property
+    def missing_inputs(self) -> bool:
+        """A real email or an admitted ZIP can supply extraction inputs.
+
+        Email absence remains visible separately for the reviewer. Arbitrary
+        supplementary files alone do not expand the ZIP-only admission policy.
+        """
+        return self.missing_email and not any(
+            _is_email_column_zip(asset.filename, asset.file_extension)
+            for asset in self.supplementary_assets
+        )
+
 
 class DownloadedAssetLike(Protocol):
     temp_path: str
@@ -115,7 +127,7 @@ def canonical_revision_bytes(assets: Sequence[DesignEmailAsset]) -> bytes:
 
 def compute_design_input_revision(assets: Sequence[DesignEmailAsset]) -> str:
     if not assets:
-        raise ValueError("at least one supported Email asset is required")
+        raise ValueError("at least one supported email or ZIP asset is required")
     return hashlib.sha256(canonical_revision_bytes(assets)).hexdigest()
 
 
@@ -260,7 +272,9 @@ def parse_design_processing_target(
             seen.add(asset_id)
     supplemental.sort(key=lambda asset: (int(asset.asset_id), asset.filename))
     input_revision = (
-        compute_design_input_revision((*ordered_assets, *supplemental)) if ordered_assets else None
+        compute_design_input_revision((*ordered_assets, *supplemental))
+        if ordered_assets or any(_is_email_column_zip(asset.filename, asset.file_extension) for asset in supplemental)
+        else None
     )
     return DesignProcessingTargetSnapshot(
         board_id=board_id,

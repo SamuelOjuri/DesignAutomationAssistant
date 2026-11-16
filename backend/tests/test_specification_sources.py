@@ -371,11 +371,43 @@ def test_design_workbook_reads_a_contract_pricing_schedule_beyond_the_search_she
     assert "Worksheet: 2.26" in text and "Trade 26" in text and "Trade 27" not in text
 
 
-def test_design_workbook_limit_reports_sheet_specific_advice():
-    with pytest.raises(ValueError, match="worksheet limit") as error:
+@pytest.mark.parametrize("in_archive", [False, True])
+def test_design_workbook_uses_first_40_visible_sheets_and_records_scope(in_archive, caplog):
+    content, filename = _workbook(41), "Pricing Schedule.xlsx"
+    if in_archive:
+        output = io.BytesIO()
+        with ZipFile(output, "w") as archive:
+            archive.writestr(filename, content)
+        content, filename = output.getvalue(), "request.zip"
+    manifest = []
+    context = extract_text_from_email("Request", [{"filename": filename, "content": content}],
+                                      extractor=SimpleNamespace(), manifest=manifest)
+    record = next(source for source in manifest if source["filename"].endswith("Pricing Schedule.xlsx"))
+    assert record["status"] == "read" and "error" not in record
+    assert record["spreadsheetExtraction"] == {"worksheetLimit": 40, "visibleOnly": True, "truncated": True}
+    assert "Worksheet: 2.39" in context and "Trade 39" in context and "Trade 40" not in context
+    assert "first 40 visible worksheets" in context and "omitted" in context
+    assert "Extraction notice" not in context and "[SPREADSHEET]" not in caplog.text
+
+
+def test_design_workbook_truncation_does_not_suppress_other_limits(monkeypatch):
+    from backend.app.services import spreadsheet_extraction
+    monkeypatch.setattr(spreadsheet_extraction, "MAX_ROWS", 2)
+    with pytest.raises(ValueError, match="row/cell scan limit") as error:
         extract_document(_workbook(41), "Pricing Schedule.xlsx", None)
     assert error.value.details["code"] == "workbook_incomplete"
-    assert "split the workbook" in str(error.value) and "formulas" not in str(error.value)
+
+
+def test_design_workbook_cannot_read_only_an_omission_note():
+    book = openpyxl.Workbook()
+    for index in range(1, 41):
+        book.create_sheet(f"Sheet {index}")
+    book.worksheets[-1]["A1"] = "Only present outside the included scope"
+    output = io.BytesIO()
+    book.save(output)
+    book.close()
+    with pytest.raises(ValueError, match="No populated worksheet cells"):
+        extract_document(output.getvalue(), "Empty prefix.xlsx", None)
 
 
 @pytest.mark.parametrize("failures,permanent", [

@@ -1,0 +1,496 @@
+{
+  "observed_at": "2026-11-15 23:03:04.586784+00:00",
+  "emails": [
+    {
+      "label": "a",
+      "header": "From: \"Lowthion, Rik\" <richardlowthion@sigplc.com>\nTo: Sales <sales@taperedplus.co.uk>\nSubject: 150 to 0 falls - Stockport college\nDate: Wed, 11 Nov 2026 16:08:35 +0000\n",
+      "body_sha256": "cd6b10f19be3a1220e3781d077a1011125009b675c38e3cce4c5fb0dd4f4304b",
+      "body": "Hi Guys,\r\n\r\nHave had a customer ask me for the below - is this something you could do??\r\n\r\nPIR - I'm assuming Tissue faced?\r\n\r\n150mm down to 0mm (or the min you can do) - 1.1m boards (see image below).\r\nThis will then be on for 150 lm (125 boards?? Think you guys use 1200mm sheets?) Image below of the section if it helps??\r\n\r\n\r\n[cid:image001.png@01DD71F6.E825AE60]\r\n\r\n\r\nThank you\r\n\r\n[SIG Insulation & Drylining]\r\nRichard Lowthion\r\nInternal Sales Executive - Insulation\r\nSIG Insulation & Dry Lining\r\nDD: 0161 836 4400 | E: richardlowthion@sigplc.com<mailto:richardlowthion@sigplc.com>\r\nUnit 1, Trafford Point, Manchester, M17 1SH\r\nhttps://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsigdistribution.co.uk%2f&c=E,1,GnvDhpT0gYewfggzmyMvDkxNOOJ4vk-S7gEUjBurFqPutG6bBOLrHywDhzeha340HuklIWjQESrGrkSjc9Mwo9oGAajlE4YvbBVb51K8W5cYXq-fyAUK1tUI&typo=1    Latest Price Changes <https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsigdistribution.co.uk%2fprice-changes%2f&c=E,1,2nlO1UZGhY6Vu8mnkFQy5u37uak4s-suJp_XOfcFoDa9kb9_NIpwMqdn0zluYcLE6RWr4rLLVcOVJ8PV4YwwGmGXWVRi2GIoHvQHl6J7okzXj1Ot-NQSkK-XMgfz&typo=1>\r\n\r\nPLEASE CHECK OUT THE LATEST PRICE INCREASES: https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsigdistribution.co.uk%2fprice-changes%2f&c=E,1,Xn8LIHGbTjBGkWWLNOiYw-OF6xPz1QfCLF9hOPuwtmpKzZNjtxaXJUadvd9Xpv8C7t1q9-P-bNBPhRKrRizzBRSoqZK-b1TVPKVyJKsqqjdJtqFoxNKON7BV&typo=1\r\n\r\n****************************************************\r\n\r\nPlease only print out this email if absolutely necessary.\r\n\r\n\r\nThe contents of this e-mail and its attachments are confidential and may\r\nbe subject to legal privilege. The contents may not be disclosed,\r\ncopied or distributed without our consent. It is intended for the use of\r\nthe addressee(s) only. If you are not the intended recipient you must\r\ndelete this message immediately and advise the sender that you received\r\nit in error. The statements and opinions expressed in this message are\r\nthose of the author and do not necessarily reflect those of the Company.\r\nThe Company does not accept any responsibility for the author's views.\r\n\r\nWhilst the Company takes every effort to ensure this message is virus free\r\nit can not guarantee that this is the case. It is the recipients\r\nresponsibility to carry out such virus checks as it deems necessary.\r\n\r\n\r\nRegistered Address: SIG Trading Ltd, Adsetts House, 16 Europa View, Sheffield Business Park, Sheffield, S9 1XH \r\nRegistered in England, Number 01451007 \r\n\r\nRegistered Address: SIG PLC, Adsetts House, 16 Europa View, Sheffield Business Park, Sheffield, S9 1XH  \r\nRegistered in England, Number 00998314\r\n",
+      "messages": [
+        {
+          "messageIndex": 0,
+          "sender": "richardlowthion@sigplc.com",
+          "recipients": [
+            "sales@taperedplus.co.uk"
+          ],
+          "sentDate": "Wed, 11 Nov 2026 16:08:35 +0000",
+          "sentAt": "2026-11-11T16:08:35+00:00",
+          "requestRole": "direct_request",
+          "headerSnippet": "From: \"Lowthion, Rik\" <richardlowthion@sigplc.com>\nTo: Sales <sales@taperedplus.co.uk>\nSubject: 150 to 0 falls - Stockport college\nDate: Wed, 11 Nov 2026 16:08:35 +0000"
+        },
+        {
+          "messageIndex": 0,
+          "sender": "richardlowthion@sigplc.com",
+          "recipients": [
+            "sales@taperedplus.co.uk"
+          ],
+          "sentDate": "Wed, 11 Nov 2026 16:08:35 +0000",
+          "sentAt": "2026-11-11T16:08:35+00:00",
+          "requestRole": "direct_request",
+          "headerSnippet": "From: \"Lowthion, Rik\" <richardlowthion@sigplc.com>\nTo: Sales <sales@taperedplus.co.uk>\nSubject: 150 to 0 falls - Stockport college\nDate: Wed, 11 Nov 2026 16:08:35 +0000"
+        }
+      ],
+      "attachments": [],
+      "inline_images": 2
+    },
+    {
+      "label": "b",
+      "header": "From: \"Lowthion, Rik\" <richardlowthion@sigplc.com>\nTo: Sales <sales@Taperedplus.co.uk>\nSubject: RE: 150 to 0 falls - Stockport college\nDate: Thu, 12 Nov 2026 09:51:19 +0000\n",
+      "body_sha256": "7c2ef362d727551d7c47d2c23709c58d5fd9a33f7f0b6c436dd1b19e98b05810",
+      "body": "Hi Hitesh,\r\n\r\n\r\nCustomer has asked for a quote on this option please?\r\n\r\nSeems he doesn\u2019t have many other options to be fair!\r\n\r\n\r\n\r\nThank you\r\n\r\n[SIG Insulation & Drylining]\r\nRichard Lowthion\r\nInternal Sales Executive - Insulation\r\nSIG Insulation & Dry Lining\r\nDD: 0161 836 4400 | E: richardlowthion@sigplc.com<mailto:richardlowthion@sigplc.com>\r\nUnit 1, Trafford Point, Manchester, M17 1SH\r\nhttps://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsigdistribution.co.uk%2f&c=E,1,sfZiR69sguQzjDZbJXjBMut3QEvDxLNyExyWCjB-kmEMXErRejFELkRVuMh5BDWRI-xnwAa45WhdtEvF5UmzkisYqTSuO0koah4nwb5oFKvuPgY,&typo=1    Latest Price Changes <https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsigdistribution.co.uk%2fprice-changes%2f&c=E,1,qXi7S50XCqGeNgY4IowLTJlP-Qtwcx8hlIECzxdEkFBBVOeJKNqBzeV2O4zCupUF5CaMrU39C6P5RRBa7Sqjxhz9wbkC4DUDfg1JgyCr2RjpRV7vSPwlytFoLjs,&typo=1>\r\n\r\nPLEASE CHECK OUT THE LATEST PRICE INCREASES: https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsigdistribution.co.uk%2fprice-changes%2f&c=E,1,liDKyHjcnWy3-jzKjPhV6wB1EmNnpEP7mIK6_vgMJ7J7_z7qCgDP-ZM2Sj3Cijz9A3sig5rQpqThHA2f6YAa-90A1HS4qc2GQJ2eknfZ3V5K&typo=1\r\n\r\nFrom: Sales <sales@Taperedplus.co.uk>\r\nSent: 12 November 2026 09:11\r\nTo: Lowthion, Rik <richardlowthion@sigplc.com>\r\nCc: dean <dean@taperedplus.co.uk>\r\nSubject: [ALERT] RE: 150 to 0 falls - Stockport college\r\n\r\nThis message originated from outside your organisation and may be an attempt to impersonate an internal member of staff.\r\n________________________________\r\nMorning \u2013 Hope your well, thank you for the request.\r\n\r\nI'm just reviewing the information.\r\n\r\nRegarding the Fall, in PIR the only one we could use is 1.30 Board which is (30-60mm) \u2013 Only a 30mm Step,\r\n\r\nYou require a 150mm Step across 1200mm,\r\n\r\nOnly other Option we could do is go hybrid, PIR Overlay and EPS customise the Fall e.g. 35mm -150mm?\r\n\r\nOnce confirmed well be happy to put together a provisional scheme for you\r\n\r\n\r\nKind Regards,\r\n\r\n[cid:image002.png@01DD728B.5CB46610]\r\n\r\nPlease note all designs, quotations, order and supply are subject to our terms and conditions which you can find on the below link and on our website\r\nTerms & Conditions | Tapered Plus<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fwww.taperedplus.co.uk%2fterms-conditions%2f&c=E,1,bGNC_XKdoe3YazS35hkAHWepkicC6fsEIZqH5zuv4kkaSSF9XvKjRO8LVIniTd3rEhofif9DkuTaXLNq6K-z--7NEdx8AV3Bmb9Oz0Hg-WsSEve5PfxOoYNrXOEv&typo=1>\r\n\r\nThe information contained in this e-mail is confidential and may be legally privileged.  It is intended solely for the use of the addressee and others authorised to receive it.  If you are not the intended recipient, please note that any circulation or copying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by telephone on 01642 677342 or e-mail sales@taperedplus.co.uk<mailto:sales@taperedplus.co.uk>.  TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\r\ncopying of this e-mail is strictly prohibited.  If you have received this e-mail in error please notify us immediately by telephone on 01642 677342 or e-mail sales@taperedplus.co.uk<mailto:sales@taperedplus.co.uk>.  TaperedPlus makes every effort to ensure that this e-mail and any attachments are sent virus free, however it is the responsibility of the recipient to perform any checks they deem necessary.\r\n\r\n\r\n\r\n\r\n\r\nFrom: Lowthion, Rik <richardlowthion@sigplc.com<mailto:richardlowthion@sigplc.com>>\r\nSent: 11 November 2026 16:09\r\nTo: Sales <sales@taperedplus.co.uk<mailto:sales@taperedplus.co.uk>>\r\nSubject: 150 to 0 falls - Stockport college\r\n\r\nHi Guys,\r\n\r\nHave had a customer ask me for the below \u2013 is this something you could do??\r\n\r\nPIR \u2013 I\u2019m assuming Tissue faced?\r\n\r\n150mm down to 0mm (or the min you can do) \u2013 1.1m boards (see image below).\r\nThis will then be on for 150 lm (125 boards?? Think you guys use 1200mm sheets?) Image below of the section if it helps??\r\n\r\n\r\n[cid:image003.png@01DD728B.5CB46610]\r\n\r\n\r\nThank you\r\n\r\n[SIG Insulation & Drylining]\r\nRichard Lowthion\r\nInternal Sales Executive - Insulation\r\nSIG Insulation & Dry Lining\r\nDD: 0161 836 4400 | E: richardlowthion@sigplc.com<mailto:richardlowthion@sigplc.com>\r\nUnit 1, Trafford Point, Manchester, M17 1SH\r\nhttps://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsigdistribution.co.uk%2f&c=E,1,8hYMhc-wJFMUA34xhb_ZlCmF21wxdmIo2N-O8eyV1kWwgXUjZlZEX-H0tvq5vizDLhHf90eazu4rPF1ndJuEO_5vZebSzmrm6pJ7D_LCd9po2JRW3axRAtnah7MT&typo=1<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsigdistribution.co.uk%2f&c=E,1,OaHbWRPhBxSxOiI47tWIkHIjFfUo1T88vRbCKgtrfM3Il03uIqTFlgusLcVS0m8h4FoZpmCZ801ozWrCoLcJc7h0Ef6RU5c_RWkRSmir9U9GfM8i&typo=1>    Latest Price Changes <https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsigdistribution.co.uk%2fprice-changes%2f&c=E,1,Dvep1cpW1BhYfxLORmOCKVTAVyeOPlAKl2U66M39c50my0unZcPlVNYeo6oejSEnt1-Pk-gEPqZlbWn27xiYMj0vF0p0jbxZmL0F3oKfR6fG-zEAXpRwYs0j&typo=1>\r\n\r\nPLEASE CHECK OUT THE LATEST PRICE INCREASES: https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsigdistribution.co.uk%2fprice-changes%2f&c=E,1,y6WadJVarZTF2ylbMkU39byii3cGWeg2L2c09lC_fK-cu393WanU0pwFvQVngyWqKl5EOsrqpVgHFceAUD63luTUkmTTsfRfyO975BMenCpFmkAbqbeB&typo=1<https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fsigdistribution.co.uk%2fprice-changes%2f&c=E,1,tdMxMlcHHKqGb3a7LSo14ZYs0pYWTLnH68pyKNf3SBvL0Fv2DTsu5ED2kQIWuhsBuxZTSEoTUQsnm3jfVcsY3NTY69TU5udV544pGm_Q5xFdznOh3mVr&typo=1>\r\n\r\n\r\n\r\n****************************************************\r\nPlease only print out this email if absolutely necessary.\r\n\r\nThe contents of this e-mail and its attachments are confidential and may be subject to legal privilege. The contents may not be disclosed, copied or distributed without our consent. It is intended for the use of the addressee(s) only. If you are not the intended recipient you must delete this message immediately and advise the sender that you received it in error. The statements and opinions expressed in this message are those of the author and do not necessarily reflect those of the Company. The Company does not accept any responsibility for the author's views.\r\nWhilst the Company takes every effort to ensure this message is virus free it can not guarantee that this is the case. It is the recipients responsibility to carry out such virus checks as it deems necessary.\r\n\r\nRegistered Address: SIG Trading Ltd, Adsetts House, 16 Europa View, Sheffield Business Park, Sheffield, S9 1XH\r\nRegistered in England, Number 01451007\r\n\r\nRegistered Address: SIG PLC, Adsetts House, 16 Europa View, Sheffield Business Park, Sheffield, S9 1XH\r\nRegistered in England, Number 00998314\r\n\r\n****************************************************\r\n\r\nPlease only print out this email if absolutely necessary.\r\n\r\n\r\nThe contents of this e-mail and its attachments are confidential and may\r\nbe subject to legal privilege. The contents may not be disclosed,\r\ncopied or distributed without our consent. It is intended for the use of\r\nthe addressee(s) only. If you are not the intended recipient you must\r\ndelete this message immediately and advise the sender that you received\r\nit in error. The statements and opinions expressed in this message are\r\nthose of the author and do not necessarily reflect those of the Company.\r\nThe Company does not accept any responsibility for the author's views.\r\n\r\nWhilst the Company takes every effort to ensure this message is virus free\r\nit can not guarantee that this is the case. It is the recipients\r\nresponsibility to carry out such virus checks as it deems necessary.\r\n\r\n\r\nRegistered Address: SIG Trading Ltd, Adsetts House, 16 Europa View, Sheffield Business Park, Sheffield, S9 1XH \r\nRegistered in England, Number 01451007 \r\n\r\nRegistered Address: SIG PLC, Adsetts House, 16 Europa View, Sheffield Business Park, Sheffield, S9 1XH  \r\nRegistered in England, Number 00998314\r\n",
+      "messages": [
+        {
+          "messageIndex": 0,
+          "sender": "richardlowthion@sigplc.com",
+          "recipients": [
+            "sales@taperedplus.co.uk"
+          ],
+          "sentDate": "Thu, 12 Nov 2026 09:51:19 +0000",
+          "sentAt": "2026-11-12T09:51:19+00:00",
+          "requestRole": "direct_request",
+          "headerSnippet": "From: \"Lowthion, Rik\" <richardlowthion@sigplc.com>\nTo: Sales <sales@Taperedplus.co.uk>\nSubject: RE: 150 to 0 falls - Stockport college\nDate: Thu, 12 Nov 2026 09:51:19 +0000"
+        },
+        {
+          "messageIndex": 1,
+          "sender": "sales@taperedplus.co.uk",
+          "recipients": [
+            "richardlowthion@sigplc.com",
+            "dean@taperedplus.co.uk"
+          ],
+          "sentDate": "12 November 2026 09:11",
+          "sentAt": "2026-11-12T09:11:00+00:00",
+          "requestRole": "forwarded_request",
+          "headerSnippet": "From: Sales <sales@Taperedplus.co.uk>\nSent: 12 November 2026 09:11\nTo: Lowthion, Rik <richardlowthion@sigplc.com>\nCc: dean <dean@taperedplus.co.uk>\nSubject: [ALERT] RE: 150 to 0 falls - Stockport college"
+        },
+        {
+          "messageIndex": 2,
+          "sender": "richardlowthion@sigplc.com",
+          "recipients": [
+            "sales@taperedplus.co.uk"
+          ],
+          "sentDate": "11 November 2026 16:09",
+          "sentAt": "2026-11-11T16:09:00+00:00",
+          "requestRole": "forwarded_request",
+          "headerSnippet": "From: Lowthion, Rik <richardlowthion@sigplc.com<mailto:richardlowthion@sigplc.com>>\nSent: 11 November 2026 16:09\nTo: Sales <sales@taperedplus.co.uk<mailto:sales@taperedplus.co.uk>>\nSubject: 150 to 0 falls - Stockport college"
+        },
+        {
+          "messageIndex": 0,
+          "sender": "richardlowthion@sigplc.com",
+          "recipients": [
+            "sales@taperedplus.co.uk"
+          ],
+          "sentDate": "Thu, 12 Nov 2026 09:51:19 +0000",
+          "sentAt": "2026-11-12T09:51:19+00:00",
+          "requestRole": "direct_request",
+          "headerSnippet": "From: \"Lowthion, Rik\" <richardlowthion@sigplc.com>\nTo: Sales <sales@Taperedplus.co.uk>\nSubject: RE: 150 to 0 falls - Stockport college\nDate: Thu, 12 Nov 2026 09:51:19 +0000"
+        },
+        {
+          "messageIndex": 1,
+          "sender": "sales@taperedplus.co.uk",
+          "recipients": [
+            "richardlowthion@sigplc.com",
+            "dean@taperedplus.co.uk"
+          ],
+          "sentDate": "12 November 2026 09:11",
+          "sentAt": "2026-11-12T09:11:00+00:00",
+          "requestRole": "forwarded_request",
+          "headerSnippet": "From:\n Sales <sales@Taperedplus.co.uk> \n\nSent: 12 November 2026 09:11\n\nTo: Lowthion, Rik <richardlowthion@sigplc.com>\n\nCc: dean <dean@taperedplus.co.uk>\n\nSubject: [ALERT] RE: 150 to 0 falls - Stockport college"
+        },
+        {
+          "messageIndex": 2,
+          "sender": "richardlowthion@sigplc.com",
+          "recipients": [
+            "sales@taperedplus.co.uk"
+          ],
+          "sentDate": "11 November 2026 16:09",
+          "sentAt": "2026-11-11T16:09:00+00:00",
+          "requestRole": "forwarded_request",
+          "headerSnippet": "From:\n Lowthion, Rik <richardlowthion@sigplc.com>\n\n\nSent: 11 November 2026 16:09\n\nTo: Sales <sales@taperedplus.co.uk>\n\nSubject: 150 to 0 falls - Stockport college"
+        }
+      ],
+      "attachments": [],
+      "inline_images": 3
+    }
+  ],
+  "item": [
+    {
+      "state": "failed",
+      "latest_desired_input_revision": "7f930b815ff428e7379aa9808b502a21055bf1c3bff689e4c89ee585fa349c30",
+      "latest_analyzed_input_revision": "f0d8684e192fbfbba5c359c2f2a9d7968a2188611dedf4d831e82392378bf106",
+      "latest_desired_pipeline_version": "legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.8-flash:thinking-medium:request-domains-ff0f39bd81a2:native-pdf-1:output-v20",
+      "latest_analyzed_pipeline_version": "legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.8-flash:thinking-medium:request-domains-ff0f39bd81a2:native-pdf-1:output-v20"
+    }
+  ],
+  "specification": [
+    {
+      "review_json": {
+        "status": "source_waiting",
+        "reason": "Waiting for current email extraction",
+        "source": null
+      },
+      "last_error": null,
+      "requested_generation": 5,
+      "completed_generation": 4,
+      "scheduled_for": "2026-11-15 23:34:12.071990+00:00",
+      "current_revision": null,
+      "prepared_revision": null
+    }
+  ],
+  "jobs": [
+    {
+      "id": "4b0b514d-4049-41bf-b4fe-ffaefaebee85",
+      "status": "failed",
+      "execution_kind": "analysis",
+      "created_at": "2026-11-12 10:36:57.986918+00:00",
+      "started_at": "2026-11-12 10:38:57.670526+00:00",
+      "completed_at": "2026-11-12 10:57:22.348666+00:00",
+      "attempt_count": 3,
+      "execution_pipeline_version": "legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.8-flash:thinking-medium:request-domains-ff0f39bd81a2:native-pdf-1:output-v20",
+      "last_error": "Specification evidence recovery unresolved: {'Membrane': 'Candidate request timestamp could not be verified', 'VCL': 'Candidate request timestamp could not be verified', 'Decking': 'Candidate request timestamp could not be verified'}; evidence_roles={'Decking': {'requested': 2}, 'Membrane': {'requested': 2}, 'VCL': {'requested': 2}}",
+      "fieldIssues": {
+        "Membrane": "Candidate request timestamp could not be verified",
+        "VCL": "Candidate request timestamp could not be verified",
+        "Decking": "Candidate request timestamp could not be verified"
+      },
+      "noteIssues": {},
+      "evidence": [
+        {
+          "field": "Membrane",
+          "value": "VM Zinc membrane",
+          "source_id": "asset:295826606:attachment:2",
+          "location": "TEXT REGION 8",
+          "snippet": "VM Zinc membrane",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "direct_request",
+          "message_date": "Thu, 12 Nov 2026 09:51:19 +0000",
+          "supersedes": [],
+          "rationale": "Waterproofing membrane identified on the architectural section attachment.",
+          "reference_parts": []
+        },
+        {
+          "field": "VCL",
+          "value": "Aludex Max",
+          "source_id": "asset:295826606:attachment:2",
+          "location": "TEXT REGION 12",
+          "snippet": "Aludex Max, fully supported on 18mm",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "direct_request",
+          "message_date": "Thu, 12 Nov 2026 09:51:19 +0000",
+          "supersedes": [],
+          "rationale": "Vapour control layer specified on the cross-section drawing.",
+          "reference_parts": []
+        },
+        {
+          "field": "Decking",
+          "value": "18mm",
+          "source_id": "asset:295826606:attachment:2",
+          "location": "TEXT REGION 12",
+          "snippet": "Aludex Max, fully supported on 18mm",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "direct_request",
+          "message_date": "Thu, 12 Nov 2026 09:51:19 +0000",
+          "supersedes": [],
+          "rationale": "Substrate/decking specification indicated on the cross-section.",
+          "reference_parts": []
+        },
+        {
+          "field": "Membrane",
+          "value": "VM Zinc membrane",
+          "source_id": "asset:295826606:attachment:2",
+          "location": "TEXT REGION 8",
+          "snippet": "VM Zinc membrane",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "forwarded_request",
+          "message_date": "11 November 2026 16:09",
+          "supersedes": [],
+          "rationale": "Waterproofing membrane identified on the architectural section attachment.",
+          "reference_parts": []
+        },
+        {
+          "field": "VCL",
+          "value": "Aludex Max",
+          "source_id": "asset:295826606:attachment:2",
+          "location": "TEXT REGION 12",
+          "snippet": "Aludex Max, fully supported on 18mm",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "forwarded_request",
+          "message_date": "11 November 2026 16:09",
+          "supersedes": [],
+          "rationale": "Vapour control layer specified on the cross-section drawing.",
+          "reference_parts": []
+        },
+        {
+          "field": "Decking",
+          "value": "18mm",
+          "source_id": "asset:295826606:attachment:2",
+          "location": "TEXT REGION 12",
+          "snippet": "Aludex Max, fully supported on 18mm",
+          "scope": null,
+          "issuer": null,
+          "role": "requested",
+          "request_role": "forwarded_request",
+          "message_date": "11 November 2026 16:09",
+          "supersedes": [],
+          "rationale": "Substrate/decking specification indicated on the cross-section.",
+          "reference_parts": []
+        }
+      ],
+      "sources": [
+        {
+          "sourceId": "asset:295826606:attachment:2",
+          "filename": "image003.png",
+          "sourceType": "attachment",
+          "status": "read",
+          "observedAt": "2026-11-12T09:51:19+00:00",
+          "contentSha256": "6d8b5a119c5c6698ac6eeabc4af361b29540e1b9b3f9d5992bb9276e697e0aae",
+          "supplied_email_match": null
+        }
+      ],
+      "current_resolver_issues": {},
+      "current_resolver_provenance": {
+        "Membrane": {
+          "source": "Email/Attachment",
+          "status": "provided",
+          "selected": {
+            "field": "Membrane",
+            "value": "VM Zinc membrane",
+            "source_id": "asset:295826606:attachment:2",
+            "location": "TEXT REGION 8",
+            "snippet": "VM Zinc membrane",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "forwarded_request",
+            "message_date": "11 November 2026 16:09",
+            "supersedes": [],
+            "rationale": "Waterproofing membrane identified on the architectural section attachment.",
+            "reference_parts": [],
+            "observedAt": "2026-11-11T16:09:00+00:00",
+            "sourceObservedAt": "2026-11-12T09:51:19+00:00",
+            "filename": "image003.png",
+            "contentSha256": "6d8b5a119c5c6698ac6eeabc4af361b29540e1b9b3f9d5992bb9276e697e0aae"
+          },
+          "candidates": [
+            {
+              "field": "Membrane",
+              "value": "VM Zinc membrane",
+              "source_id": "asset:295826606:attachment:2",
+              "location": "TEXT REGION 8",
+              "snippet": "VM Zinc membrane",
+              "scope": null,
+              "issuer": null,
+              "role": "requested",
+              "request_role": "forwarded_request",
+              "message_date": "11 November 2026 16:09",
+              "supersedes": [],
+              "rationale": "Waterproofing membrane identified on the architectural section attachment.",
+              "reference_parts": [],
+              "observedAt": "2026-11-11T16:09:00+00:00",
+              "sourceObservedAt": "2026-11-12T09:51:19+00:00",
+              "filename": "image003.png",
+              "contentSha256": "6d8b5a119c5c6698ac6eeabc4af361b29540e1b9b3f9d5992bb9276e697e0aae"
+            }
+          ],
+          "rejectedCandidates": [
+            {
+              "field": "Membrane",
+              "value": "VM Zinc membrane",
+              "source_id": "asset:295826606:attachment:2",
+              "location": "TEXT REGION 8",
+              "snippet": "VM Zinc membrane",
+              "scope": null,
+              "issuer": null,
+              "role": "requested",
+              "request_role": "direct_request",
+              "message_date": "Thu, 12 Nov 2026 09:51:19 +0000",
+              "supersedes": [],
+              "rationale": "Waterproofing membrane identified on the architectural section attachment.",
+              "reference_parts": [],
+              "reason": "Candidate request timestamp could not be verified",
+              "status": "redundant"
+            }
+          ],
+          "rationale": "Most recent applicable request within the confirmed scope; common values may span roofs"
+        },
+        "Decking": {
+          "source": "Email/Attachment",
+          "status": "provided",
+          "selected": {
+            "field": "Decking",
+            "value": "18mm",
+            "source_id": "asset:295826606:attachment:2",
+            "location": "TEXT REGION 12",
+            "snippet": "Aludex Max, fully supported on 18mm",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "forwarded_request",
+            "message_date": "11 November 2026 16:09",
+            "supersedes": [],
+            "rationale": "Substrate/decking specification indicated on the cross-section.",
+            "reference_parts": [],
+            "observedAt": "2026-11-11T16:09:00+00:00",
+            "sourceObservedAt": "2026-11-12T09:51:19+00:00",
+            "filename": "image003.png",
+            "contentSha256": "6d8b5a119c5c6698ac6eeabc4af361b29540e1b9b3f9d5992bb9276e697e0aae"
+          },
+          "candidates": [
+            {
+              "field": "Decking",
+              "value": "18mm",
+              "source_id": "asset:295826606:attachment:2",
+              "location": "TEXT REGION 12",
+              "snippet": "Aludex Max, fully supported on 18mm",
+              "scope": null,
+              "issuer": null,
+              "role": "requested",
+              "request_role": "forwarded_request",
+              "message_date": "11 November 2026 16:09",
+              "supersedes": [],
+              "rationale": "Substrate/decking specification indicated on the cross-section.",
+              "reference_parts": [],
+              "observedAt": "2026-11-11T16:09:00+00:00",
+              "sourceObservedAt": "2026-11-12T09:51:19+00:00",
+              "filename": "image003.png",
+              "contentSha256": "6d8b5a119c5c6698ac6eeabc4af361b29540e1b9b3f9d5992bb9276e697e0aae"
+            }
+          ],
+          "rejectedCandidates": [
+            {
+              "field": "Decking",
+              "value": "18mm",
+              "source_id": "asset:295826606:attachment:2",
+              "location": "TEXT REGION 12",
+              "snippet": "Aludex Max, fully supported on 18mm",
+              "scope": null,
+              "issuer": null,
+              "role": "requested",
+              "request_role": "direct_request",
+              "message_date": "Thu, 12 Nov 2026 09:51:19 +0000",
+              "supersedes": [],
+              "rationale": "Substrate/decking specification indicated on the cross-section.",
+              "reference_parts": [],
+              "reason": "Candidate request timestamp could not be verified",
+              "status": "redundant"
+            }
+          ],
+          "rationale": "Most recent applicable request within the confirmed scope; common values may span roofs"
+        },
+        "VCL": {
+          "source": "Email/Attachment",
+          "status": "provided",
+          "selected": {
+            "field": "VCL",
+            "value": "Aludex Max",
+            "source_id": "asset:295826606:attachment:2",
+            "location": "TEXT REGION 12",
+            "snippet": "Aludex Max, fully supported on 18mm",
+            "scope": null,
+            "issuer": null,
+            "role": "requested",
+            "request_role": "forwarded_request",
+            "message_date": "11 November 2026 16:09",
+            "supersedes": [],
+            "rationale": "Vapour control layer specified on the cross-section drawing.",
+            "reference_parts": [],
+            "observedAt": "2026-11-11T16:09:00+00:00",
+            "sourceObservedAt": "2026-11-12T09:51:19+00:00",
+            "filename": "image003.png",
+            "contentSha256": "6d8b5a119c5c6698ac6eeabc4af361b29540e1b9b3f9d5992bb9276e697e0aae"
+          },
+          "candidates": [
+            {
+              "field": "VCL",
+              "value": "Aludex Max",
+              "source_id": "asset:295826606:attachment:2",
+              "location": "TEXT REGION 12",
+              "snippet": "Aludex Max, fully supported on 18mm",
+              "scope": null,
+              "issuer": null,
+              "role": "requested",
+              "request_role": "forwarded_request",
+              "message_date": "11 November 2026 16:09",
+              "supersedes": [],
+              "rationale": "Vapour control layer specified on the cross-section drawing.",
+              "reference_parts": [],
+              "observedAt": "2026-11-11T16:09:00+00:00",
+              "sourceObservedAt": "2026-11-12T09:51:19+00:00",
+              "filename": "image003.png",
+              "contentSha256": "6d8b5a119c5c6698ac6eeabc4af361b29540e1b9b3f9d5992bb9276e697e0aae"
+            }
+          ],
+          "rejectedCandidates": [
+            {
+              "field": "VCL",
+              "value": "Aludex Max",
+              "source_id": "asset:295826606:attachment:2",
+              "location": "TEXT REGION 12",
+              "snippet": "Aludex Max, fully supported on 18mm",
+              "scope": null,
+              "issuer": null,
+              "role": "requested",
+              "request_role": "direct_request",
+              "message_date": "Thu, 12 Nov 2026 09:51:19 +0000",
+              "supersedes": [],
+              "rationale": "Vapour control layer specified on the cross-section drawing.",
+              "reference_parts": [],
+              "reason": "Candidate request timestamp could not be verified",
+              "status": "redundant"
+            }
+          ],
+          "rationale": "Most recent applicable request within the confirmed scope; common values may span roofs"
+        }
+      },
+      "after_date_repair_issues": {},
+      "date_repairs": [],
+      "replayed_values": {
+        "Membrane": "VM Zinc membrane",
+        "Decking": "18mm",
+        "VCL": "Aludex Max"
+      }
+    },
+    {
+      "id": "816141a2-2cce-48f2-9a88-f9da67a00942",
+      "status": "completed",
+      "execution_kind": null,
+      "created_at": "2026-11-11 20:23:58.495609+00:00",
+      "started_at": "2026-11-11 20:45:40.094033+00:00",
+      "completed_at": "2026-11-11 20:45:40.493849+00:00",
+      "attempt_count": 0,
+      "execution_pipeline_version": null,
+      "last_error": null
+    },
+    {
+      "id": "1d7ffa0b-e4be-4148-962a-d0c19e507b7a",
+      "status": "completed",
+      "execution_kind": "publication",
+      "created_at": "2026-11-11 19:38:01.104870+00:00",
+      "started_at": "2026-11-11 20:21:21.271267+00:00",
+      "completed_at": "2026-11-11 20:21:48.219840+00:00",
+      "attempt_count": 1,
+      "execution_pipeline_version": "legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.8-flash:thinking-medium:request-domains-ff0f39bd81a2:native-pdf-1:output-v20",
+      "last_error": null
+    },
+    {
+      "id": "cad4920e-89a1-489c-912e-88948e5a30ce",
+      "status": "completed",
+      "execution_kind": "analysis",
+      "created_at": "2026-11-11 16:42:40.413371+00:00",
+      "started_at": "2026-11-11 19:36:12.195636+00:00",
+      "completed_at": "2026-11-11 19:38:01.104870+00:00",
+      "attempt_count": 1,
+      "execution_pipeline_version": "legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.8-flash:thinking-medium:request-domains-ff0f39bd81a2:native-pdf-1:output-v20",
+      "last_error": null
+    }
+  ]
+}

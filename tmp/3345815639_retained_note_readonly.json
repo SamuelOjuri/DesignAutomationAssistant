@@ -1,0 +1,207 @@
+{
+  "observed_at": "2026-11-15 22:44:32.130058+00:00",
+  "item": [
+    {
+      "state": "failed",
+      "latest_desired_input_revision": "85ac0c42a261ae2dbc8de55d6a2ad9fa231dc0d2c79bd63841859df21a3288c1",
+      "latest_analyzed_input_revision": "b8e93fea94f4f76cad27ff15291c4fa2682277eca84b81203e45379813534a3a",
+      "latest_desired_pipeline_version": "legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.8-flash:thinking-medium:request-domains-ff0f39bd81a2:native-pdf-1:output-v20",
+      "latest_analyzed_pipeline_version": "legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.8-flash:thinking-medium:request-domains-ff0f39bd81a2:native-pdf-1:output-v20"
+    }
+  ],
+  "specification": [
+    {
+      "requested_generation": 4,
+      "completed_generation": 3,
+      "scheduled_for": "2026-11-15 23:17:32.458899+00:00",
+      "lease_until": null,
+      "checked_at": "2026-11-15 21:04:39.598989+00:00",
+      "attempt_count": 7,
+      "last_error": null,
+      "review_json": {
+        "status": "source_waiting",
+        "reason": "Waiting for current email extraction",
+        "source": null
+      },
+      "current_revision": null,
+      "prepared_revision": null
+    }
+  ],
+  "jobs": [
+    {
+      "id": "9e9bcffb-5d38-4365-9f3a-117dbba1e63f",
+      "status": "failed",
+      "execution_kind": "analysis",
+      "execution_pipeline_version": "legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.8-flash:thinking-medium:request-domains-ff0f39bd81a2:native-pdf-1:output-v20",
+      "started_at": "2026-11-12 11:07:25.647934+00:00",
+      "completed_at": "2026-11-12 11:29:19.471285+00:00",
+      "created_at": "2026-11-12 11:06:11.572887+00:00",
+      "attempt_count": 3,
+      "last_error": "Request note has an unverified source/excerpt (note index 2)",
+      "fieldIssues": {
+        "Tapered Insulation": "Candidate request timestamp could not be verified"
+      },
+      "noteIssues": {
+        "2": "Request note has an unverified source/excerpt"
+      },
+      "notes": [
+        {
+          "source_id": "asset:295855589:body",
+          "snippet": "Just had confirmation, your markup is correct the second outlet (marked blue circle by yourselves) is to be hidden behind the zinc capping & facia.",
+          "scope": null,
+          "category": "constraint"
+        },
+        {
+          "source_id": "asset:294355194:body",
+          "snippet": "The proposed rear extension comprises a warm flat roof, with shallow falls (expressed internally) of around 5 to 8 degrees. There are three facets to the roof, including one ridge and two valleys, although subject to design requirements, I'm not sure the valley channels are strictly required, and there may be a more sensible way to fall to the designated RWP outlets. The roof is inset behind a perimeter parapet, and to keep costs down, we would like to explore a single ply membrane with a mid-grey finish, to tie in with the Natural Zinc parapet.",
+          "scope": null,
+          "category": "constraint"
+        },
+        {
+          "source_id": "asset:294355194:body",
+          "snippet": "At the same time I would like to try and persuade the client to consider a sedum roof finish, however the budget is tight, and I'm not sure they will be able to stretch that far in the first instance – is it something that could be designed in now, but installed at a later date?",
+          "scope": null,
+          "category": "option"
+        },
+        {
+          "source_id": "asset:294355194:attachment:0",
+          "snippet": "For Sedum Finish allow;\n1mm Spectratex 300 GSM Fleece Membrane\n100mm Sky Garden sedum blanket system",
+          "scope": null,
+          "category": "option"
+        },
+        {
+          "source_id": "asset:294355194:body",
+          "snippet": "At the same time I would like to try and persuade the client to consider a sedum roof finish, however the budget is tight, and I'm not sure they will be able to stretch that far in the first instance - is it something that could be designed in now, but installed at a later date?",
+          "scope": null,
+          "category": "option"
+        }
+      ],
+      "noteSources": [
+        {
+          "sourceId": "asset:294355194:body",
+          "filename": "Email body",
+          "sourceType": "email_body",
+          "status": "read",
+          "observedAt": "2026-11-10T16:15:20+00:00",
+          "contentSha256": "1ac2d7f849786f6c325220120536ba84f9f8ca7fa4e4b73d5e06c76ae5a275eb",
+          "parentSourceId": null
+        },
+        {
+          "sourceId": "asset:294355194:attachment:0",
+          "filename": "25002_4_Technical Coordination_DRAFT 01_16.10.2026.pdf",
+          "sourceType": "attachment",
+          "status": "read",
+          "observedAt": "2026-11-10T16:15:20+00:00",
+          "contentSha256": "5ffda87563e3cdccd615f7d4cc4ac59a14d8cb9fcd88892eba2db238f279db30",
+          "parentSourceId": null
+        },
+        {
+          "sourceId": "asset:295855589:body",
+          "filename": "Email body",
+          "sourceType": "email_body",
+          "status": "read",
+          "observedAt": "2026-11-12T11:04:00+00:00",
+          "contentSha256": "e90a02ffa9dde89e0e40a61d9e638fc2227b262ffa7b75a2d73c191b3481004a",
+          "parentSourceId": null
+        }
+      ],
+      "sourceFailures": []
+    },
+    {
+      "id": "5f729d83-2ddd-486b-a8cd-1d2c84aa0902",
+      "status": "completed",
+      "execution_kind": null,
+      "execution_pipeline_version": null,
+      "started_at": "2026-11-11 20:24:53.575550+00:00",
+      "completed_at": "2026-11-11 20:24:53.995549+00:00",
+      "created_at": "2026-11-11 19:44:33.737185+00:00",
+      "attempt_count": 0,
+      "last_error": null,
+      "fieldIssues": null,
+      "noteIssues": {},
+      "notes": [],
+      "noteSources": [],
+      "sourceFailures": []
+    },
+    {
+      "id": "88bd266a-30b0-4c91-ad06-e7a9f9e949eb",
+      "status": "completed",
+      "execution_kind": "publication",
+      "execution_pipeline_version": "legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.8-flash:thinking-medium:request-domains-ff0f39bd81a2:native-pdf-1:output-v20",
+      "started_at": "2026-11-11 19:26:38.463373+00:00",
+      "completed_at": "2026-11-11 19:27:05.686113+00:00",
+      "created_at": "2026-11-11 16:23:13.852282+00:00",
+      "attempt_count": 1,
+      "last_error": null,
+      "fieldIssues": null,
+      "noteIssues": {},
+      "notes": [],
+      "noteSources": [],
+      "sourceFailures": []
+    },
+    {
+      "id": "a56434dd-d9fa-4ff6-8075-6dc8702c9f1f",
+      "status": "completed",
+      "execution_kind": "analysis",
+      "execution_pipeline_version": "legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.8-flash:thinking-medium:request-domains-ff0f39bd81a2:native-pdf-1:output-v20",
+      "started_at": "2026-11-11 16:19:51.187785+00:00",
+      "completed_at": "2026-11-11 16:23:13.852282+00:00",
+      "created_at": "2026-11-11 15:00:26.705818+00:00",
+      "attempt_count": 1,
+      "last_error": null,
+      "fieldIssues": null,
+      "noteIssues": {},
+      "notes": [],
+      "noteSources": [],
+      "sourceFailures": []
+    },
+    {
+      "id": "418f2ed4-c519-4054-b646-0cb00ced7a35",
+      "status": "completed",
+      "execution_kind": null,
+      "execution_pipeline_version": null,
+      "started_at": "2026-11-11 09:59:56.661956+00:00",
+      "completed_at": "2026-11-11 09:59:57.061898+00:00",
+      "created_at": "2026-11-11 09:59:26.764430+00:00",
+      "attempt_count": 0,
+      "last_error": null,
+      "fieldIssues": null,
+      "noteIssues": {},
+      "notes": [],
+      "noteSources": [],
+      "sourceFailures": []
+    },
+    {
+      "id": "271dab6d-bd28-4cb0-94d5-80373afcd2b7",
+      "status": "completed",
+      "execution_kind": "publication",
+      "execution_pipeline_version": "legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.8-flash:thinking-medium:request-domains-ff0f39bd81a2:output-v18",
+      "started_at": "2026-11-11 09:50:49.723331+00:00",
+      "completed_at": "2026-11-11 09:51:15.075200+00:00",
+      "created_at": "2026-11-11 09:35:18.389761+00:00",
+      "attempt_count": 1,
+      "last_error": null,
+      "fieldIssues": null,
+      "noteIssues": {},
+      "notes": [],
+      "noteSources": [],
+      "sourceFailures": []
+    },
+    {
+      "id": "36fdb925-e5f4-4061-bbb9-6b3f86bb2a97",
+      "status": "completed",
+      "execution_kind": "analysis",
+      "execution_pipeline_version": "legacy-files-82d5612a9efce97660c3a3fef36a731d45597cb3096e58365865727ba719e28e:model-gemini-3.8-flash:thinking-medium:request-domains-ff0f39bd81a2:output-v18",
+      "started_at": "2026-11-11 09:08:05.646132+00:00",
+      "completed_at": "2026-11-11 09:35:18.389761+00:00",
+      "created_at": "2026-11-11 08:41:24.165281+00:00",
+      "attempt_count": 2,
+      "last_error": null,
+      "fieldIssues": null,
+      "noteIssues": {},
+      "notes": [],
+      "noteSources": [],
+      "sourceFailures": []
+    }
+  ]
+}

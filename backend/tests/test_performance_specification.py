@@ -462,7 +462,7 @@ def test_recitation_blocked_source_publishes_with_an_item_review_until_read(case
     artifact = case.db.get(PerformanceSpecificationArtifact, (BOARD, ITEM, record.current_revision))
     assert artifact.translation_json["sourceReviews"] == [note]
     text = pdf_text(case.gateway.uploads[-1][1])
-    assert "Review required: some source documents could not be read." in text
+    assert "Review required: source information is missing or could not be read." in text
     assert "Calder Outlet Revision - 3nr.png: Not transcribed." in text
     assert "Scale: 1:100" in text
     plan.update(status="read", text="Outlet plan")

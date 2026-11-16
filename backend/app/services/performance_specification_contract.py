@@ -17,6 +17,7 @@ from .gemini_schema import gemini_response_schema
 from .gemini_requests import GeminiJSONRequester
 from .specification_semantics import (
     FIELD_DEFINITIONS, PDF_FIELD_NAMES as FIELD_NAMES,
+    ARCHIVE_MEMBER_REVIEW_STATUS, MISSING_CLIENT_EMAIL_REVIEW_STATUS, OVERSIZED_ARCHIVE_REVIEW_STATUS,
     PROVIDER_RECITATION_REVIEW_STATUS, SpecificationField, missing,
 )
 
@@ -24,6 +25,20 @@ from .specification_semantics import (
 SPECIFICATION_VERSION = "performance-specification-v5"
 NOT_PROVIDED = "Not Provided"
 SOURCE_REVIEW_DETAILS = {
+    ARCHIVE_MEMBER_REVIEW_STATUS: (
+        "Unsupported archive member was not read; its contents and any model geometry were not used. "
+        "Review the original file manually if it is needed, or supply supported drawings/images."
+    ),
+    MISSING_CLIENT_EMAIL_REVIEW_STATUS: (
+        "No client email was provided. Recommendations are based on the supplied files only. "
+        "Review those files and confirm the client/requester, request date and request type, "
+        "then record any necessary corrections before marking the specification complete. "
+        "File upload dates are not client request dates."
+    ),
+    OVERSIZED_ARCHIVE_REVIEW_STATUS: (
+        "Not extracted. The ZIP or a nested ZIP exceeds the 40 MiB processing limit. Download and review the original ZIP "
+        "manually, record any necessary corrections, or provide smaller files. The ZIP contents were not used."
+    ),
     PROVIDER_RECITATION_REVIEW_STATUS: (
         "Not transcribed. AI model withheld the transcription (finish_reason=RECITATION), so its "
         "contents were not used. Review this source before relying on this specification."

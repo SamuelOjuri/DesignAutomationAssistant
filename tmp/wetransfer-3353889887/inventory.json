@@ -1,0 +1,402 @@
+{
+  "archive": "C:\\Users\\SamuelOjuri\\Downloads\\wetransfer_13056-albermarle-music-centre_2026-11-10_1027.zip",
+  "archive_bytes": 515317032,
+  "archive_sha256": "d24a6a471da1e5c8447b814853d321336c39badefac1570030977cffdb1dc36c",
+  "entries": 4,
+  "files": 4,
+  "directories": 0,
+  "compressed_member_bytes": 515316427,
+  "expanded_member_bytes": 515316427,
+  "by_suffix": {
+    ".pdf": {
+      "count": 2,
+      "compressed_bytes": 3015572,
+      "expanded_bytes": 3015572
+    },
+    ".zip": {
+      "count": 2,
+      "compressed_bytes": 512300855,
+      "expanded_bytes": 512300855
+    }
+  },
+  "members_over_40MiB": [
+    {
+      "index": 0,
+      "name": "Drone Photos.zip",
+      "directory": false,
+      "suffix": ".zip",
+      "compressed_bytes": 249302536,
+      "expanded_bytes": 249302536,
+      "compression": 0,
+      "encrypted": false,
+      "unsafe_path": false,
+      "symlink": false,
+      "crc32": "0d54cc58"
+    },
+    {
+      "index": 1,
+      "name": "Photos.zip",
+      "directory": false,
+      "suffix": ".zip",
+      "compressed_bytes": 262998319,
+      "expanded_bytes": 262998319,
+      "compression": 0,
+      "encrypted": false,
+      "unsafe_path": false,
+      "symlink": false,
+      "crc32": "2ad830f1"
+    }
+  ],
+  "encrypted_members": [],
+  "unsafe_paths": [],
+  "symlinks": [],
+  "duplicate_names": {},
+  "nested_archives": [
+    {
+      "index": 0,
+      "name": "Drone Photos.zip",
+      "directory": false,
+      "suffix": ".zip",
+      "compressed_bytes": 249302536,
+      "expanded_bytes": 249302536,
+      "compression": 0,
+      "encrypted": false,
+      "unsafe_path": false,
+      "symlink": false,
+      "crc32": "0d54cc58"
+    },
+    {
+      "index": 1,
+      "name": "Photos.zip",
+      "directory": false,
+      "suffix": ".zip",
+      "compressed_bytes": 262998319,
+      "expanded_bytes": 262998319,
+      "compression": 0,
+      "encrypted": false,
+      "unsafe_path": false,
+      "symlink": false,
+      "crc32": "2ad830f1"
+    }
+  ],
+  "nested_inventory": [
+    {
+      "name": "Drone Photos.zip",
+      "entries": 29,
+      "files": 28,
+      "expanded_bytes": 249854945,
+      "compressed_bytes": 249296818,
+      "by_suffix": {
+        ".db": {
+          "count": 1,
+          "compressed_bytes": 374801,
+          "expanded_bytes": 400896
+        },
+        ".jpg": {
+          "count": 27,
+          "compressed_bytes": 248922017,
+          "expanded_bytes": 249454049
+        }
+      },
+      "jpeg_dimensions_bounded_header_read": {
+        "5472x3648": 27
+      },
+      "encrypted": [],
+      "nested_zip": [],
+      "largest_members": [
+        {
+          "name": "Drone Photos/DJI_0280.JPG",
+          "bytes": 10272504
+        },
+        {
+          "name": "Drone Photos/DJI_0260.JPG",
+          "bytes": 10053541
+        },
+        {
+          "name": "Drone Photos/DJI_0270.JPG",
+          "bytes": 9828584
+        },
+        {
+          "name": "Drone Photos/DJI_0279.JPG",
+          "bytes": 9582724
+        },
+        {
+          "name": "Drone Photos/DJI_0269.JPG",
+          "bytes": 9544874
+        },
+        {
+          "name": "Drone Photos/DJI_0266.JPG",
+          "bytes": 9538262
+        },
+        {
+          "name": "Drone Photos/DJI_0268.JPG",
+          "bytes": 9525528
+        },
+        {
+          "name": "Drone Photos/DJI_0265.JPG",
+          "bytes": 9469477
+        },
+        {
+          "name": "Drone Photos/DJI_0263.JPG",
+          "bytes": 9420027
+        },
+        {
+          "name": "Drone Photos/DJI_0267.JPG",
+          "bytes": 9381866
+        }
+      ],
+      "member_names": [
+        "Drone Photos/DJI_0260.JPG",
+        "Drone Photos/DJI_0261.JPG",
+        "Drone Photos/DJI_0262.JPG",
+        "Drone Photos/DJI_0263.JPG",
+        "Drone Photos/DJI_0264.JPG",
+        "Drone Photos/DJI_0265.JPG",
+        "Drone Photos/DJI_0266.JPG",
+        "Drone Photos/DJI_0267.JPG",
+        "Drone Photos/DJI_0268.JPG",
+        "Drone Photos/DJI_0269.JPG",
+        "Drone Photos/DJI_0270.JPG",
+        "Drone Photos/DJI_0271.JPG",
+        "Drone Photos/DJI_0272.JPG",
+        "Drone Photos/DJI_0273.JPG",
+        "Drone Photos/DJI_0274.JPG",
+        "Drone Photos/DJI_0275.JPG",
+        "Drone Photos/DJI_0276.JPG",
+        "Drone Photos/DJI_0277.JPG",
+        "Drone Photos/DJI_0278.JPG",
+        "Drone Photos/DJI_0279.JPG",
+        "Drone Photos/DJI_0280.JPG",
+        "Drone Photos/DJI_0281.JPG",
+        "Drone Photos/DJI_0282.JPG",
+        "Drone Photos/DJI_0283.JPG",
+        "Drone Photos/DJI_0284.JPG",
+        "Drone Photos/DJI_0285.JPG",
+        "Drone Photos/DJI_0286.JPG",
+        "Drone Photos/Thumbs.db"
+      ]
+    },
+    {
+      "name": "Photos.zip",
+      "entries": 48,
+      "files": 47,
+      "expanded_bytes": 264264398,
+      "compressed_bytes": 262989409,
+      "by_suffix": {
+        ".jpg": {
+          "count": 47,
+          "compressed_bytes": 262989409,
+          "expanded_bytes": 264264398
+        }
+      },
+      "jpeg_dimensions_bounded_header_read": {
+        "5712x4284": 45,
+        "4032x3024": 2
+      },
+      "encrypted": [],
+      "nested_zip": [],
+      "largest_members": [
+        {
+          "name": "Photos/IMG_2017.JPG",
+          "bytes": 7441996
+        },
+        {
+          "name": "Photos/IMG_2039.JPG",
+          "bytes": 7406061
+        },
+        {
+          "name": "Photos/IMG_2025.JPG",
+          "bytes": 7246914
+        },
+        {
+          "name": "Photos/IMG_2043.JPG",
+          "bytes": 7211639
+        },
+        {
+          "name": "Photos/IMG_2016.JPG",
+          "bytes": 6513072
+        },
+        {
+          "name": "Photos/IMG_2011.JPG",
+          "bytes": 6499885
+        },
+        {
+          "name": "Photos/IMG_2041.JPG",
+          "bytes": 6477478
+        },
+        {
+          "name": "Photos/IMG_2003.JPG",
+          "bytes": 6472045
+        },
+        {
+          "name": "Photos/IMG_2018.JPG",
+          "bytes": 6461907
+        },
+        {
+          "name": "Photos/IMG_2030.JPG",
+          "bytes": 6249911
+        }
+      ],
+      "member_names": [
+        "Photos/IMG_1993.JPG",
+        "Photos/IMG_1997.JPG",
+        "Photos/IMG_1998.JPG",
+        "Photos/IMG_1999.JPG",
+        "Photos/IMG_2001.JPG",
+        "Photos/IMG_2002.JPG",
+        "Photos/IMG_2003.JPG",
+        "Photos/IMG_2004.JPG",
+        "Photos/IMG_2005.JPG",
+        "Photos/IMG_2006.JPG",
+        "Photos/IMG_2007.JPG",
+        "Photos/IMG_2008.JPG",
+        "Photos/IMG_2009.JPG",
+        "Photos/IMG_2010.JPG",
+        "Photos/IMG_2011.JPG",
+        "Photos/IMG_2012.JPG",
+        "Photos/IMG_2013.JPG",
+        "Photos/IMG_2014.JPG",
+        "Photos/IMG_2015.JPG",
+        "Photos/IMG_2016.JPG",
+        "Photos/IMG_2017.JPG",
+        "Photos/IMG_2018.JPG",
+        "Photos/IMG_2019.JPG",
+        "Photos/IMG_2020.JPG",
+        "Photos/IMG_2021.JPG",
+        "Photos/IMG_2022.JPG",
+        "Photos/IMG_2023.JPG",
+        "Photos/IMG_2024.JPG",
+        "Photos/IMG_2025.JPG",
+        "Photos/IMG_2026.JPG",
+        "Photos/IMG_2027.JPG",
+        "Photos/IMG_2028.JPG",
+        "Photos/IMG_2029.JPG",
+        "Photos/IMG_2030.JPG",
+        "Photos/IMG_2031.JPG",
+        "Photos/IMG_2032.JPG",
+        "Photos/IMG_2033.JPG",
+        "Photos/IMG_2034.JPG",
+        "Photos/IMG_2035.JPG",
+        "Photos/IMG_2036.JPG",
+        "Photos/IMG_2037.JPG",
+        "Photos/IMG_2038.JPG",
+        "Photos/IMG_2039.JPG",
+        "Photos/IMG_2040.JPG",
+        "Photos/IMG_2041.JPG",
+        "Photos/IMG_2042.JPG",
+        "Photos/IMG_2043.JPG"
+      ]
+    }
+  ],
+  "largest_members": [
+    {
+      "index": 1,
+      "name": "Photos.zip",
+      "directory": false,
+      "suffix": ".zip",
+      "compressed_bytes": 262998319,
+      "expanded_bytes": 262998319,
+      "compression": 0,
+      "encrypted": false,
+      "unsafe_path": false,
+      "symlink": false,
+      "crc32": "2ad830f1"
+    },
+    {
+      "index": 0,
+      "name": "Drone Photos.zip",
+      "directory": false,
+      "suffix": ".zip",
+      "compressed_bytes": 249302536,
+      "expanded_bytes": 249302536,
+      "compression": 0,
+      "encrypted": false,
+      "unsafe_path": false,
+      "symlink": false,
+      "crc32": "0d54cc58"
+    },
+    {
+      "index": 2,
+      "name": "A-02-001-Existing Elevation.pdf",
+      "directory": false,
+      "suffix": ".pdf",
+      "compressed_bytes": 2027200,
+      "expanded_bytes": 2027200,
+      "compression": 0,
+      "encrypted": false,
+      "unsafe_path": false,
+      "symlink": false,
+      "crc32": "038bee9e"
+    },
+    {
+      "index": 3,
+      "name": "A-20-001-Proposed Roof Plan Works.pdf",
+      "directory": false,
+      "suffix": ".pdf",
+      "compressed_bytes": 988372,
+      "expanded_bytes": 988372,
+      "compression": 0,
+      "encrypted": false,
+      "unsafe_path": false,
+      "symlink": false,
+      "crc32": "0fe6f596"
+    }
+  ],
+  "likely_relevant_names": [
+    "A-20-001-Proposed Roof Plan Works.pdf"
+  ],
+  "all_members": [
+    {
+      "index": 0,
+      "name": "Drone Photos.zip",
+      "directory": false,
+      "suffix": ".zip",
+      "compressed_bytes": 249302536,
+      "expanded_bytes": 249302536,
+      "compression": 0,
+      "encrypted": false,
+      "unsafe_path": false,
+      "symlink": false,
+      "crc32": "0d54cc58"
+    },
+    {
+      "index": 1,
+      "name": "Photos.zip",
+      "directory": false,
+      "suffix": ".zip",
+      "compressed_bytes": 262998319,
+      "expanded_bytes": 262998319,
+      "compression": 0,
+      "encrypted": false,
+      "unsafe_path": false,
+      "symlink": false,
+      "crc32": "2ad830f1"
+    },
+    {
+      "index": 2,
+      "name": "A-02-001-Existing Elevation.pdf",
+      "directory": false,
+      "suffix": ".pdf",
+      "compressed_bytes": 2027200,
+      "expanded_bytes": 2027200,
+      "compression": 0,
+      "encrypted": false,
+      "unsafe_path": false,
+      "symlink": false,
+      "crc32": "038bee9e"
+    },
+    {
+      "index": 3,
+      "name": "A-20-001-Proposed Roof Plan Works.pdf",
+      "directory": false,
+      "suffix": ".pdf",
+      "compressed_bytes": 988372,
+      "expanded_bytes": 988372,
+      "compression": 0,
+      "encrypted": false,
+      "unsafe_path": false,
+      "symlink": false,
+      "crc32": "0fe6f596"
+    }
+  ]
+}

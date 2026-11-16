@@ -23,8 +23,13 @@ from .parameter_extraction import (
     extract_parameters,
     extract_project_name_from_content,
 )
-from .source_documents import IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_source_records, source_record
-from ..specification_semantics import COMPLETE_SOURCE_STATUSES, SpecificationEvidence, missing
+from .source_documents import (
+    IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_source_records,
+    oversized_archive_file_record, source_record,
+)
+from ..specification_semantics import (
+    COMPLETE_SOURCE_STATUSES, MISSING_CLIENT_EMAIL_REVIEW_STATUS, SpecificationEvidence, missing,
+)
 from ..source_progress import SourceProgress
 from ..specification_request_context import (
     email_messages, internal_address, select_client_request,
@@ -89,6 +94,12 @@ def analyze_downloaded_email_assets(
         progress.record({"sourceId": f"asset:{downloaded.source.asset_id}" + (
             ":body" if downloaded.source.filename.lower().endswith((".eml", ".msg")) else ""), "status": "pending"})
     for downloaded in downloaded_assets:
+        if not downloaded.source.filename.lower().endswith((".eml", ".msg")):
+            # Supplementary files are validated by their reader below. This
+            # lets an oversized ZIP be hashed in bounded chunks for review
+            # rather than loading its full contents into memory before referral.
+            supplementary_assets.append(downloaded)
+            continue
         content = Path(downloaded.temp_path).read_bytes()
         actual_digest = hashlib.sha256(content).hexdigest()
         if actual_digest != downloaded.content_sha256:
@@ -99,9 +110,6 @@ def analyze_downloaded_email_assets(
             raise ValueError(
                 f"downloaded Email asset {downloaded.source.asset_id} size changed on disk"
             )
-        if not downloaded.source.filename.lower().endswith((".eml", ".msg")):
-            supplementary_assets.append(downloaded)
-            continue
         try:
             metadata = {}
             header, body, attachments, inline_images = process_email_content(
@@ -121,6 +129,14 @@ def analyze_downloaded_email_assets(
             request_time = None  # Upload time is not the date of the request.
         parsed_assets.append((request_time or "", downloaded.source.asset_id, downloaded, header, body, attachments, inline_images, metadata))
     def read_supplementary(downloaded):
+        review = oversized_archive_file_record(downloaded.temp_path, downloaded.source.filename,
+            source_id=f"asset:{downloaded.source.asset_id}",
+            file_extension=getattr(downloaded.source, "file_extension", None))
+        if review is not None:
+            if review["contentSha256"] != downloaded.content_sha256 or review["sizeBytes"] != downloaded.size_bytes:
+                raise ValueError("Downloaded source changed before transcription")
+            progress.record(review)
+            return [review]
         content = Path(downloaded.temp_path).read_bytes()
         if hashlib.sha256(content).hexdigest() != downloaded.content_sha256 or len(content) != downloaded.size_bytes:
             raise ValueError("Downloaded source changed before transcription")
@@ -176,6 +192,16 @@ def analyze_downloaded_email_assets(
 
     if any(source["status"] not in COMPLETE_SOURCE_STATUSES for source in manifest):
         raise IncompleteSourceExtraction(manifest)
+    files_only = not any(downloaded.source.filename.lower().endswith((".eml", ".msg"))
+                         for downloaded in downloaded_assets)
+    if files_only:
+        # This is an application-authored absence marker, not a synthetic email
+        # or a source of requester/date evidence. Actual file identities remain
+        # separately recorded in the same immutable input inventory.
+        missing_email_source = source_record("request:missing-client-email", "Client email", b"",
+            source_type="request_context", status=MISSING_CLIENT_EMAIL_REVIEW_STATUS)
+        manifest.append(missing_email_source)
+        progress.record(missing_email_source)
     if len(parsed_assets) > 1 and any(not entry[0] for entry in parsed_assets):
         raise ValueError("Multiple email requests have unreadable sent dates; chronology requires review")
     for record in supplementary_records:
@@ -234,7 +260,7 @@ def analyze_downloaded_email_assets(
             request_role="direct_request",
             rationale="Latest actual outer request timestamp; earlier forwarded dates and upload times excluded",
         )]
-    elif internal_only:
+    elif internal_only or files_only:
         structured_parameters.date_received = structured_parameters.hour_received = None
         structured_parameters.company = structured_parameters.contact = None
         structured_parameters.specification_evidence = [
@@ -243,7 +269,7 @@ def analyze_downloaded_email_assets(
         all_text,
         extracted_parameters=structured_parameters,
     )
-    if internal_only:
+    if internal_only or files_only:
         parameters["Date Received"] = parameters["Hour Received"] = "Not provided"
     query_llm: QueryLlm = client.query_llm
     title_started = time.monotonic()
@@ -261,10 +287,10 @@ def analyze_downloaded_email_assets(
     stage_timings["project_title_seconds"] = round(time.monotonic() - title_started, 3)
     stage_timings["analysis_seconds"] = round(time.monotonic() - started, 3)
     logger.info("analysis_stage_timings %s", stage_timings)
-    sources = {parameter: "Email Content" for parameter in parameters}
+    sources = {parameter: "Provided Files" if files_only else "Email Content" for parameter in parameters}
     intent = build_request_intent(manifest, structured_parameters.specification_request_intent)
     parameters["Reason for Change"] = reason_for_change(intent)
-    sources["Reason for Change"] = "AI recommendation from Email Context"
+    sources["Reason for Change"] = "Reviewer classification required" if files_only else "AI recommendation from Email Context"
 
     result = LegacyAnalysisResult(
         parameters=parameters,
@@ -274,7 +300,7 @@ def analyze_downloaded_email_assets(
         extracted_text_sha256=hashlib.sha256(all_text.encode("utf-8")).hexdigest(),
         performance_parameters={
             **structured_parameters.as_canonical_parameters(),
-            "Date Received": None if internal_only else parameters["Date Received"],
+            "Date Received": None if internal_only or files_only else parameters["Date Received"],
             "Bauder Roof Num": structured_parameters.bauder_roof_num,
         },
         specification_evidence=tuple(e.model_dump() for e in structured_parameters.specification_evidence),

@@ -219,9 +219,9 @@ The reader supports plain text and HTML-only email bodies, PDF/image attachments
 DOCX, text/CSV/TSV/JSON/XML/HTML and XLS/XLSX/**XLSM**. Workbook readers use cached
 values and never execute macros or formulas. The design reader excludes hidden
 worksheets and identifies visible selected values by worksheet/cell, so lookup
-catalogues do not become selected specifications. Uncached formulas, extraction
-limits and unreadable supported sources hold extraction for retry/review rather
-than imply absent fields. Failed per-source manifests are retained in the design
+catalogues do not become selected specifications. Genuinely uncached formulas,
+other extraction limits and unreadable supported sources hold extraction for
+retry/review rather than imply absent fields. Failed per-source manifests are retained in the design
 job's `result_json.sourceExtractionFailure`. PDFs are read individually to preserve
 attachment identity. The extraction model also makes one targeted second pass for
 missing/unverified fields before accepting the extraction.
@@ -234,18 +234,30 @@ column, cell and document limits, plus the overall 500,000-character context lim
 Uncached formulas and actual extraction limits still block incomplete evidence;
 their safe reason is now retained in the job's error and source manifest.
 
-The design reader allows 40 worksheets, while search ingestion keeps 20. Contract
-pricing documents commonly have one worksheet per trade package; the row, cell,
+The design reader extracts the first 40 visible worksheet tabs in workbook order,
+while search ingestion keeps its strict 20-sheet limit. Hidden tabs do not consume
+the design allowance. Additional tabs are omitted with an INFO log and an explicit
+extraction-scope note in the source text; the source manifest records
+`spreadsheetExtraction` with the limit and truncation flag. This authorized sheet
+cutoff does not raise `workbook_incomplete`; the other limits above remain enforced.
+Contract pricing documents commonly have one worksheet per trade package; the row, cell,
 chunk and context limits above still bound their total size. Item `3342464181`
 (job `80c7df2f`) failed all three attempts on a 33-worksheet (27 visible) pricing
 schedule of about 5,600 rows. Read with the design allowance, its visible sheets
 yield 236,000 characters without a notice. A blocking workbook error now names its
 own remedy: recalculating uncached formulas, or supplying a smaller export or
-splitting the workbook for a size/sheet limit.
+splitting the workbook for a size limit.
+
+XLSX/XLSM formula cells with an explicit cached empty string are valid blanks;
+absent caches remain errors and cached numeric zero is preserved. These parser
+fixes need no schema migration or pipeline-version change. Deploy the updated design
+worker and matching services, then use item-scoped reconciliation with
+`--retry-failed` for unchanged inputs whose earlier permanent workbook errors are
+retained. Normal notifications do not automatically retry those failures.
 
 A design job now fails on its first attempt when every incomplete source was
-rejected on its own unchanged bytes: oversize sources, unreadable PDFs/archives,
-incomplete workbooks, and empty, encrypted or over-limit ZIPs
+rejected on its own unchanged bytes: oversize non-archive sources, unreadable PDFs/archives,
+incomplete workbooks, and empty, encrypted or expansion/member/depth-limited ZIPs
 (`PERMANENT_SOURCE_ERROR_CODES`). Retrying cannot change these until a replacement
 file creates new input. Reconciliation treats such a failed job as exhausted for its
 input identity. Provider/transcription failures, `no_readable_text` and
@@ -253,15 +265,16 @@ transcribed-text limits keep the bounded retry, including when they accompany a
 permanent rejection. On 12 November, a 491 MiB WeTransfer ZIP (item `3353889887`,
 jobs `65d14c7f`/`ecc45db0`) and a 128-byte MacBinary header attached in place of a
 PDF (item `3305268547`, job `e3e10183`) each repeated the same rejection on all
-three attempts.
+three attempts. Oversized ZIPs now follow the manual source-review path below.
 
 DWG drawings are intentionally skipped, including inside ZIP archives. Their
 identity/hash and `skipped:dwg` status remain in the source manifest; they are not
 sent to the model and cannot supply field evidence. The remaining readable sources
 can proceed to extraction and publication.
 
-ZIP attachments and configured source ZIPs are expanded in memory. Each member
-retains its own source ID, archive-qualified filename, content hash and parent
+ZIP attachments and configured source ZIPs within the 40 MiB limit are expanded
+in memory. Each read member retains its own source ID, archive-qualified filename,
+content hash and parent
 source ID. Nested archives share a budget of 100 MiB expanded bytes, 200 entries
 (including directories) and three archive levels. Every archive and readable member must
 also fit the 40 MiB source limit, and extracted text remains subject to the
@@ -269,10 +282,62 @@ also fit the 40 MiB source limit, and extracted text remains subject to the
 are recorded as `expanded:archive`; only readable members can supply evidence.
 Unsupported document formats are audited as `skipped:unsupported_format`, including
 ZIP members; they supply no field evidence and allow readable sources to proceed.
-Corrupt, encrypted, empty or oversized archives and supported members that fail
+Unsupported archive OBJ/MTL mesh/material members have a separate metadata-only
+path: they remain compressed and receive `review:unsupported_archive_member`.
+Their records retain the verified containing-archive hash, member index, declared
+size and directory CRC, with no claimed member content hash or verified member
+size. They cannot supply geometry or field evidence, and their unexpanded bytes
+do not consume the 100 MiB actual expansion-work budget. Other unsupported formats
+keep the existing hashed, expansion-bounded handling. Encryption, entry-count,
+nesting and supported-document limits remain enforced.
+Corrupt, encrypted or empty archives and supported non-archive members that fail
 to read still hold extraction for retry/review. The design workbook reader also
 accepts 40 MiB inputs; the independent search ingestion workbook reader retains
 its 20 MiB input limit.
+
+The ZIP processing limit remains **40 MiB**. Larger ZIPs are not opened or sent to
+the model; their original filename, byte count and hash are retained with status
+`review:oversized_archive`. A downloaded supplementary ZIP is audited using a
+streamed hash rather than loading its entire contents into memory. An in-limit ZIP
+containing an oversized nested ZIP is likewise referred for manual review before
+any member is read. Readable emails and other sources continue through analysis.
+The worker logs this policy outcome at INFO rather than failing/retrying extraction
+solely because the ZIP is oversized. Other archive limits remain unchanged.
+
+Specification Review and the PDF explicitly recommend downloading/reviewing the
+original ZIP, recording necessary specification corrections or supplying smaller
+files, and state that its contents were not used. The existing publication policy
+can publish a PDF with this source-review warning; final completion requires an
+audited disposition against the current source. Field edits alone cannot clear it.
+No schema migration or pipeline-version change is required. After deploying matching
+services, explicitly retry exhausted items such as `3353889887` with item-scoped
+reconciliation and `--retry-failed`; their stored earlier failure is not automatically
+reclassified by deployment.
+
+A ZIP in the Email column (or an already configured source-file column) can also
+provide extraction inputs when no `.eml`/`.msg` was supplied. Ordinary empty items
+still wait for inputs, and files outside those admitted columns do not expand
+scope. ZIP replacement or later email arrival changes the input revision and
+retains the normal live-source fences. Name/group/rollout gates are unchanged.
+
+Files-only extraction adds an application-authored `review:missing_client_email`
+source issue. Technical recommendations may come from readable files, but Company,
+Contact, Date Received and Hour Received are not inferred from a drawing issuer,
+survey contact, visit/export timestamp or file upload time. The request type stays
+uncertain until reviewer classification. The generic review panel and PDF warn
+that no client email was provided and ask the reviewer to confirm request context,
+record corrections and address the source issue before completion.
+
+For item `3354188478`, the supplied TaperedView ZIP is 25.27 MiB and contains about
+1.64 MiB of supported JSON/TXT/preview data plus an unsupported 149.46 MiB OBJ mesh
+and an MTL file. The supported files can now be read without expanding that mesh
+or raising the current ZIP/expansion limits. Both missing-email and unread-mesh
+issues remain visible. Deploy matching design/API/reconciliation/specification
+services, then run item-scoped design reconciliation to wake its waiting job;
+this change needs no migration or pipeline-version bump and does not bulk-backfill
+unregistered history. A full model extraction/publication must still succeed in
+the deployed environment.
+
 Application-owned failure messages survive the process boundary in worker logs,
 `last_error` and `result_json.sourceExtractionFailure` without exposing arbitrary
 parser/provider exception text.
@@ -1061,6 +1126,14 @@ constraints and context**. They remain review excerpts, including source/date co
 external linked files are not downloaded or claimed to have been inspected. Notes
 are stored in `source_json.requestNotes` and `translation_json.requestNotes` and cause
 `published_with_review`/`rendered_with_review` status even if all scalar fields resolve.
+
+Request-note recovery can replace a spaced prose hyphen/en dash/em dash variation
+with one uniquely matching literal passage in the same cited source. The exact
+source wording is restored and the before/after quotation and source hash are
+audited. Numeric signs/ranges, identifiers, links, words, scope and category cannot
+change. Ambiguous passages remain unverified. A repaired note and an identical
+correct quotation collapse to one note; unrelated notes are retained. This local
+repair runs before model recovery and does not weaken the literal citation checks.
 
 ```powershell
 venv/Scripts/python.exe -m pytest backend/tests/test_performance_specification.py backend/tests/test_specification_drawing_selection.py backend/tests/test_specification_evidence.py backend/tests/test_specification_sources.py backend/tests/test_specification_publication_hardening.py backend/tests/test_specification_recovery_regressions.py backend/tests/test_specification_semantic_context.py backend/tests/test_pdf_detail_views.py backend/tests/test_source_archives.py backend/tests/test_encrypted_pdf_sources.py -q

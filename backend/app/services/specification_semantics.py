@@ -35,7 +35,15 @@ ARCHIVE_EXPANDED_STATUS = "expanded:archive"
 # no text and cannot supply evidence, but unlike a skip it is never silent: it is
 # published as an explicit source-review note instead of blocking extraction.
 PROVIDER_RECITATION_REVIEW_STATUS = "review:provider_recitation"
-REVIEW_SOURCE_STATUSES = frozenset({PROVIDER_RECITATION_REVIEW_STATUS})
+# ZIPs over the existing size allowance remain unread and require an explicit
+# reviewer disposition; their presence need not fail readable email extraction.
+OVERSIZED_ARCHIVE_REVIEW_STATUS = "review:oversized_archive"
+MISSING_CLIENT_EMAIL_REVIEW_STATUS = "review:missing_client_email"
+ARCHIVE_MEMBER_REVIEW_STATUS = "review:unsupported_archive_member"
+REVIEW_SOURCE_STATUSES = frozenset({
+    PROVIDER_RECITATION_REVIEW_STATUS, OVERSIZED_ARCHIVE_REVIEW_STATUS,
+    MISSING_CLIENT_EMAIL_REVIEW_STATUS, ARCHIVE_MEMBER_REVIEW_STATUS,
+})
 COMPLETE_SOURCE_STATUSES = frozenset({
     "read", ANIMATED_IMAGE_SKIP_STATUS, DWG_SKIP_STATUS, UNSUPPORTED_SOURCE_SKIP_STATUS,
     ENCRYPTED_PDF_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS,

@@ -15,7 +15,7 @@ from .specification_semantics import (
     EVIDENCE_VERSION, REFERENCE_FIELDS, U_VALUE_FIELDS, canonical_label, missing, normalize_reference_dashes,
     normalize_unit_spacing, scale_ratio, tp_reference_revision,
 )
-from .specification_image_text import literal_image_regions
+from .specification_image_text import literal_image_regions, literal_source_texts
 from .specification_request_context import (
     attachment_message, attachment_messages, parent_email, request_context_summary, select_client_request, source_email_messages,
 )
@@ -246,6 +246,92 @@ def repair_note_list_formatting(result, manifest):
             "contentSha256": source["contentSha256"]})
 
 
+def _prose_dash_positions(text):
+    return {
+        match.start(2) for match in re.finditer(
+            r"(?<!\w)([A-Za-z]{2,})\s+([-\u2013\u2014])\s+(?=([A-Za-z]{2,})(?!\w))", text)
+        if not (match[1].isupper() and match[3].isupper())
+    }
+
+
+def repair_note_prose_dashes(result, manifest):
+    """Restore one literal same-source passage after a prose dash substitution.
+
+    Only spaced hyphen/en/em separators between prose words are interchangeable.
+    Numeric signs/ranges, identifiers, URLs and all other punctuation stay literal.
+    This repairs the quotation, never broadens the evidence validator's matching.
+    """
+    issues = request_note_diagnostics(extraction_payload(result, manifest))
+    sources = {source["sourceId"]: source for source in manifest}
+    repaired = False
+    for index, old in enumerate(result.specification_request_notes):
+        source = sources.get(old.source_id)
+        if (issues.get(index) != "Request note has an unverified source/excerpt"
+                or not source or source["status"] != "read" or old.category == "source_link"
+                or re.search(r"\b(?:[a-z][a-z0-9+.-]*://|www\.|mailto:)", old.snippet, re.I)):
+            continue
+        quote = old.snippet.strip()
+        dash_positions = _prose_dash_positions(quote)
+        if not dash_positions:
+            continue
+        key = _normal("".join("-" if index in dash_positions else char for index, char in enumerate(quote)))
+        parts = []
+        for token in re.finditer(r"\s+|\S", quote):
+            parts.append(r"\s+" if token[0].isspace() else
+                         "([-\u2013\u2014])" if token.start() in dash_positions else re.escape(token[0]))
+        boundary = r"[^\W_]"  # Match the verifier's whole-word boundaries.
+        pattern = (rf"(?<!{boundary})" if re.match(boundary, quote[0]) else "") + "".join(parts)
+        if re.match(boundary, quote[-1]):
+            pattern += rf"(?!{boundary})"
+        candidates = {}
+        occurrences = 0
+        ambiguous = False
+        for text in literal_source_texts(source):
+            matches = list(re.finditer(pattern, text, re.I))
+            occurrences += len(matches)
+            if len(matches) > 1 or ("imageTextRegions" in source and occurrences > 1):
+                ambiguous = True
+                break
+            if matches:
+                match = matches[0]
+                snippet = match[0]
+                source_dash_positions = _prose_dash_positions(snippet)
+                matched_positions = {match.start(group) - match.start()
+                                     for group in range(1, len(match.groups()) + 1)}
+                if not matched_positions <= source_dash_positions:
+                    continue  # Case-insensitive matching cannot turn source IDs into prose.
+                source_key = _normal("".join("-" if index in matched_positions else char
+                                             for index, char in enumerate(snippet)))
+                if key != source_key:
+                    continue  # Regex IGNORECASE must not introduce other Unicode letter substitutions.
+                # Plain/HTML alternatives may repeat one email passage with
+                # different whitespace. Different literal dash spellings remain
+                # ambiguous, as do repeated passages within either alternative.
+                candidates.setdefault(_normal(snippet), snippet)
+        if ambiguous or len(candidates) != 1:
+            continue
+        snippet = next(iter(candidates.values()))
+        if len(snippet) > 2000:
+            continue
+        new = old.model_copy(update={"snippet": snippet})
+        if request_note_diagnostics({"sourceManifest": manifest,
+                                     "specificationRequestNotes": [new.model_dump()]}):
+            continue
+        result.specification_request_notes[index] = new
+        repaired = True
+        result._evidence_repairs.append({
+            "reason": "Verified same-source prose-dash repair",
+            "before": old.model_dump(), "after": new.model_dump(),
+            "contentSha256": source["contentSha256"],
+        })
+    if repaired:
+        # A previously corrected quotation may already accompany the rejected
+        # one. Remove only exact duplicates after restoring the literal text.
+        result.specification_request_notes = list({
+            note.model_dump_json(): note for note in result.specification_request_notes
+        }.values())
+
+
 def _same_value(old, new):
     if _excerpt_normal(old.value) == _excerpt_normal(new["value"]):
         return True
@@ -407,6 +493,8 @@ def _issuer_repair_allowed(old, new):
 def _merge_request_notes(initial, recovery, manifest):
     repair_note_list_formatting(initial, manifest)
     repair_note_list_formatting(recovery, manifest)
+    repair_note_prose_dashes(initial, manifest)
+    repair_note_prose_dashes(recovery, manifest)
     initial._evidence_repairs.extend(r for r in recovery._evidence_repairs if r not in initial._evidence_repairs)
     before = request_note_diagnostics(extraction_payload(initial, manifest))
     after = request_note_diagnostics(extraction_payload(recovery, manifest))

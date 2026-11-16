@@ -1,0 +1,7409 @@
+[
+  {
+    "file": "C:\\Users\\SamuelOjuri\\Downloads\\3343973241 - Worksheet.xlsm",
+    "bytes": 110980,
+    "expanded_bytes": 506940,
+    "calculation_properties": {
+      "calcId": "191028"
+    },
+    "vba": true,
+    "external_links": [],
+    "sheet_count": 11,
+    "visible_sheet_count": 11,
+    "sheets": [
+      {
+        "index": 1,
+        "name": "SUMMARY",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:J134"
+        },
+        "xml_rows": 134,
+        "xml_cells": 1080,
+        "populated_cells": 378,
+        "formula_counts": {
+          "all": 19
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "B1": {
+            "value": "Rowlinsons - Belvedere Rd",
+            "type": "s"
+          },
+          "G1": {
+            "value": "Document produced by F. Arif at\nSovereign Surveyors Ltd\nCompany No: 15083464  |  VAT No: 513 3800 27",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Rowlinsons - Belvedere Rd, Salford v3 05.11.26",
+            "type": "s"
+          },
+          "B3": {
+            "value": "46331",
+            "type": "n"
+          },
+          "F4": {
+            "value": "Estimating  \u25c6  BoQs  \u25c6  Programmes  \u25c6  Quantity Surveying  \u25c6  Commercial Management  \u25c6  Design",
+            "type": "s"
+          },
+          "B6": {
+            "value": "3A ROOFING - SUMMARY",
+            "type": "s"
+          },
+          "E6": {
+            "value": "Total:",
+            "type": "s"
+          },
+          "F6": {
+            "value": "0",
+            "type": "n"
+          },
+          "G6": {
+            "value": "Excl. VAT",
+            "type": "s"
+          },
+          "A8": {
+            "value": "Code",
+            "type": "s"
+          },
+          "B8": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C8": {
+            "value": "Qty",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 2,
+        "name": "3.1 Roof Structure",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G54"
+        },
+        "xml_rows": 54,
+        "xml_cells": 303,
+        "populated_cells": 124,
+        "formula_counts": {
+          "all": 46,
+          "missing_str": 42
+        },
+        "missing_formula_samples": [
+          {
+            "cell": "F10",
+            "formula": "IF(AND(ISNUMBER(C10),ISNUMBER(E10)),C10*E10,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "ref": "F10:F51",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F11",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F12",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F13",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F14",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F15",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F16",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F17",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F18",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F19",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F20",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F21",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F22",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F23",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F24",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F25",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F26",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F27",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F28",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F29",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F30",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F31",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F32",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F33",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F34",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F35",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F36",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F37",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F38",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F39",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          }
+        ],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "B1": {
+            "value": "Rowlinsons - Belvedere Rd",
+            "type": "str"
+          },
+          "G1": {
+            "value": "Document produced by F. Arif at\nSovereign Surveyors Ltd\nCompany No: 15083464  |  VAT No: 513 3800 27",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Rowlinsons - Belvedere Rd, Salford v3 05.11.26",
+            "type": "str"
+          },
+          "B3": {
+            "value": "46331",
+            "type": "n"
+          },
+          "F4": {
+            "value": "Estimating  \u25c6  BoQs  \u25c6  Programmes  \u25c6  Quantity Surveying  \u25c6  Commercial Management  \u25c6  Design",
+            "type": "s"
+          },
+          "A6": {
+            "value": "3",
+            "type": "s"
+          },
+          "B6": {
+            "value": "ROOF STRUCTURE",
+            "type": "s"
+          },
+          "A7": {
+            "value": "3.1",
+            "type": "s"
+          },
+          "B7": {
+            "value": "Roof Structure",
+            "type": "s"
+          },
+          "E7": {
+            "value": "Total:",
+            "type": "s"
+          },
+          "F7": {
+            "value": "0",
+            "type": "n"
+          },
+          "G7": {
+            "value": "C/F to summary",
+            "type": "s"
+          }
+        },
+        "missing_rows_context": {
+          "F10": {
+            "value": null,
+            "type": "str"
+          },
+          "B11": {
+            "value": "Parapet Framework\nSupply and install structural parapet framing to roof perimeter, comprising 100mm light gauge steel framing, tracks, studs, bracing, connections and fixings, to the required heights and configuration in accordance with the drawings, specification and specialist subcontractor\u2019s design, complete.",
+            "type": "s"
+          },
+          "F11": {
+            "value": null,
+            "type": "str"
+          },
+          "F12": {
+            "value": null,
+            "type": "str"
+          },
+          "A13": {
+            "value": "3.1.1",
+            "type": "s"
+          },
+          "B13": {
+            "value": "parapet (NW elevation); 600mm high",
+            "type": "s"
+          },
+          "C13": {
+            "value": "20",
+            "type": "n"
+          },
+          "D13": {
+            "value": "Lm",
+            "type": "s"
+          },
+          "F13": {
+            "value": null,
+            "type": "str"
+          },
+          "F14": {
+            "value": null,
+            "type": "str"
+          },
+          "A15": {
+            "value": "3.1.2",
+            "type": "s"
+          },
+          "B15": {
+            "value": "parapet (SE elevation);  approx 1600-1750mm high",
+            "type": "s"
+          },
+          "C15": {
+            "value": "16",
+            "type": "n"
+          },
+          "D15": {
+            "value": "Lm",
+            "type": "s"
+          },
+          "F15": {
+            "value": null,
+            "type": "str"
+          },
+          "F16": {
+            "value": null,
+            "type": "str"
+          },
+          "A17": {
+            "value": "3.1.3",
+            "type": "s"
+          },
+          "B17": {
+            "value": "raking parapet (NE & SW elevation); 1250mm average height (between 600-1900mm)",
+            "type": "s"
+          },
+          "C17": {
+            "value": "80",
+            "type": "n"
+          },
+          "D17": {
+            "value": "Lm",
+            "type": "s"
+          },
+          "F17": {
+            "value": null,
+            "type": "str"
+          },
+          "F18": {
+            "value": null,
+            "type": "str"
+          },
+          "B19": {
+            "value": "Lift Over-run Framework\nSupply and install structural framing to lift over-run perimeter, comprising 100mm light gauge steel framing, tracks, studs, bracing, connections and fixings, to the required heights and configuration in accordance with the drawings, specification and specialist subcontractor\u2019s design, complete.",
+            "type": "s"
+          },
+          "F19": {
+            "value": null,
+            "type": "str"
+          },
+          "F20": {
+            "value": null,
+            "type": "str"
+          },
+          "A21": {
+            "value": "3.1.4",
+            "type": "s"
+          },
+          "B21": {
+            "value": "1600mm high",
+            "type": "s"
+          },
+          "C21": {
+            "value": "8",
+            "type": "n"
+          },
+          "D21": {
+            "value": "Lm",
+            "type": "s"
+          },
+          "F21": {
+            "value": null,
+            "type": "str"
+          },
+          "F22": {
+            "value": null,
+            "type": "str"
+          },
+          "B23": {
+            "value": "Lift Roof Framework\nSupply and install structural roof framing to lift shaft overrun, including supporting members, bracing, connections and fixings, formed to the required dimensions and levels in accordance with the drawings, specification and specialist subcontractor\u2019s design, complete.",
+            "type": "s"
+          },
+          "F23": {
+            "value": null,
+            "type": "str"
+          },
+          "F24": {
+            "value": null,
+            "type": "str"
+          },
+          "A25": {
+            "value": "3.1.5",
+            "type": "s"
+          },
+          "B25": {
+            "value": "generally",
+            "type": "s"
+          },
+          "C25": {
+            "value": "4",
+            "type": "n"
+          },
+          "D25": {
+            "value": "m2",
+            "type": "s"
+          },
+          "F25": {
+            "value": null,
+            "type": "str"
+          },
+          "F26": {
+            "value": null,
+            "type": "str"
+          },
+          "B27": {
+            "value": "Sheathing to Parapet Framework\nSupply and fix 18mm OSB sheathing to both sides of framework, including cutting, jointing and mechanical fixings, to the required heights and configuration in accordance with the drawings and specification, complete.",
+            "type": "s"
+          },
+          "F27": {
+            "value": null,
+            "type": "str"
+          },
+          "F28": {
+            "value": null,
+            "type": "str"
+          },
+          "A29": {
+            "value": "3.1.6",
+            "type": "s"
+          },
+          "B29": {
+            "value": "parapet (NW elevation); 600mm high",
+            "type": "s"
+          },
+          "C29": {
+            "value": "24",
+            "type": "n"
+          },
+          "D29": {
+            "value": "m2",
+            "type": "s"
+          },
+          "F29": {
+            "value": null,
+            "type": "str"
+          },
+          "F30": {
+            "value": null,
+            "type": "str"
+          },
+          "A31": {
+            "value": "3.1.7",
+            "type": "s"
+          },
+          "B31": {
+            "value": "parapet (SE elevation);  approx 1600-1750mm high",
+            "type": "s"
+          },
+          "C31": {
+            "value": "54.4",
+            "type": "n"
+          },
+          "D31": {
+            "value": "m2",
+            "type": "s"
+          },
+          "F31": {
+            "value": null,
+            "type": "str"
+          },
+          "F32": {
+            "value": null,
+            "type": "str"
+          },
+          "A33": {
+            "value": "3.1.8",
+            "type": "s"
+          },
+          "B33": {
+            "value": "raking parapet (NE & SW elevation); 1250mm average height (between 600-1900mm)",
+            "type": "s"
+          },
+          "C33": {
+            "value": "200",
+            "type": "n"
+          },
+          "D33": {
+            "value": "m2",
+            "type": "s"
+          },
+          "F33": {
+            "value": null,
+            "type": "str"
+          },
+          "F34": {
+            "value": null,
+            "type": "str"
+          },
+          "B35": {
+            "value": "Sheathing to external face of ift over-run / roof Framework\nSupply and fix 18mm OSB sheathing to one side of framework, including cutting, jointing and mechanical fixings, to the required heights and configuration in accordance with the drawings and specification, complete.",
+            "type": "s"
+          },
+          "F35": {
+            "value": null,
+            "type": "str"
+          },
+          "F36": {
+            "value": null,
+            "type": "str"
+          },
+          "A37": {
+            "value": "3.1.9",
+            "type": "s"
+          },
+          "B37": {
+            "value": "to walls",
+            "type": "s"
+          },
+          "C37": {
+            "value": "12.8",
+            "type": "n"
+          },
+          "D37": {
+            "value": "m2",
+            "type": "s"
+          },
+          "F37": {
+            "value": null,
+            "type": "str"
+          },
+          "F38": {
+            "value": null,
+            "type": "str"
+          },
+          "A39": {
+            "value": "3.1.10",
+            "type": "s"
+          },
+          "B39": {
+            "value": "to roof",
+            "type": "s"
+          },
+          "C39": {
+            "value": "4",
+            "type": "n"
+          },
+          "D39": {
+            "value": "m2",
+            "type": "s"
+          },
+          "F39": {
+            "value": null,
+            "type": "str"
+          }
+        }
+      },
+      {
+        "index": 3,
+        "name": "4.1 Upper Flat Roof",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G96"
+        },
+        "xml_rows": 96,
+        "xml_cells": 550,
+        "populated_cells": 225,
+        "formula_counts": {
+          "all": 88,
+          "missing_str": 84
+        },
+        "missing_formula_samples": [
+          {
+            "cell": "F10",
+            "formula": "IF(AND(ISNUMBER(C10),ISNUMBER(E10)),C10*E10,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "ref": "F10:F73",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F11",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F12",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F13",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F14",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F15",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F16",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F17",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F18",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F19",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F20",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F21",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F22",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F23",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F24",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F25",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F26",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F27",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F28",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F29",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F30",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F31",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F32",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F33",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F34",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F35",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F36",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F37",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F38",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F39",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          }
+        ],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "B1": {
+            "value": "Rowlinsons - Belvedere Rd",
+            "type": "str"
+          },
+          "G1": {
+            "value": "Document produced by F. Arif at\nSovereign Surveyors Ltd\nCompany No: 15083464  |  VAT No: 513 3800 27",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Rowlinsons - Belvedere Rd, Salford v3 05.11.26",
+            "type": "str"
+          },
+          "B3": {
+            "value": "46331",
+            "type": "n"
+          },
+          "F4": {
+            "value": "Estimating  \u25c6  BoQs  \u25c6  Programmes  \u25c6  Quantity Surveying  \u25c6  Commercial Management  \u25c6  Design",
+            "type": "s"
+          },
+          "A6": {
+            "value": "4",
+            "type": "s"
+          },
+          "B6": {
+            "value": "ROOF COVERINGS AND ASSOCIATED WORKS",
+            "type": "s"
+          },
+          "A7": {
+            "value": "4.1",
+            "type": "s"
+          },
+          "B7": {
+            "value": "Upper Flat Roof",
+            "type": "s"
+          },
+          "E7": {
+            "value": "Total:",
+            "type": "s"
+          },
+          "F7": {
+            "value": "0",
+            "type": "n"
+          },
+          "G7": {
+            "value": "C/F to summary",
+            "type": "s"
+          }
+        },
+        "missing_rows_context": {
+          "F10": {
+            "value": null,
+            "type": "str"
+          },
+          "B11": {
+            "value": "Section Preambles",
+            "type": "s"
+          },
+          "F11": {
+            "value": null,
+            "type": "str"
+          },
+          "F12": {
+            "value": null,
+            "type": "str"
+          },
+          "B13": {
+            "value": "Item deemed to include all necessary materials, fittings, fixings, brackets, connections, laps, joints, seals, supports, accessories, ancillary components, preparation, cutting, adjustment and finishing required for a complete and operational installation.",
+            "type": "s"
+          },
+          "D13": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F13": {
+            "value": null,
+            "type": "str"
+          },
+          "F14": {
+            "value": null,
+            "type": "str"
+          },
+          "B15": {
+            "value": "All works shall be carried out in accordance with the drawings, specifications, relevant standards, manufacturer's recommendations and applicable statutory requirements.",
+            "type": "s"
+          },
+          "D15": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F15": {
+            "value": null,
+            "type": "str"
+          },
+          "F16": {
+            "value": null,
+            "type": "str"
+          },
+          "B17": {
+            "value": "Where the product, material, type, profile, dimensions or other specification has not been stated, the contractor shall propose their intended specification, including manufacturer/product reference where applicable, in the Comments column. Proposed specifications shall be suitable for the intended application and comply with the drawings, performance requirements, relevant standards and statutory requirements",
+            "type": "s"
+          },
+          "D17": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F17": {
+            "value": null,
+            "type": "str"
+          },
+          "F18": {
+            "value": null,
+            "type": "str"
+          },
+          "B19": {
+            "value": "Self-levelling screed to top of roof deck to provide suitable substrate for subsequent roof construction",
+            "type": "s"
+          },
+          "F19": {
+            "value": null,
+            "type": "str"
+          },
+          "F20": {
+            "value": null,
+            "type": "str"
+          },
+          "A21": {
+            "value": "4.1.1",
+            "type": "s"
+          },
+          "B21": {
+            "value": "roof area generally",
+            "type": "s"
+          },
+          "C21": {
+            "value": "570.41999999999996",
+            "type": "n"
+          },
+          "D21": {
+            "value": "m\u00b2",
+            "type": "s"
+          },
+          "F21": {
+            "value": null,
+            "type": "str"
+          },
+          "F22": {
+            "value": null,
+            "type": "str"
+          },
+          "B23": {
+            "value": "Air and Vapour Control Layer; bonded to primed concrete deck, including compatible primer, dressing around penetrations, perimeter and penetration detailing",
+            "type": "s"
+          },
+          "F23": {
+            "value": null,
+            "type": "str"
+          },
+          "F24": {
+            "value": null,
+            "type": "str"
+          },
+          "A25": {
+            "value": "4.1.2",
+            "type": "s"
+          },
+          "B25": {
+            "value": "main roof",
+            "type": "s"
+          },
+          "C25": {
+            "value": "570.41999999999996",
+            "type": "n"
+          },
+          "D25": {
+            "value": "m\u00b2",
+            "type": "s"
+          },
+          "F25": {
+            "value": null,
+            "type": "str"
+          },
+          "F26": {
+            "value": null,
+            "type": "str"
+          },
+          "A27": {
+            "value": "4.1.3",
+            "type": "s"
+          },
+          "B27": {
+            "value": "lift over-run roof",
+            "type": "s"
+          },
+          "C27": {
+            "value": "4.13",
+            "type": "n"
+          },
+          "D27": {
+            "value": "m\u00b2",
+            "type": "s"
+          },
+          "F27": {
+            "value": null,
+            "type": "str"
+          },
+          "F28": {
+            "value": null,
+            "type": "str"
+          },
+          "B29": {
+            "value": "AVCL dressed up vertical faces and over",
+            "type": "s"
+          },
+          "F29": {
+            "value": null,
+            "type": "str"
+          },
+          "F30": {
+            "value": null,
+            "type": "str"
+          },
+          "A31": {
+            "value": "4.1.4",
+            "type": "s"
+          },
+          "B31": {
+            "value": "parapet (NW elevation); 600mm high",
+            "type": "s"
+          },
+          "C31": {
+            "value": "19.670000000000002",
+            "type": "n"
+          },
+          "D31": {
+            "value": "Lm",
+            "type": "s"
+          },
+          "F31": {
+            "value": null,
+            "type": "str"
+          },
+          "F32": {
+            "value": null,
+            "type": "str"
+          },
+          "A33": {
+            "value": "4.1.5",
+            "type": "s"
+          },
+          "B33": {
+            "value": "parapet (SE elevation);  approx 1600-1750mm high",
+            "type": "s"
+          },
+          "C33": {
+            "value": "16",
+            "type": "n"
+          },
+          "D33": {
+            "value": "Lm",
+            "type": "s"
+          },
+          "F33": {
+            "value": null,
+            "type": "str"
+          },
+          "F34": {
+            "value": null,
+            "type": "str"
+          },
+          "A35": {
+            "value": "4.1.6",
+            "type": "s"
+          },
+          "B35": {
+            "value": "raking parapet (NE & SW elevation); 1250mm average height (between 600-1900mm)",
+            "type": "s"
+          },
+          "C35": {
+            "value": "80",
+            "type": "n"
+          },
+          "D35": {
+            "value": "Lm",
+            "type": "s"
+          },
+          "F35": {
+            "value": null,
+            "type": "str"
+          },
+          "F36": {
+            "value": null,
+            "type": "str"
+          },
+          "A37": {
+            "value": "4.1.7",
+            "type": "s"
+          },
+          "B37": {
+            "value": "lift over-run; 1600mm high",
+            "type": "s"
+          },
+          "C37": {
+            "value": "8.1300000000000008",
+            "type": "n"
+          },
+          "D37": {
+            "value": "Lm",
+            "type": "s"
+          },
+          "F37": {
+            "value": null,
+            "type": "str"
+          },
+          "F38": {
+            "value": null,
+            "type": "str"
+          },
+          "A39": {
+            "value": "4.1.8",
+            "type": "s"
+          },
+          "B39": {
+            "value": "AOVs upstand; 900mm high",
+            "type": "s"
+          },
+          "C39": {
+            "value": "20",
+            "type": "n"
+          },
+          "D39": {
+            "value": "Lm",
+            "type": "s"
+          },
+          "F39": {
+            "value": null,
+            "type": "str"
+          }
+        }
+      },
+      {
+        "index": 4,
+        "name": "4.2 Lower Flat Roof",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G68"
+        },
+        "xml_rows": 68,
+        "xml_cells": 384,
+        "populated_cells": 151,
+        "formula_counts": {
+          "all": 60,
+          "missing_str": 56
+        },
+        "missing_formula_samples": [
+          {
+            "cell": "F10",
+            "formula": "IF(AND(ISNUMBER(C10),ISNUMBER(E10)),C10*E10,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "ref": "F10:F65",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F11",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F12",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F13",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F14",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F15",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F16",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F17",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F18",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F19",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F20",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F21",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F22",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F23",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F24",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F25",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F26",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F27",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F28",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F29",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F30",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F31",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F32",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F33",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F34",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F35",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F36",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F37",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F38",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F39",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          }
+        ],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "B1": {
+            "value": "Rowlinsons - Belvedere Rd",
+            "type": "str"
+          },
+          "G1": {
+            "value": "Document produced by F. Arif at\nSovereign Surveyors Ltd\nCompany No: 15083464  |  VAT No: 513 3800 27",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Rowlinsons - Belvedere Rd, Salford v3 05.11.26",
+            "type": "str"
+          },
+          "B3": {
+            "value": "46331",
+            "type": "n"
+          },
+          "F4": {
+            "value": "Estimating  \u25c6  BoQs  \u25c6  Programmes  \u25c6  Quantity Surveying  \u25c6  Commercial Management  \u25c6  Design",
+            "type": "s"
+          },
+          "A6": {
+            "value": "4",
+            "type": "s"
+          },
+          "B6": {
+            "value": "ROOF COVERINGS AND ASSOCIATED WORKS",
+            "type": "s"
+          },
+          "A7": {
+            "value": "4.2",
+            "type": "s"
+          },
+          "B7": {
+            "value": "Lower Flat Roof",
+            "type": "s"
+          },
+          "E7": {
+            "value": "Total:",
+            "type": "s"
+          },
+          "F7": {
+            "value": "0",
+            "type": "n"
+          },
+          "G7": {
+            "value": "C/F to summary",
+            "type": "s"
+          }
+        },
+        "missing_rows_context": {
+          "F10": {
+            "value": null,
+            "type": "str"
+          },
+          "B11": {
+            "value": "Section Preambles",
+            "type": "s"
+          },
+          "F11": {
+            "value": null,
+            "type": "str"
+          },
+          "F12": {
+            "value": null,
+            "type": "str"
+          },
+          "B13": {
+            "value": "Item deemed to include all necessary materials, fittings, fixings, brackets, connections, laps, joints, seals, supports, accessories, ancillary components, preparation, cutting, adjustment and finishing required for a complete and operational installation.",
+            "type": "s"
+          },
+          "D13": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F13": {
+            "value": null,
+            "type": "str"
+          },
+          "F14": {
+            "value": null,
+            "type": "str"
+          },
+          "B15": {
+            "value": "All works shall be carried out in accordance with the drawings, specifications, relevant standards, manufacturer's recommendations and applicable statutory requirements.",
+            "type": "s"
+          },
+          "D15": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F15": {
+            "value": null,
+            "type": "str"
+          },
+          "F16": {
+            "value": null,
+            "type": "str"
+          },
+          "B17": {
+            "value": "Where the product, material, type, profile, dimensions or other specification has not been stated, the contractor shall propose their intended specification, including manufacturer/product reference where applicable, in the Comments column. Proposed specifications shall be suitable for the intended application and comply with the drawings, performance requirements, relevant standards and statutory requirements",
+            "type": "s"
+          },
+          "D17": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F17": {
+            "value": null,
+            "type": "str"
+          },
+          "F18": {
+            "value": null,
+            "type": "str"
+          },
+          "B19": {
+            "value": "Self-levelling screed to top of roof deck to provide suitable substrate for subsequent roof construction",
+            "type": "s"
+          },
+          "F19": {
+            "value": null,
+            "type": "str"
+          },
+          "F20": {
+            "value": null,
+            "type": "str"
+          },
+          "A21": {
+            "value": "4.2.1",
+            "type": "s"
+          },
+          "B21": {
+            "value": "roof area generally",
+            "type": "s"
+          },
+          "C21": {
+            "value": "47.53",
+            "type": "n"
+          },
+          "D21": {
+            "value": "m\u00b2",
+            "type": "s"
+          },
+          "F21": {
+            "value": null,
+            "type": "str"
+          },
+          "F22": {
+            "value": null,
+            "type": "str"
+          },
+          "B23": {
+            "value": "Air and Vapour Control Layer; bonded to primed concrete deck, including compatible primer, sealed laps, joints, dressing around penetrations, perimeter and penetration detailing",
+            "type": "s"
+          },
+          "F23": {
+            "value": null,
+            "type": "str"
+          },
+          "F24": {
+            "value": null,
+            "type": "str"
+          },
+          "A25": {
+            "value": "4.2.2",
+            "type": "s"
+          },
+          "B25": {
+            "value": "roof area generally",
+            "type": "s"
+          },
+          "C25": {
+            "value": "47.53",
+            "type": "n"
+          },
+          "D25": {
+            "value": "m\u00b2",
+            "type": "s"
+          },
+          "F25": {
+            "value": null,
+            "type": "str"
+          },
+          "F26": {
+            "value": null,
+            "type": "str"
+          },
+          "A27": {
+            "value": "4.2.3",
+            "type": "s"
+          },
+          "B27": {
+            "value": "dressed up vertical face of parapet; 300mm high",
+            "type": "s"
+          },
+          "C27": {
+            "value": "28.92",
+            "type": "n"
+          },
+          "D27": {
+            "value": "Lm",
+            "type": "s"
+          },
+          "F27": {
+            "value": null,
+            "type": "str"
+          },
+          "F28": {
+            "value": null,
+            "type": "str"
+          },
+          "A29": {
+            "value": "4.2.4",
+            "type": "s"
+          },
+          "B29": {
+            "value": "extra over for cutting, dressing and sealing around rainwater hopper outlets",
+            "type": "s"
+          },
+          "C29": {
+            "value": "2",
+            "type": "n"
+          },
+          "D29": {
+            "value": "nr",
+            "type": "s"
+          },
+          "F29": {
+            "value": null,
+            "type": "str"
+          },
+          "F30": {
+            "value": null,
+            "type": "str"
+          },
+          "B31": {
+            "value": "Flat Roof Insulation; ROCKWOOL stone wool system Rigid roof insulation, tapered configuration; laid to falls; including cutting as well as around penetrations",
+            "type": "s"
+          },
+          "F31": {
+            "value": null,
+            "type": "str"
+          },
+          "F32": {
+            "value": null,
+            "type": "str"
+          },
+          "A33": {
+            "value": "4.2.5",
+            "type": "s"
+          },
+          "B33": {
+            "value": "roof area generally;  thickness and taper / falls TBC",
+            "type": "s"
+          },
+          "C33": {
+            "value": "47.53",
+            "type": "n"
+          },
+          "D33": {
+            "value": "m\u00b2",
+            "type": "s"
+          },
+          "F33": {
+            "value": null,
+            "type": "str"
+          },
+          "F34": {
+            "value": null,
+            "type": "str"
+          },
+          "A35": {
+            "value": "4.2.6",
+            "type": "s"
+          },
+          "B35": {
+            "value": "extra over for forming gutter recess detail to parapet including fillet detail at abutment with parapet. approx 300mm wide gutter",
+            "type": "s"
+          },
+          "C35": {
+            "value": "24.64",
+            "type": "n"
+          },
+          "D35": {
+            "value": "m",
+            "type": "s"
+          },
+          "F35": {
+            "value": null,
+            "type": "str"
+          },
+          "F36": {
+            "value": null,
+            "type": "str"
+          },
+          "B37": {
+            "value": "Parapet Cavity Closure; Plywood board to top of parapet to close cavity",
+            "type": "s"
+          },
+          "F37": {
+            "value": null,
+            "type": "str"
+          },
+          "F38": {
+            "value": null,
+            "type": "str"
+          },
+          "A39": {
+            "value": "4.2.7",
+            "type": "s"
+          },
+          "B39": {
+            "value": "450mm wide (horizontal)",
+            "type": "s"
+          },
+          "C39": {
+            "value": "24.64",
+            "type": "n"
+          },
+          "D39": {
+            "value": "m",
+            "type": "s"
+          },
+          "F39": {
+            "value": null,
+            "type": "str"
+          }
+        }
+      },
+      {
+        "index": 5,
+        "name": "4.3 Automatic Opening Vents (AO",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G30"
+        },
+        "xml_rows": 30,
+        "xml_cells": 163,
+        "populated_cells": 58,
+        "formula_counts": {
+          "all": 22,
+          "missing_str": 18
+        },
+        "missing_formula_samples": [
+          {
+            "cell": "F10",
+            "formula": "IF(AND(ISNUMBER(C10),ISNUMBER(E10)),C10*E10,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "ref": "F10:F27",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F11",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F12",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F13",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F14",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F15",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F16",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F17",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F18",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F19",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F20",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F21",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F22",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F23",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F24",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F25",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F26",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F27",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          }
+        ],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "B1": {
+            "value": "Rowlinsons - Belvedere Rd",
+            "type": "str"
+          },
+          "G1": {
+            "value": "Document produced by F. Arif at\nSovereign Surveyors Ltd\nCompany No: 15083464  |  VAT No: 513 3800 27",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Rowlinsons - Belvedere Rd, Salford v3 05.11.26",
+            "type": "str"
+          },
+          "B3": {
+            "value": "46331",
+            "type": "n"
+          },
+          "F4": {
+            "value": "Estimating  \u25c6  BoQs  \u25c6  Programmes  \u25c6  Quantity Surveying  \u25c6  Commercial Management  \u25c6  Design",
+            "type": "s"
+          },
+          "A6": {
+            "value": "4",
+            "type": "s"
+          },
+          "B6": {
+            "value": "ROOF COVERINGS AND ASSOCIATED WORKS",
+            "type": "s"
+          },
+          "A7": {
+            "value": "4.3",
+            "type": "s"
+          },
+          "B7": {
+            "value": "Automatic Opening Vents (Aovs)",
+            "type": "s"
+          },
+          "E7": {
+            "value": "Total:",
+            "type": "s"
+          },
+          "F7": {
+            "value": "0",
+            "type": "n"
+          },
+          "G7": {
+            "value": "C/F to summary",
+            "type": "s"
+          }
+        },
+        "missing_rows_context": {
+          "F10": {
+            "value": null,
+            "type": "str"
+          },
+          "B11": {
+            "value": "Section Preambles",
+            "type": "s"
+          },
+          "F11": {
+            "value": null,
+            "type": "str"
+          },
+          "F12": {
+            "value": null,
+            "type": "str"
+          },
+          "B13": {
+            "value": "Item deemed to include all necessary materials, fittings, fixings, brackets, connections, seals, supports, accessories, ancillary components, preparation, cutting, adjustment and finishing required for a complete and operational installation.",
+            "type": "s"
+          },
+          "D13": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F13": {
+            "value": null,
+            "type": "str"
+          },
+          "F14": {
+            "value": null,
+            "type": "str"
+          },
+          "B15": {
+            "value": "All works shall be carried out in accordance with the drawings, specifications, relevant standards, manufacturer's recommendations and applicable statutory requirements.",
+            "type": "s"
+          },
+          "D15": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F15": {
+            "value": null,
+            "type": "str"
+          },
+          "F16": {
+            "value": null,
+            "type": "str"
+          },
+          "B17": {
+            "value": "Where the product, material, type, profile, dimensions or other specification has not been stated, the contractor shall propose their intended specification, including manufacturer/product reference where applicable, in the Comments column. Proposed specifications shall be suitable for the intended application and comply with the drawings, performance requirements, relevant standards and statutory requirements",
+            "type": "s"
+          },
+          "D17": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F17": {
+            "value": null,
+            "type": "str"
+          },
+          "F18": {
+            "value": null,
+            "type": "str"
+          },
+          "B19": {
+            "value": "Automatic Opening Vents (AOVs)",
+            "type": "s"
+          },
+          "F19": {
+            "value": null,
+            "type": "str"
+          },
+          "F20": {
+            "value": null,
+            "type": "str"
+          },
+          "A21": {
+            "value": "4.3.1",
+            "type": "s"
+          },
+          "B21": {
+            "value": "Proprietary louvred smoke and natural ventilator, to specialist subcontractor's design and installation, including actuator, controls, frame, weatherproof stitching screws with mastic seals, weathering components; installed onto steel frame upstand by others\n1800 \u00d7 850mm",
+            "type": "s"
+          },
+          "C21": {
+            "value": "2",
+            "type": "n"
+          },
+          "D21": {
+            "value": "Nr",
+            "type": "s"
+          },
+          "F21": {
+            "value": null,
+            "type": "str"
+          },
+          "F22": {
+            "value": null,
+            "type": "str"
+          },
+          "B23": {
+            "value": "Combined Automatic Opening Vent (AOV) and Roof Hatch",
+            "type": "s"
+          },
+          "F23": {
+            "value": null,
+            "type": "str"
+          },
+          "F24": {
+            "value": null,
+            "type": "str"
+          },
+          "A25": {
+            "value": "4.3.2",
+            "type": "s"
+          },
+          "B25": {
+            "value": "Single-leaf AOV roof access hatch to top of staircase, to specialist subcontractor's design and installation, including cover, weather seals, flashing etc; installed onto steel frame upstand by others\n1250 x 1250mm",
+            "type": "s"
+          },
+          "C25": {
+            "value": "1",
+            "type": "n"
+          },
+          "D25": {
+            "value": "Nr",
+            "type": "s"
+          },
+          "F25": {
+            "value": null,
+            "type": "str"
+          },
+          "F26": {
+            "value": null,
+            "type": "str"
+          },
+          "A27": {
+            "value": "4.3.3",
+            "type": "s"
+          },
+          "B27": {
+            "value": "extra over roof access hatch for proprietary retractable access ladder, including brackets",
+            "type": "s"
+          },
+          "C27": {
+            "value": "1",
+            "type": "n"
+          },
+          "D27": {
+            "value": "Nr",
+            "type": "s"
+          },
+          "F27": {
+            "value": null,
+            "type": "str"
+          }
+        }
+      },
+      {
+        "index": 6,
+        "name": "23.3 Substation Roof incl. RWGs",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G48"
+        },
+        "xml_rows": 48,
+        "xml_cells": 271,
+        "populated_cells": 108,
+        "formula_counts": {
+          "all": 40,
+          "missing_str": 36
+        },
+        "missing_formula_samples": [
+          {
+            "cell": "F10",
+            "formula": "IF(AND(ISNUMBER(C10),ISNUMBER(E10)),C10*E10,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "ref": "F10:F45",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F11",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F12",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F13",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F14",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F15",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F16",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F17",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F18",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F19",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F20",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F21",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F22",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F23",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F24",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F25",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F26",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F27",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F28",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F29",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F30",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F31",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F32",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F33",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F34",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F35",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F36",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F37",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F38",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          },
+          {
+            "cell": "F39",
+            "formula": null,
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {
+              "t": "shared",
+              "si": "0"
+            }
+          }
+        ],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "B1": {
+            "value": "Rowlinsons - Belvedere Rd",
+            "type": "str"
+          },
+          "G1": {
+            "value": "Document produced by F. Arif at\nSovereign Surveyors Ltd\nCompany No: 15083464  |  VAT No: 513 3800 27",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Rowlinsons - Belvedere Rd, Salford v3 05.11.26",
+            "type": "str"
+          },
+          "B3": {
+            "value": "46331",
+            "type": "n"
+          },
+          "F4": {
+            "value": "Estimating  \u25c6  BoQs  \u25c6  Programmes  \u25c6  Quantity Surveying  \u25c6  Commercial Management  \u25c6  Design",
+            "type": "s"
+          },
+          "A6": {
+            "value": "23",
+            "type": "s"
+          },
+          "B6": {
+            "value": "SITE FITTINGS & MINOR BUILDING WORK",
+            "type": "s"
+          },
+          "A7": {
+            "value": "23.3",
+            "type": "s"
+          },
+          "B7": {
+            "value": "Substation Roof Incl. Rwgs",
+            "type": "s"
+          },
+          "E7": {
+            "value": "Total:",
+            "type": "s"
+          },
+          "F7": {
+            "value": "0",
+            "type": "n"
+          },
+          "G7": {
+            "value": "C/F to summary",
+            "type": "s"
+          }
+        },
+        "missing_rows_context": {
+          "F10": {
+            "value": null,
+            "type": "str"
+          },
+          "B11": {
+            "value": "Section Preambles",
+            "type": "s"
+          },
+          "F11": {
+            "value": null,
+            "type": "str"
+          },
+          "F12": {
+            "value": null,
+            "type": "str"
+          },
+          "B13": {
+            "value": "Works shall be carried out in accordance with the drawings, specification, relevant standards, statutory requirements and manufacturer's recommendations.",
+            "type": "s"
+          },
+          "D13": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F13": {
+            "value": null,
+            "type": "str"
+          },
+          "F14": {
+            "value": null,
+            "type": "str"
+          },
+          "B15": {
+            "value": "The Contractor shall verify dimensions, levels, falls, setting out and interfaces with existing structures, drainage, utilities and adjoining surfaces before commencing work.",
+            "type": "s"
+          },
+          "D15": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F15": {
+            "value": null,
+            "type": "str"
+          },
+          "F16": {
+            "value": null,
+            "type": "str"
+          },
+          "B17": {
+            "value": "The Contractor shall allow for all labour, materials, plant, equipment, handling, delivery, setting out, cutting, fitting and incidental work necessary to complete the installations.",
+            "type": "s"
+          },
+          "D17": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F17": {
+            "value": null,
+            "type": "str"
+          },
+          "F18": {
+            "value": null,
+            "type": "str"
+          },
+          "B19": {
+            "value": "Where the product, material, type, profile, dimensions or other specification has not been stated, the Contractor shall propose a suitable specification, including manufacturer and product reference where applicable, in the Comments column.",
+            "type": "s"
+          },
+          "D19": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F19": {
+            "value": null,
+            "type": "str"
+          },
+          "F20": {
+            "value": null,
+            "type": "str"
+          },
+          "B21": {
+            "value": "Proposed materials and systems shall be suitable for their intended application, anticipated loading, exposure conditions, durability and maintenance requirements.",
+            "type": "s"
+          },
+          "D21": {
+            "value": "Note",
+            "type": "s"
+          },
+          "F21": {
+            "value": null,
+            "type": "str"
+          },
+          "F22": {
+            "value": null,
+            "type": "str"
+          },
+          "B23": {
+            "value": "Substation Roof Construction",
+            "type": "s"
+          },
+          "F23": {
+            "value": null,
+            "type": "str"
+          },
+          "F24": {
+            "value": null,
+            "type": "str"
+          },
+          "A25": {
+            "value": "23.3.1",
+            "type": "s"
+          },
+          "B25": {
+            "value": "Roof construction; allowance for either precast concrete or timber joists and plywood decking",
+            "type": "s"
+          },
+          "C25": {
+            "value": "16.059999999999999",
+            "type": "n"
+          },
+          "D25": {
+            "value": "m2",
+            "type": "s"
+          },
+          "F25": {
+            "value": null,
+            "type": "str"
+          },
+          "F26": {
+            "value": null,
+            "type": "str"
+          },
+          "A27": {
+            "value": "23.3.2",
+            "type": "s"
+          },
+          "B27": {
+            "value": "Flat roof coverings; Sarnafil or similar single ply system; comprising vapour control, tapered insulation to form falls and waterproof membrane; complete installation including all fixings, trims and accessories",
+            "type": "s"
+          },
+          "C27": {
+            "value": "16.059999999999999",
+            "type": "n"
+          },
+          "D27": {
+            "value": "m2",
+            "type": "s"
+          },
+          "F27": {
+            "value": null,
+            "type": "str"
+          },
+          "F28": {
+            "value": null,
+            "type": "str"
+          },
+          "A29": {
+            "value": "23.3.3",
+            "type": "s"
+          },
+          "B29": {
+            "value": "extra over for perimeter abutment detail; dress membrane up wall < 300mm and seal under capping",
+            "type": "s"
+          },
+          "C29": {
+            "value": "16.07",
+            "type": "n"
+          },
+          "D29": {
+            "value": "Lm",
+            "type": "s"
+          },
+          "F29": {
+            "value": null,
+            "type": "str"
+          },
+          "F30": {
+            "value": null,
+            "type": "str"
+          },
+          "A31": {
+            "value": "23.3.4",
+            "type": "s"
+          },
+          "B31": {
+            "value": "extra over for formed gutter detail within roof make up",
+            "type": "s"
+          },
+          "C31": {
+            "value": "4.3",
+            "type": "n"
+          },
+          "D31": {
+            "value": "Lm",
+            "type": "s"
+          },
+          "F31": {
+            "value": null,
+            "type": "str"
+          },
+          "F32": {
+            "value": null,
+            "type": "str"
+          },
+          "A33": {
+            "value": "23.3.5",
+            "type": "s"
+          },
+          "B33": {
+            "value": "extra over formed gutter for ends",
+            "type": "s"
+          },
+          "C33": {
+            "value": "2",
+            "type": "n"
+          },
+          "D33": {
+            "value": "Nr",
+            "type": "s"
+          },
+          "F33": {
+            "value": null,
+            "type": "str"
+          },
+          "F34": {
+            "value": null,
+            "type": "str"
+          },
+          "A35": {
+            "value": "23.3.6",
+            "type": "s"
+          },
+          "B35": {
+            "value": "extra over formed gutter for forming outlet through parapet wall; including preformed chute and flashings",
+            "type": "s"
+          },
+          "C35": {
+            "value": "1",
+            "type": "n"
+          },
+          "D35": {
+            "value": "Nr",
+            "type": "s"
+          },
+          "F35": {
+            "value": null,
+            "type": "str"
+          },
+          "F36": {
+            "value": null,
+            "type": "str"
+          },
+          "A37": {
+            "value": "23.3.7",
+            "type": "s"
+          },
+          "B37": {
+            "value": "Purpose made, powder coated, aluminium coping system; including timber subframe, plywood base and all fixings",
+            "type": "s"
+          },
+          "C37": {
+            "value": "16.07",
+            "type": "n"
+          },
+          "D37": {
+            "value": "m2",
+            "type": "s"
+          },
+          "F37": {
+            "value": null,
+            "type": "str"
+          },
+          "F38": {
+            "value": null,
+            "type": "str"
+          },
+          "B39": {
+            "value": "Substation Rainwater goods; Marley or similar upvc; including manufacturers brackets and fixings",
+            "type": "s"
+          },
+          "F39": {
+            "value": null,
+            "type": "str"
+          }
+        }
+      },
+      {
+        "index": 7,
+        "name": "SC Trade Preliminaries",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G100"
+        },
+        "xml_rows": 100,
+        "xml_cells": 362,
+        "populated_cells": 57,
+        "formula_counts": {
+          "all": 24,
+          "missing_str": 20
+        },
+        "missing_formula_samples": [
+          {
+            "cell": "F13",
+            "formula": "IF(AND(ISNUMBER(C13),ISNUMBER(E13)),C13*E13,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F15",
+            "formula": "IF(AND(ISNUMBER(C15),ISNUMBER(E15)),C15*E15,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F17",
+            "formula": "IF(AND(ISNUMBER(C17),ISNUMBER(E17)),C17*E17,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F19",
+            "formula": "IF(AND(ISNUMBER(C19),ISNUMBER(E19)),C19*E19,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F21",
+            "formula": "IF(AND(ISNUMBER(C21),ISNUMBER(E21)),C21*E21,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F23",
+            "formula": "IF(AND(ISNUMBER(C23),ISNUMBER(E23)),C23*E23,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F25",
+            "formula": "IF(AND(ISNUMBER(C25),ISNUMBER(E25)),C25*E25,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F27",
+            "formula": "IF(AND(ISNUMBER(C27),ISNUMBER(E27)),C27*E27,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F29",
+            "formula": "IF(AND(ISNUMBER(C29),ISNUMBER(E29)),C29*E29,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F31",
+            "formula": "IF(AND(ISNUMBER(C31),ISNUMBER(E31)),C31*E31,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F33",
+            "formula": "IF(AND(ISNUMBER(C33),ISNUMBER(E33)),C33*E33,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F35",
+            "formula": "IF(AND(ISNUMBER(C35),ISNUMBER(E35)),C35*E35,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F37",
+            "formula": "IF(AND(ISNUMBER(C37),ISNUMBER(E37)),C37*E37,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F39",
+            "formula": "IF(AND(ISNUMBER(C39),ISNUMBER(E39)),C39*E39,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F41",
+            "formula": "IF(AND(ISNUMBER(C41),ISNUMBER(E41)),C41*E41,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F43",
+            "formula": "IF(AND(ISNUMBER(C43),ISNUMBER(E43)),C43*E43,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F45",
+            "formula": "IF(AND(ISNUMBER(C45),ISNUMBER(E45)),C45*E45,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F47",
+            "formula": "IF(AND(ISNUMBER(C47),ISNUMBER(E47)),C47*E47,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F49",
+            "formula": "IF(AND(ISNUMBER(C49),ISNUMBER(E49)),C49*E49,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F51",
+            "formula": "IF(AND(ISNUMBER(C51),ISNUMBER(E51)),C51*E51,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          }
+        ],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "B1": {
+            "value": "Rowlinsons - Belvedere Rd",
+            "type": "str"
+          },
+          "G1": {
+            "value": "Document produced by F. Arif at\nSovereign Surveyors Ltd\nCompany No: 15083464  |  VAT No: 513 3800 27",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Rowlinsons - Belvedere Rd, Salford v3 05.11.26",
+            "type": "str"
+          },
+          "B3": {
+            "value": "46331",
+            "type": "n"
+          },
+          "F4": {
+            "value": "Estimating  \u25c6  BoQs  \u25c6  Programmes  \u25c6  Quantity Surveying  \u25c6  Commercial Management  \u25c6  Design",
+            "type": "s"
+          },
+          "B7": {
+            "value": "SC Trade Preliminaries",
+            "type": "s"
+          },
+          "E7": {
+            "value": "Total:",
+            "type": "s"
+          },
+          "F7": {
+            "value": "0",
+            "type": "n"
+          },
+          "G7": {
+            "value": "C/F to summary",
+            "type": "s"
+          },
+          "A9": {
+            "value": "Code",
+            "type": "s"
+          },
+          "B9": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C9": {
+            "value": "Qty",
+            "type": "s"
+          }
+        },
+        "missing_rows_context": {
+          "A13": {
+            "value": "1",
+            "type": "n"
+          },
+          "F13": {
+            "value": null,
+            "type": "str"
+          },
+          "A15": {
+            "value": "2",
+            "type": "n"
+          },
+          "F15": {
+            "value": null,
+            "type": "str"
+          },
+          "A17": {
+            "value": "3",
+            "type": "n"
+          },
+          "F17": {
+            "value": null,
+            "type": "str"
+          },
+          "A19": {
+            "value": "4",
+            "type": "n"
+          },
+          "F19": {
+            "value": null,
+            "type": "str"
+          },
+          "A21": {
+            "value": "5",
+            "type": "n"
+          },
+          "F21": {
+            "value": null,
+            "type": "str"
+          },
+          "A23": {
+            "value": "6",
+            "type": "n"
+          },
+          "F23": {
+            "value": null,
+            "type": "str"
+          },
+          "A25": {
+            "value": "7",
+            "type": "n"
+          },
+          "F25": {
+            "value": null,
+            "type": "str"
+          },
+          "A27": {
+            "value": "8",
+            "type": "n"
+          },
+          "F27": {
+            "value": null,
+            "type": "str"
+          },
+          "A29": {
+            "value": "9",
+            "type": "n"
+          },
+          "F29": {
+            "value": null,
+            "type": "str"
+          },
+          "A31": {
+            "value": "10",
+            "type": "n"
+          },
+          "F31": {
+            "value": null,
+            "type": "str"
+          },
+          "A33": {
+            "value": "11",
+            "type": "n"
+          },
+          "F33": {
+            "value": null,
+            "type": "str"
+          },
+          "A35": {
+            "value": "12",
+            "type": "n"
+          },
+          "F35": {
+            "value": null,
+            "type": "str"
+          },
+          "A37": {
+            "value": "13",
+            "type": "n"
+          },
+          "F37": {
+            "value": null,
+            "type": "str"
+          },
+          "A39": {
+            "value": "14",
+            "type": "n"
+          },
+          "F39": {
+            "value": null,
+            "type": "str"
+          },
+          "A41": {
+            "value": "15",
+            "type": "n"
+          },
+          "F41": {
+            "value": null,
+            "type": "str"
+          },
+          "A43": {
+            "value": "16",
+            "type": "n"
+          },
+          "F43": {
+            "value": null,
+            "type": "str"
+          },
+          "A45": {
+            "value": "17",
+            "type": "n"
+          },
+          "F45": {
+            "value": null,
+            "type": "str"
+          },
+          "A47": {
+            "value": "18",
+            "type": "n"
+          },
+          "F47": {
+            "value": null,
+            "type": "str"
+          },
+          "A49": {
+            "value": "19",
+            "type": "n"
+          },
+          "F49": {
+            "value": null,
+            "type": "str"
+          },
+          "A51": {
+            "value": "20",
+            "type": "n"
+          },
+          "F51": {
+            "value": null,
+            "type": "str"
+          }
+        }
+      },
+      {
+        "index": 8,
+        "name": "Items Missed",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G100"
+        },
+        "xml_rows": 100,
+        "xml_cells": 362,
+        "populated_cells": 57,
+        "formula_counts": {
+          "all": 24,
+          "missing_str": 20
+        },
+        "missing_formula_samples": [
+          {
+            "cell": "F13",
+            "formula": "IF(AND(ISNUMBER(C13),ISNUMBER(E13)),C13*E13,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F15",
+            "formula": "IF(AND(ISNUMBER(C15),ISNUMBER(E15)),C15*E15,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F17",
+            "formula": "IF(AND(ISNUMBER(C17),ISNUMBER(E17)),C17*E17,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F19",
+            "formula": "IF(AND(ISNUMBER(C19),ISNUMBER(E19)),C19*E19,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F21",
+            "formula": "IF(AND(ISNUMBER(C21),ISNUMBER(E21)),C21*E21,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F23",
+            "formula": "IF(AND(ISNUMBER(C23),ISNUMBER(E23)),C23*E23,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F25",
+            "formula": "IF(AND(ISNUMBER(C25),ISNUMBER(E25)),C25*E25,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F27",
+            "formula": "IF(AND(ISNUMBER(C27),ISNUMBER(E27)),C27*E27,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F29",
+            "formula": "IF(AND(ISNUMBER(C29),ISNUMBER(E29)),C29*E29,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F31",
+            "formula": "IF(AND(ISNUMBER(C31),ISNUMBER(E31)),C31*E31,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F33",
+            "formula": "IF(AND(ISNUMBER(C33),ISNUMBER(E33)),C33*E33,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F35",
+            "formula": "IF(AND(ISNUMBER(C35),ISNUMBER(E35)),C35*E35,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F37",
+            "formula": "IF(AND(ISNUMBER(C37),ISNUMBER(E37)),C37*E37,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F39",
+            "formula": "IF(AND(ISNUMBER(C39),ISNUMBER(E39)),C39*E39,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F41",
+            "formula": "IF(AND(ISNUMBER(C41),ISNUMBER(E41)),C41*E41,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F43",
+            "formula": "IF(AND(ISNUMBER(C43),ISNUMBER(E43)),C43*E43,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F45",
+            "formula": "IF(AND(ISNUMBER(C45),ISNUMBER(E45)),C45*E45,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F47",
+            "formula": "IF(AND(ISNUMBER(C47),ISNUMBER(E47)),C47*E47,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F49",
+            "formula": "IF(AND(ISNUMBER(C49),ISNUMBER(E49)),C49*E49,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F51",
+            "formula": "IF(AND(ISNUMBER(C51),ISNUMBER(E51)),C51*E51,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          }
+        ],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "B1": {
+            "value": "Rowlinsons - Belvedere Rd",
+            "type": "str"
+          },
+          "G1": {
+            "value": "Document produced by F. Arif at\nSovereign Surveyors Ltd\nCompany No: 15083464  |  VAT No: 513 3800 27",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Rowlinsons - Belvedere Rd, Salford v3 05.11.26",
+            "type": "str"
+          },
+          "B3": {
+            "value": "46331",
+            "type": "n"
+          },
+          "F4": {
+            "value": "Estimating  \u25c6  BoQs  \u25c6  Programmes  \u25c6  Quantity Surveying  \u25c6  Commercial Management  \u25c6  Design",
+            "type": "s"
+          },
+          "B7": {
+            "value": "Items Missed",
+            "type": "s"
+          },
+          "E7": {
+            "value": "Total:",
+            "type": "s"
+          },
+          "F7": {
+            "value": "0",
+            "type": "n"
+          },
+          "G7": {
+            "value": "C/F to summary",
+            "type": "s"
+          },
+          "A9": {
+            "value": "Code",
+            "type": "s"
+          },
+          "B9": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C9": {
+            "value": "Qty",
+            "type": "s"
+          }
+        },
+        "missing_rows_context": {
+          "A13": {
+            "value": "1",
+            "type": "n"
+          },
+          "F13": {
+            "value": null,
+            "type": "str"
+          },
+          "A15": {
+            "value": "2",
+            "type": "n"
+          },
+          "F15": {
+            "value": null,
+            "type": "str"
+          },
+          "A17": {
+            "value": "3",
+            "type": "n"
+          },
+          "F17": {
+            "value": null,
+            "type": "str"
+          },
+          "A19": {
+            "value": "4",
+            "type": "n"
+          },
+          "F19": {
+            "value": null,
+            "type": "str"
+          },
+          "A21": {
+            "value": "5",
+            "type": "n"
+          },
+          "F21": {
+            "value": null,
+            "type": "str"
+          },
+          "A23": {
+            "value": "6",
+            "type": "n"
+          },
+          "F23": {
+            "value": null,
+            "type": "str"
+          },
+          "A25": {
+            "value": "7",
+            "type": "n"
+          },
+          "F25": {
+            "value": null,
+            "type": "str"
+          },
+          "A27": {
+            "value": "8",
+            "type": "n"
+          },
+          "F27": {
+            "value": null,
+            "type": "str"
+          },
+          "A29": {
+            "value": "9",
+            "type": "n"
+          },
+          "F29": {
+            "value": null,
+            "type": "str"
+          },
+          "A31": {
+            "value": "10",
+            "type": "n"
+          },
+          "F31": {
+            "value": null,
+            "type": "str"
+          },
+          "A33": {
+            "value": "11",
+            "type": "n"
+          },
+          "F33": {
+            "value": null,
+            "type": "str"
+          },
+          "A35": {
+            "value": "12",
+            "type": "n"
+          },
+          "F35": {
+            "value": null,
+            "type": "str"
+          },
+          "A37": {
+            "value": "13",
+            "type": "n"
+          },
+          "F37": {
+            "value": null,
+            "type": "str"
+          },
+          "A39": {
+            "value": "14",
+            "type": "n"
+          },
+          "F39": {
+            "value": null,
+            "type": "str"
+          },
+          "A41": {
+            "value": "15",
+            "type": "n"
+          },
+          "F41": {
+            "value": null,
+            "type": "str"
+          },
+          "A43": {
+            "value": "16",
+            "type": "n"
+          },
+          "F43": {
+            "value": null,
+            "type": "str"
+          },
+          "A45": {
+            "value": "17",
+            "type": "n"
+          },
+          "F45": {
+            "value": null,
+            "type": "str"
+          },
+          "A47": {
+            "value": "18",
+            "type": "n"
+          },
+          "F47": {
+            "value": null,
+            "type": "str"
+          },
+          "A49": {
+            "value": "19",
+            "type": "n"
+          },
+          "F49": {
+            "value": null,
+            "type": "str"
+          },
+          "A51": {
+            "value": "20",
+            "type": "n"
+          },
+          "F51": {
+            "value": null,
+            "type": "str"
+          }
+        }
+      },
+      {
+        "index": 9,
+        "name": "Daywork Rates",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G100"
+        },
+        "xml_rows": 100,
+        "xml_cells": 362,
+        "populated_cells": 54,
+        "formula_counts": {
+          "all": 23,
+          "missing_str": 20
+        },
+        "missing_formula_samples": [
+          {
+            "cell": "F13",
+            "formula": "IF(AND(ISNUMBER(C13),ISNUMBER(E13)),C13*E13,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F15",
+            "formula": "IF(AND(ISNUMBER(C15),ISNUMBER(E15)),C15*E15,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F17",
+            "formula": "IF(AND(ISNUMBER(C17),ISNUMBER(E17)),C17*E17,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F19",
+            "formula": "IF(AND(ISNUMBER(C19),ISNUMBER(E19)),C19*E19,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F21",
+            "formula": "IF(AND(ISNUMBER(C21),ISNUMBER(E21)),C21*E21,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F23",
+            "formula": "IF(AND(ISNUMBER(C23),ISNUMBER(E23)),C23*E23,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F25",
+            "formula": "IF(AND(ISNUMBER(C25),ISNUMBER(E25)),C25*E25,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F27",
+            "formula": "IF(AND(ISNUMBER(C27),ISNUMBER(E27)),C27*E27,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F29",
+            "formula": "IF(AND(ISNUMBER(C29),ISNUMBER(E29)),C29*E29,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F31",
+            "formula": "IF(AND(ISNUMBER(C31),ISNUMBER(E31)),C31*E31,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F33",
+            "formula": "IF(AND(ISNUMBER(C33),ISNUMBER(E33)),C33*E33,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F35",
+            "formula": "IF(AND(ISNUMBER(C35),ISNUMBER(E35)),C35*E35,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F37",
+            "formula": "IF(AND(ISNUMBER(C37),ISNUMBER(E37)),C37*E37,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F39",
+            "formula": "IF(AND(ISNUMBER(C39),ISNUMBER(E39)),C39*E39,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F41",
+            "formula": "IF(AND(ISNUMBER(C41),ISNUMBER(E41)),C41*E41,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F43",
+            "formula": "IF(AND(ISNUMBER(C43),ISNUMBER(E43)),C43*E43,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F45",
+            "formula": "IF(AND(ISNUMBER(C45),ISNUMBER(E45)),C45*E45,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F47",
+            "formula": "IF(AND(ISNUMBER(C47),ISNUMBER(E47)),C47*E47,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F49",
+            "formula": "IF(AND(ISNUMBER(C49),ISNUMBER(E49)),C49*E49,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F51",
+            "formula": "IF(AND(ISNUMBER(C51),ISNUMBER(E51)),C51*E51,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          }
+        ],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "B1": {
+            "value": "Rowlinsons - Belvedere Rd",
+            "type": "str"
+          },
+          "G1": {
+            "value": "Document produced by F. Arif at\nSovereign Surveyors Ltd\nCompany No: 15083464  |  VAT No: 513 3800 27",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Rowlinsons - Belvedere Rd, Salford v3 05.11.26",
+            "type": "str"
+          },
+          "B3": {
+            "value": "46331",
+            "type": "n"
+          },
+          "F4": {
+            "value": "Estimating  \u25c6  BoQs  \u25c6  Programmes  \u25c6  Quantity Surveying  \u25c6  Commercial Management  \u25c6  Design",
+            "type": "s"
+          },
+          "B7": {
+            "value": "Daywork Rates",
+            "type": "s"
+          },
+          "A9": {
+            "value": "Code",
+            "type": "s"
+          },
+          "B9": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C9": {
+            "value": "Qty",
+            "type": "s"
+          },
+          "D9": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E9": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F9": {
+            "value": "Total",
+            "type": "s"
+          }
+        },
+        "missing_rows_context": {
+          "A13": {
+            "value": "1",
+            "type": "n"
+          },
+          "F13": {
+            "value": null,
+            "type": "str"
+          },
+          "A15": {
+            "value": "2",
+            "type": "n"
+          },
+          "F15": {
+            "value": null,
+            "type": "str"
+          },
+          "A17": {
+            "value": "3",
+            "type": "n"
+          },
+          "F17": {
+            "value": null,
+            "type": "str"
+          },
+          "A19": {
+            "value": "4",
+            "type": "n"
+          },
+          "F19": {
+            "value": null,
+            "type": "str"
+          },
+          "A21": {
+            "value": "5",
+            "type": "n"
+          },
+          "F21": {
+            "value": null,
+            "type": "str"
+          },
+          "A23": {
+            "value": "6",
+            "type": "n"
+          },
+          "F23": {
+            "value": null,
+            "type": "str"
+          },
+          "A25": {
+            "value": "7",
+            "type": "n"
+          },
+          "F25": {
+            "value": null,
+            "type": "str"
+          },
+          "A27": {
+            "value": "8",
+            "type": "n"
+          },
+          "F27": {
+            "value": null,
+            "type": "str"
+          },
+          "A29": {
+            "value": "9",
+            "type": "n"
+          },
+          "F29": {
+            "value": null,
+            "type": "str"
+          },
+          "A31": {
+            "value": "10",
+            "type": "n"
+          },
+          "F31": {
+            "value": null,
+            "type": "str"
+          },
+          "A33": {
+            "value": "11",
+            "type": "n"
+          },
+          "F33": {
+            "value": null,
+            "type": "str"
+          },
+          "A35": {
+            "value": "12",
+            "type": "n"
+          },
+          "F35": {
+            "value": null,
+            "type": "str"
+          },
+          "A37": {
+            "value": "13",
+            "type": "n"
+          },
+          "F37": {
+            "value": null,
+            "type": "str"
+          },
+          "A39": {
+            "value": "14",
+            "type": "n"
+          },
+          "F39": {
+            "value": null,
+            "type": "str"
+          },
+          "A41": {
+            "value": "15",
+            "type": "n"
+          },
+          "F41": {
+            "value": null,
+            "type": "str"
+          },
+          "A43": {
+            "value": "16",
+            "type": "n"
+          },
+          "F43": {
+            "value": null,
+            "type": "str"
+          },
+          "A45": {
+            "value": "17",
+            "type": "n"
+          },
+          "F45": {
+            "value": null,
+            "type": "str"
+          },
+          "A47": {
+            "value": "18",
+            "type": "n"
+          },
+          "F47": {
+            "value": null,
+            "type": "str"
+          },
+          "A49": {
+            "value": "19",
+            "type": "n"
+          },
+          "F49": {
+            "value": null,
+            "type": "str"
+          },
+          "A51": {
+            "value": "20",
+            "type": "n"
+          },
+          "F51": {
+            "value": null,
+            "type": "str"
+          }
+        }
+      },
+      {
+        "index": 10,
+        "name": "Value Engineering",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G100"
+        },
+        "xml_rows": 100,
+        "xml_cells": 362,
+        "populated_cells": 57,
+        "formula_counts": {
+          "all": 24,
+          "missing_str": 20
+        },
+        "missing_formula_samples": [
+          {
+            "cell": "F13",
+            "formula": "IF(AND(ISNUMBER(C13),ISNUMBER(E13)),C13*E13,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F15",
+            "formula": "IF(AND(ISNUMBER(C15),ISNUMBER(E15)),C15*E15,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F17",
+            "formula": "IF(AND(ISNUMBER(C17),ISNUMBER(E17)),C17*E17,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F19",
+            "formula": "IF(AND(ISNUMBER(C19),ISNUMBER(E19)),C19*E19,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F21",
+            "formula": "IF(AND(ISNUMBER(C21),ISNUMBER(E21)),C21*E21,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F23",
+            "formula": "IF(AND(ISNUMBER(C23),ISNUMBER(E23)),C23*E23,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F25",
+            "formula": "IF(AND(ISNUMBER(C25),ISNUMBER(E25)),C25*E25,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F27",
+            "formula": "IF(AND(ISNUMBER(C27),ISNUMBER(E27)),C27*E27,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F29",
+            "formula": "IF(AND(ISNUMBER(C29),ISNUMBER(E29)),C29*E29,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F31",
+            "formula": "IF(AND(ISNUMBER(C31),ISNUMBER(E31)),C31*E31,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F33",
+            "formula": "IF(AND(ISNUMBER(C33),ISNUMBER(E33)),C33*E33,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F35",
+            "formula": "IF(AND(ISNUMBER(C35),ISNUMBER(E35)),C35*E35,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F37",
+            "formula": "IF(AND(ISNUMBER(C37),ISNUMBER(E37)),C37*E37,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F39",
+            "formula": "IF(AND(ISNUMBER(C39),ISNUMBER(E39)),C39*E39,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F41",
+            "formula": "IF(AND(ISNUMBER(C41),ISNUMBER(E41)),C41*E41,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F43",
+            "formula": "IF(AND(ISNUMBER(C43),ISNUMBER(E43)),C43*E43,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F45",
+            "formula": "IF(AND(ISNUMBER(C45),ISNUMBER(E45)),C45*E45,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F47",
+            "formula": "IF(AND(ISNUMBER(C47),ISNUMBER(E47)),C47*E47,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F49",
+            "formula": "IF(AND(ISNUMBER(C49),ISNUMBER(E49)),C49*E49,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F51",
+            "formula": "IF(AND(ISNUMBER(C51),ISNUMBER(E51)),C51*E51,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          }
+        ],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "B1": {
+            "value": "Rowlinsons - Belvedere Rd",
+            "type": "str"
+          },
+          "G1": {
+            "value": "Document produced by F. Arif at\nSovereign Surveyors Ltd\nCompany No: 15083464  |  VAT No: 513 3800 27",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Rowlinsons - Belvedere Rd, Salford v3 05.11.26",
+            "type": "str"
+          },
+          "B3": {
+            "value": "46331",
+            "type": "n"
+          },
+          "F4": {
+            "value": "Estimating  \u25c6  BoQs  \u25c6  Programmes  \u25c6  Quantity Surveying  \u25c6  Commercial Management  \u25c6  Design",
+            "type": "s"
+          },
+          "B7": {
+            "value": "Value Engineering",
+            "type": "s"
+          },
+          "E7": {
+            "value": "Total:",
+            "type": "s"
+          },
+          "F7": {
+            "value": "0",
+            "type": "n"
+          },
+          "G7": {
+            "value": "C/F to summary",
+            "type": "s"
+          },
+          "A9": {
+            "value": "Code",
+            "type": "s"
+          },
+          "B9": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C9": {
+            "value": "Qty",
+            "type": "s"
+          }
+        },
+        "missing_rows_context": {
+          "A13": {
+            "value": "1",
+            "type": "n"
+          },
+          "F13": {
+            "value": null,
+            "type": "str"
+          },
+          "A15": {
+            "value": "2",
+            "type": "n"
+          },
+          "F15": {
+            "value": null,
+            "type": "str"
+          },
+          "A17": {
+            "value": "3",
+            "type": "n"
+          },
+          "F17": {
+            "value": null,
+            "type": "str"
+          },
+          "A19": {
+            "value": "4",
+            "type": "n"
+          },
+          "F19": {
+            "value": null,
+            "type": "str"
+          },
+          "A21": {
+            "value": "5",
+            "type": "n"
+          },
+          "F21": {
+            "value": null,
+            "type": "str"
+          },
+          "A23": {
+            "value": "6",
+            "type": "n"
+          },
+          "F23": {
+            "value": null,
+            "type": "str"
+          },
+          "A25": {
+            "value": "7",
+            "type": "n"
+          },
+          "F25": {
+            "value": null,
+            "type": "str"
+          },
+          "A27": {
+            "value": "8",
+            "type": "n"
+          },
+          "F27": {
+            "value": null,
+            "type": "str"
+          },
+          "A29": {
+            "value": "9",
+            "type": "n"
+          },
+          "F29": {
+            "value": null,
+            "type": "str"
+          },
+          "A31": {
+            "value": "10",
+            "type": "n"
+          },
+          "F31": {
+            "value": null,
+            "type": "str"
+          },
+          "A33": {
+            "value": "11",
+            "type": "n"
+          },
+          "F33": {
+            "value": null,
+            "type": "str"
+          },
+          "A35": {
+            "value": "12",
+            "type": "n"
+          },
+          "F35": {
+            "value": null,
+            "type": "str"
+          },
+          "A37": {
+            "value": "13",
+            "type": "n"
+          },
+          "F37": {
+            "value": null,
+            "type": "str"
+          },
+          "A39": {
+            "value": "14",
+            "type": "n"
+          },
+          "F39": {
+            "value": null,
+            "type": "str"
+          },
+          "A41": {
+            "value": "15",
+            "type": "n"
+          },
+          "F41": {
+            "value": null,
+            "type": "str"
+          },
+          "A43": {
+            "value": "16",
+            "type": "n"
+          },
+          "F43": {
+            "value": null,
+            "type": "str"
+          },
+          "A45": {
+            "value": "17",
+            "type": "n"
+          },
+          "F45": {
+            "value": null,
+            "type": "str"
+          },
+          "A47": {
+            "value": "18",
+            "type": "n"
+          },
+          "F47": {
+            "value": null,
+            "type": "str"
+          },
+          "A49": {
+            "value": "19",
+            "type": "n"
+          },
+          "F49": {
+            "value": null,
+            "type": "str"
+          },
+          "A51": {
+            "value": "20",
+            "type": "n"
+          },
+          "F51": {
+            "value": null,
+            "type": "str"
+          }
+        }
+      },
+      {
+        "index": 11,
+        "name": "Clarifications & Exclusions",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G100"
+        },
+        "xml_rows": 100,
+        "xml_cells": 362,
+        "populated_cells": 54,
+        "formula_counts": {
+          "all": 23,
+          "missing_str": 20
+        },
+        "missing_formula_samples": [
+          {
+            "cell": "F13",
+            "formula": "IF(AND(ISNUMBER(C13),ISNUMBER(E13)),C13*E13,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F15",
+            "formula": "IF(AND(ISNUMBER(C15),ISNUMBER(E15)),C15*E15,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F17",
+            "formula": "IF(AND(ISNUMBER(C17),ISNUMBER(E17)),C17*E17,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F19",
+            "formula": "IF(AND(ISNUMBER(C19),ISNUMBER(E19)),C19*E19,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F21",
+            "formula": "IF(AND(ISNUMBER(C21),ISNUMBER(E21)),C21*E21,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F23",
+            "formula": "IF(AND(ISNUMBER(C23),ISNUMBER(E23)),C23*E23,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F25",
+            "formula": "IF(AND(ISNUMBER(C25),ISNUMBER(E25)),C25*E25,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F27",
+            "formula": "IF(AND(ISNUMBER(C27),ISNUMBER(E27)),C27*E27,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F29",
+            "formula": "IF(AND(ISNUMBER(C29),ISNUMBER(E29)),C29*E29,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F31",
+            "formula": "IF(AND(ISNUMBER(C31),ISNUMBER(E31)),C31*E31,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F33",
+            "formula": "IF(AND(ISNUMBER(C33),ISNUMBER(E33)),C33*E33,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F35",
+            "formula": "IF(AND(ISNUMBER(C35),ISNUMBER(E35)),C35*E35,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F37",
+            "formula": "IF(AND(ISNUMBER(C37),ISNUMBER(E37)),C37*E37,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F39",
+            "formula": "IF(AND(ISNUMBER(C39),ISNUMBER(E39)),C39*E39,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F41",
+            "formula": "IF(AND(ISNUMBER(C41),ISNUMBER(E41)),C41*E41,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F43",
+            "formula": "IF(AND(ISNUMBER(C43),ISNUMBER(E43)),C43*E43,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F45",
+            "formula": "IF(AND(ISNUMBER(C45),ISNUMBER(E45)),C45*E45,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F47",
+            "formula": "IF(AND(ISNUMBER(C47),ISNUMBER(E47)),C47*E47,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F49",
+            "formula": "IF(AND(ISNUMBER(C49),ISNUMBER(E49)),C49*E49,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          },
+          {
+            "cell": "F51",
+            "formula": "IF(AND(ISNUMBER(C51),ISNUMBER(E51)),C51*E51,\"\")",
+            "type": "str",
+            "cache": null,
+            "v_exists": true,
+            "formula_attrs": {}
+          }
+        ],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "B1": {
+            "value": "Rowlinsons - Belvedere Rd",
+            "type": "str"
+          },
+          "G1": {
+            "value": "Document produced by F. Arif at\nSovereign Surveyors Ltd\nCompany No: 15083464  |  VAT No: 513 3800 27",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Rowlinsons - Belvedere Rd, Salford v3 05.11.26",
+            "type": "str"
+          },
+          "B3": {
+            "value": "46331",
+            "type": "n"
+          },
+          "F4": {
+            "value": "Estimating  \u25c6  BoQs  \u25c6  Programmes  \u25c6  Quantity Surveying  \u25c6  Commercial Management  \u25c6  Design",
+            "type": "s"
+          },
+          "B7": {
+            "value": "Clarifications & Exclusions",
+            "type": "s"
+          },
+          "A9": {
+            "value": "Code",
+            "type": "s"
+          },
+          "B9": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C9": {
+            "value": "Qty",
+            "type": "s"
+          },
+          "D9": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E9": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F9": {
+            "value": "Total",
+            "type": "s"
+          }
+        },
+        "missing_rows_context": {
+          "A13": {
+            "value": "1",
+            "type": "n"
+          },
+          "F13": {
+            "value": null,
+            "type": "str"
+          },
+          "A15": {
+            "value": "2",
+            "type": "n"
+          },
+          "F15": {
+            "value": null,
+            "type": "str"
+          },
+          "A17": {
+            "value": "3",
+            "type": "n"
+          },
+          "F17": {
+            "value": null,
+            "type": "str"
+          },
+          "A19": {
+            "value": "4",
+            "type": "n"
+          },
+          "F19": {
+            "value": null,
+            "type": "str"
+          },
+          "A21": {
+            "value": "5",
+            "type": "n"
+          },
+          "F21": {
+            "value": null,
+            "type": "str"
+          },
+          "A23": {
+            "value": "6",
+            "type": "n"
+          },
+          "F23": {
+            "value": null,
+            "type": "str"
+          },
+          "A25": {
+            "value": "7",
+            "type": "n"
+          },
+          "F25": {
+            "value": null,
+            "type": "str"
+          },
+          "A27": {
+            "value": "8",
+            "type": "n"
+          },
+          "F27": {
+            "value": null,
+            "type": "str"
+          },
+          "A29": {
+            "value": "9",
+            "type": "n"
+          },
+          "F29": {
+            "value": null,
+            "type": "str"
+          },
+          "A31": {
+            "value": "10",
+            "type": "n"
+          },
+          "F31": {
+            "value": null,
+            "type": "str"
+          },
+          "A33": {
+            "value": "11",
+            "type": "n"
+          },
+          "F33": {
+            "value": null,
+            "type": "str"
+          },
+          "A35": {
+            "value": "12",
+            "type": "n"
+          },
+          "F35": {
+            "value": null,
+            "type": "str"
+          },
+          "A37": {
+            "value": "13",
+            "type": "n"
+          },
+          "F37": {
+            "value": null,
+            "type": "str"
+          },
+          "A39": {
+            "value": "14",
+            "type": "n"
+          },
+          "F39": {
+            "value": null,
+            "type": "str"
+          },
+          "A41": {
+            "value": "15",
+            "type": "n"
+          },
+          "F41": {
+            "value": null,
+            "type": "str"
+          },
+          "A43": {
+            "value": "16",
+            "type": "n"
+          },
+          "F43": {
+            "value": null,
+            "type": "str"
+          },
+          "A45": {
+            "value": "17",
+            "type": "n"
+          },
+          "F45": {
+            "value": null,
+            "type": "str"
+          },
+          "A47": {
+            "value": "18",
+            "type": "n"
+          },
+          "F47": {
+            "value": null,
+            "type": "str"
+          },
+          "A49": {
+            "value": "19",
+            "type": "n"
+          },
+          "F49": {
+            "value": null,
+            "type": "str"
+          },
+          "A51": {
+            "value": "20",
+            "type": "n"
+          },
+          "F51": {
+            "value": null,
+            "type": "str"
+          }
+        }
+      }
+    ],
+    "actual_design_extract": {
+      "ok": true,
+      "chars": 35685
+    },
+    "extract_limit_40": {
+      "documents": 42,
+      "chars": 35603,
+      "notices": [],
+      "last_sections": [
+        "sheet:SC Trade Preliminaries:rows:1-51",
+        "sheet:Items Missed:rows:1-51",
+        "sheet:Daywork Rates:rows:1-51",
+        "sheet:Value Engineering:rows:1-51",
+        "sheet:Clarifications & Exclusions:rows:1-51"
+      ]
+    },
+    "extract_limit_100": {
+      "documents": 42,
+      "chars": 35603,
+      "notices": [],
+      "last_sections": [
+        "sheet:SC Trade Preliminaries:rows:1-51",
+        "sheet:Items Missed:rows:1-51",
+        "sheet:Daywork Rates:rows:1-51",
+        "sheet:Value Engineering:rows:1-51",
+        "sheet:Clarifications & Exclusions:rows:1-51"
+      ]
+    }
+  },
+  {
+    "file": "C:\\Users\\SamuelOjuri\\Downloads\\3342464181 - worksheet.xlsx",
+    "bytes": 386481,
+    "expanded_bytes": 1850672,
+    "calculation_properties": {
+      "calcId": "191029"
+    },
+    "vba": false,
+    "external_links": [],
+    "sheet_count": 33,
+    "visible_sheet_count": 27,
+    "sheets": [
+      {
+        "index": 1,
+        "name": "Cover",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F66"
+        },
+        "xml_rows": 66,
+        "xml_cells": 235,
+        "populated_cells": 4,
+        "formula_counts": {},
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A8": {
+            "value": "Holborn Circus",
+            "type": "s"
+          },
+          "A11": {
+            "value": "Main Contract",
+            "type": "s"
+          },
+          "A14": {
+            "value": "Pricing Schedule",
+            "type": "s"
+          },
+          "A17": {
+            "value": "October 2026",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 2,
+        "name": "Contents",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F66"
+        },
+        "xml_rows": 66,
+        "xml_cells": 206,
+        "populated_cells": 48,
+        "formula_counts": {},
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "CONTENTS",
+            "type": "s"
+          },
+          "A3": {
+            "value": "Section",
+            "type": "s"
+          },
+          "A5": {
+            "value": "1",
+            "type": "n"
+          },
+          "B5": {
+            "value": "Preambles",
+            "type": "s"
+          },
+          "A7": {
+            "value": "2",
+            "type": "n"
+          },
+          "B7": {
+            "value": "Main Works",
+            "type": "s"
+          },
+          "A8": {
+            "value": "2.1",
+            "type": "n"
+          },
+          "B8": {
+            "value": "Preliminaries",
+            "type": "s"
+          },
+          "A9": {
+            "value": "2.2000000000000002",
+            "type": "n"
+          },
+          "B9": {
+            "value": "Enabling Works",
+            "type": "s"
+          },
+          "A10": {
+            "value": "2.2999999999999998",
+            "type": "n"
+          },
+          "B10": {
+            "value": "Substructure",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 3,
+        "name": "1",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F427"
+        },
+        "xml_rows": 424,
+        "xml_cells": 2464,
+        "populated_cells": 176,
+        "formula_counts": {
+          "all": 7
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "1. PREAMBLES",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "B3": {
+            "value": "Generally",
+            "type": "s"
+          },
+          "A5": {
+            "value": "A",
+            "type": "s"
+          },
+          "B5": {
+            "value": "The quantities of materials required for the works are to be ascertained from the Tender Drawings and Specification(s). The descriptions are not intended to describe all works necessary to complete the item nor are they exhaustive; The Contractor shall ascertain the full scope of the works from the Tender Drawings and Specification(s) and their tender is deemed to include for all such works as are necessary for the complete and proper execution of the Works.",
+            "type": "s"
+          },
+          "D13": {
+            "value": "Item",
+            "type": "s"
+          },
+          "A15": {
+            "value": "B",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 4,
+        "name": "2.1",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:P984"
+        },
+        "xml_rows": 984,
+        "xml_cells": 10232,
+        "populated_cells": 874,
+        "formula_counts": {
+          "all": 31
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.1. PRELIMINARIES",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Time-Related / Fixed Charge",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Fixed Charge",
+            "type": "s"
+          },
+          "H2": {
+            "value": "Time Charge",
+            "type": "s"
+          },
+          "D3": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "E3": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "F3": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "G3": {
+            "value": "Total (\u00a3)",
+            "type": "s"
+          },
+          "H3": {
+            "value": "Period",
+            "type": "s"
+          },
+          "K3": {
+            "value": "Quantity",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 5,
+        "name": "2.2",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G356"
+        },
+        "xml_rows": 356,
+        "xml_cells": 2312,
+        "populated_cells": 554,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.2. Enabling Works",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "G2": {
+            "value": "DO NOT ALTER COLUMN",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Major Demolition Works",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Basement Levels B1-B3",
+            "type": "s"
+          },
+          "B8": {
+            "value": "Allowance to form openings in existing lift core to create lift openings ",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 6,
+        "name": "2.3",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F68"
+        },
+        "xml_rows": 68,
+        "xml_cells": 408,
+        "populated_cells": 13,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.3. Substructure",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Lowest Floor Construction ",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Refer to 2.20 Optional Costs for B3 Sprinkler Slab",
+            "type": "s"
+          },
+          "B10": {
+            "value": "Any other item, CONTRACTOR TO LIST:",
+            "type": "s"
+          },
+          "B68": {
+            "value": "Substructure Total",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 7,
+        "name": "2.4",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G194"
+        },
+        "xml_rows": 194,
+        "xml_cells": 1222,
+        "populated_cells": 177,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.4. Frame",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "G2": {
+            "value": "DO NOT ALTER COLUMN",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Steel Frames",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Framing; all structural steelwork including plates and stiffeners designed in accordance with BS EN 10025,  grade S355; including for all necessary fixing and accessories to complete work",
+            "type": "s"
+          },
+          "B8": {
+            "value": "Ground Floor",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 8,
+        "name": "2.5",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G58"
+        },
+        "xml_rows": 58,
+        "xml_cells": 356,
+        "populated_cells": 29,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.5. Upper Floors",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "G2": {
+            "value": "DO NOT ALTER COLUMN",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Floors",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Roof Level",
+            "type": "s"
+          },
+          "B8": {
+            "value": "S1 - 0.9 60mm COMFLOR - 120mm thick - Lightweight concrete, A393 Mesh, including connecting back into existing structure ",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 9,
+        "name": "2.6",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G238"
+        },
+        "xml_rows": 238,
+        "xml_cells": 1450,
+        "populated_cells": 113,
+        "formula_counts": {
+          "all": 5
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.6. Roof (Fixed)",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "G2": {
+            "value": "DO NOT ALTER COLUMN",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Roof Coverings",
+            "type": "s"
+          },
+          "B6": {
+            "value": "RFS-A01 - Roof Level - Non-Plant - Inverted waterproofing Roof System + Paving",
+            "type": "s"
+          },
+          "G6": {
+            "value": "3.7",
+            "type": "n"
+          }
+        }
+      },
+      {
+        "index": 10,
+        "name": "2.7",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G53"
+        },
+        "xml_rows": 53,
+        "xml_cells": 331,
+        "populated_cells": 41,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.7. Stairs and Ramps",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "G2": {
+            "value": "DO NOT ALTER COLUMN",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Stairs / Ramp Structures",
+            "type": "s"
+          },
+          "B6": {
+            "value": "STR-A00 - Feature Stair (Atrium) - Repair work to existing nosing's - To glass steps",
+            "type": "s"
+          },
+          "G6": {
+            "value": "5.0999999999999996",
+            "type": "n"
+          }
+        }
+      },
+      {
+        "index": 11,
+        "name": "2.8",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G87"
+        },
+        "xml_rows": 87,
+        "xml_cells": 551,
+        "populated_cells": 81,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.8. External Walls",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "G2": {
+            "value": "DO NOT ALTER COLUMN",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "External Enclosing Walls Above Ground Level",
+            "type": "s"
+          },
+          "B6": {
+            "value": "High Holborn Elevation ",
+            "type": "s"
+          },
+          "B8": {
+            "value": "Demolition of existing granite brise-soleil to glazed units",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 12,
+        "name": "2.9",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G49"
+        },
+        "xml_rows": 49,
+        "xml_cells": 308,
+        "populated_cells": 47,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.9. Windows and External Doors",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "G2": {
+            "value": "DO NOT ALTER COLUMN",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "External Windows",
+            "type": "s"
+          },
+          "B6": {
+            "value": "WN-A03 - Roof Pavillion - Full height Frameless Window with T-Section mullion",
+            "type": "s"
+          },
+          "G6": {
+            "value": "6.5",
+            "type": "n"
+          }
+        }
+      },
+      {
+        "index": 13,
+        "name": "2.10",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G213"
+        },
+        "xml_rows": 213,
+        "xml_cells": 1394,
+        "populated_cells": 262,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.10. Internal Walls and Partitions",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "G2": {
+            "value": "DO NOT ALTER COLUMN",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Walls and Partitions",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Basement Level B3",
+            "type": "s"
+          },
+          "B8": {
+            "value": "IWS-P01 - Metal Stud Wall System - No fire rating",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 14,
+        "name": "2.11",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G307"
+        },
+        "xml_rows": 307,
+        "xml_cells": 1843,
+        "populated_cells": 243,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.11. Internal Doors",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "G2": {
+            "value": "DO NOT ALTER COLUMN",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Internal Doors",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Basement Level B3",
+            "type": "s"
+          },
+          "B8": {
+            "value": "WCs",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 15,
+        "name": "2.12",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G771"
+        },
+        "xml_rows": 771,
+        "xml_cells": 4846,
+        "populated_cells": 697,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.12. Internal Finishes",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "G2": {
+            "value": "DO NOT ALTER COLUMN",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Wall Finishes",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Basement Level B3",
+            "type": "s"
+          },
+          "B8": {
+            "value": "FF Cores",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 16,
+        "name": "2.13",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G226"
+        },
+        "xml_rows": 226,
+        "xml_cells": 1452,
+        "populated_cells": 278,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.13. Fittings, Furnishings, and Equipment",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "G2": {
+            "value": "DO NOT ALTER COLUMN",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "General Fittings, Furnishings, and Equipment",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Please refer to: 33HB-BGY-XXX-XXXX-SH-A-749000 ",
+            "type": "s"
+          },
+          "B8": {
+            "value": "Basement Level B3",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 17,
+        "name": "2.14",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F746"
+        },
+        "xml_rows": 746,
+        "xml_cells": 4476,
+        "populated_cells": 540,
+        "formula_counts": {
+          "all": 20
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.14. MEP",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "MEP Services",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Disposal Installations",
+            "type": "s"
+          },
+          "A8": {
+            "value": "A",
+            "type": "s"
+          },
+          "B8": {
+            "value": "Rainwater Disposal (Gravity & Syphonic)",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 18,
+        "name": "2.14.1 MEP Prov Sums",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F67"
+        },
+        "xml_rows": 67,
+        "xml_cells": 402,
+        "populated_cells": 18,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.14.1 MEP Provisional Sums",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Generally",
+            "type": "s"
+          },
+          "B6": {
+            "value": "The Sub-Contractor is to list and price any Provisional Sums below that they consider appropriate.",
+            "type": "s"
+          },
+          "A8": {
+            "value": "1",
+            "type": "n"
+          },
+          "B8": {
+            "value": "Specialist Lighting Design",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 19,
+        "name": "2.15",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F67"
+        },
+        "xml_rows": 67,
+        "xml_cells": 402,
+        "populated_cells": 12,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.15. Lifts",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Lift and conveyor installations",
+            "type": "s"
+          },
+          "B7": {
+            "value": "Client team will secure quote directly and advise once received. Contractor to leave blank until then",
+            "type": "s"
+          },
+          "B67": {
+            "value": "Lifts Total",
+            "type": "s"
+          },
+          "F67": {
+            "value": "0",
+            "type": "n"
+          }
+        }
+      },
+      {
+        "index": 20,
+        "name": "2.16",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:G60"
+        },
+        "xml_rows": 60,
+        "xml_cells": 366,
+        "populated_cells": 38,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.16. External Works",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "G2": {
+            "value": "DO NOT ALTER COLUMN",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Site preparation works",
+            "type": "s"
+          },
+          "A6": {
+            "value": "B",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Roads, paths, paving's and surfacing's",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 21,
+        "name": "2.17",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F69"
+        },
+        "xml_rows": 69,
+        "xml_cells": 414,
+        "populated_cells": 43,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.17. CAT-A",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Internal Finishes",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Wall Finishes",
+            "type": "s"
+          },
+          "B8": {
+            "value": "All Floors",
+            "type": "s"
+          },
+          "B10": {
+            "value": "Allowance for paint finish to core walls",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 22,
+        "name": "2.18 Additional Works",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F68"
+        },
+        "xml_rows": 68,
+        "xml_cells": 408,
+        "populated_cells": 14,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.18. Additional Works",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Additional Works",
+            "type": "s"
+          },
+          "A6": {
+            "value": "A",
+            "type": "s"
+          },
+          "B6": {
+            "value": "The Contractor shall list below and price all and any additional items, which they consider are necessary to fully complete the work in accordance with the specifications and drawings.  The cost of any additional items not listed but which are subsequently found to be necessary shall be deemed to be included within the rates for other work included within this pricing schedule.",
+            "type": "s"
+          },
+          "A14": {
+            "value": "B",
+            "type": "s"
+          },
+          "B14": {
+            "value": "Temporary Works",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 23,
+        "name": "2.19 Dayworks",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F68"
+        },
+        "xml_rows": 68,
+        "xml_cells": 408,
+        "populated_cells": 56,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.19. Dayworks",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Dayworks",
+            "type": "s"
+          },
+          "A6": {
+            "value": "A",
+            "type": "s"
+          },
+          "B6": {
+            "value": "All daywork shall be valued in accordance with the \"Definition of Prime Cost of Daywork Carried Out under a Building Contract \" - agreed and issued by The Royal Institution of Chartered Surveyors and the National Federation of Building Trades Employers (now Construction Confederation) and current at the date of tender.",
+            "type": "s"
+          },
+          "A14": {
+            "value": "B",
+            "type": "s"
+          },
+          "B14": {
+            "value": "The value of plant allowable on daywork will be assessed in accordance with the \"Schedule of Basic Plant Charges for Use in Connection with Dayworks under a Building Contract\" published by The Royal Institution of Chartered Surveyors and current at the date of tender",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 24,
+        "name": "2.20 Optional Costs",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F130"
+        },
+        "xml_rows": 130,
+        "xml_cells": 780,
+        "populated_cells": 40,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "2.20 Optional Costs",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Temporary supplies, consumption charges",
+            "type": "s"
+          },
+          "B6": {
+            "value": "- Water ",
+            "type": "s"
+          },
+          "B7": {
+            "value": "- Gas",
+            "type": "s"
+          },
+          "B8": {
+            "value": "- Electricity",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 25,
+        "name": "3. Main Summary",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F68"
+        },
+        "xml_rows": 68,
+        "xml_cells": 408,
+        "populated_cells": 93,
+        "formula_counts": {
+          "all": 48
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "3. Main Summary",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Works",
+            "type": "s"
+          },
+          "A6": {
+            "value": "2.2000000000000002",
+            "type": "n"
+          },
+          "B6": {
+            "value": "2.2. Enabling Works",
+            "type": "str"
+          },
+          "F6": {
+            "value": "0",
+            "type": "n"
+          },
+          "A8": {
+            "value": "2.2999999999999998",
+            "type": "n"
+          }
+        }
+      },
+      {
+        "index": 26,
+        "name": "4. TSP Summary",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F69"
+        },
+        "xml_rows": 69,
+        "xml_cells": 414,
+        "populated_cells": 108,
+        "formula_counts": {
+          "all": 29
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "4. Use Type Summary",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "A4": {
+            "value": "TSP SUMMARY FOR CLIENT USE ONLY. CONTRACTOR TO IGNORE, MAIN SUMMARY PAGE APPLIES",
+            "type": "s"
+          },
+          "A6": {
+            "value": "1",
+            "type": "n"
+          },
+          "B6": {
+            "value": "Demolition & Strip Out",
+            "type": "s"
+          },
+          "A8": {
+            "value": "1.1000000000000001",
+            "type": "n"
+          },
+          "B8": {
+            "value": "Soft Strip ",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 27,
+        "name": "5. Value Engineering",
+        "state": "visible",
+        "dimension": {
+          "ref": "A1:F64"
+        },
+        "xml_rows": 64,
+        "xml_cells": 384,
+        "populated_cells": 44,
+        "formula_counts": {
+          "all": 1
+        },
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "5. Value Engineering",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "A4": {
+            "value": "A",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Generally",
+            "type": "s"
+          },
+          "A6": {
+            "value": "1",
+            "type": "n"
+          },
+          "B6": {
+            "value": "Pre Action Sprinklers in lieu of Gas Suppression",
+            "type": "s"
+          },
+          "A8": {
+            "value": "2",
+            "type": "n"
+          }
+        }
+      },
+      {
+        "index": 28,
+        "name": "3. Option 2",
+        "state": "hidden",
+        "dimension": {
+          "ref": "A1:F73"
+        },
+        "xml_rows": 73,
+        "xml_cells": 434,
+        "populated_cells": 1,
+        "formula_counts": {},
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "3. OPTION 2",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 29,
+        "name": "3.1 Preliminaries",
+        "state": "hidden",
+        "dimension": {
+          "ref": "A1:F71"
+        },
+        "xml_rows": 71,
+        "xml_cells": 426,
+        "populated_cells": 76,
+        "formula_counts": {},
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "3.1. PRELIMINARIES",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "B3": {
+            "value": "Please complete the following schedule for your fixed priced lump sum Preliminaries as required to undertake the project detailed within the tender documentation.",
+            "type": "s"
+          },
+          "B8": {
+            "value": "The Contractor is to provide a complete detailed breakdown to his lump sum Preliminaries in a format of his choice with his tender return. However, we request the follow schedule is completed to summarise the proposal.",
+            "type": "s"
+          },
+          "A14": {
+            "value": "A",
+            "type": "s"
+          },
+          "B14": {
+            "value": "Management and staff",
+            "type": "s"
+          },
+          "D14": {
+            "value": "Item",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 30,
+        "name": "3.2 136 - 138 George St",
+        "state": "hidden",
+        "dimension": {
+          "ref": "A1:F210"
+        },
+        "xml_rows": 210,
+        "xml_cells": 1260,
+        "populated_cells": 101,
+        "formula_counts": {},
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "3.2. DEMOLITION OF 136-138 GEORGE STREET - OPTION 2",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Asbestos Removal",
+            "type": "s"
+          },
+          "A6": {
+            "value": "A",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Allow for the removal of all asbestos from the building and safe disposal of removed asbestos (DEFINED PROVISIONAL SUM)",
+            "type": "s"
+          },
+          "D8": {
+            "value": "Prov Sum",
+            "type": "s"
+          },
+          "F8": {
+            "value": "20000",
+            "type": "n"
+          }
+        }
+      },
+      {
+        "index": 31,
+        "name": "3.3 25 Nutford Pl",
+        "state": "hidden",
+        "dimension": {
+          "ref": "A1:F210"
+        },
+        "xml_rows": 210,
+        "xml_cells": 1260,
+        "populated_cells": 101,
+        "formula_counts": {},
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "3.3. DEMOLITION OF 25 NUTFORD PLACE - OPTION 2",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Asbestos Removal",
+            "type": "s"
+          },
+          "A6": {
+            "value": "A",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Allow for the removal of all asbestos from the building and safe disposal of removed asbestos (DEFINED PROVISIONAL SUM)",
+            "type": "s"
+          },
+          "D8": {
+            "value": "Prov Sum",
+            "type": "s"
+          },
+          "F8": {
+            "value": "30000",
+            "type": "n"
+          }
+        }
+      },
+      {
+        "index": 32,
+        "name": "3.4 Basement",
+        "state": "hidden",
+        "dimension": {
+          "ref": "A1:F142"
+        },
+        "xml_rows": 142,
+        "xml_cells": 852,
+        "populated_cells": 64,
+        "formula_counts": {},
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "3.4. DEMOLITION OF BASEMENT",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "B4": {
+            "value": "Surveys and Investigations",
+            "type": "s"
+          },
+          "A6": {
+            "value": "A",
+            "type": "s"
+          },
+          "B6": {
+            "value": "Allow for carrying out a detailed survey of the structure, site and surrounding area",
+            "type": "s"
+          },
+          "D7": {
+            "value": "Item",
+            "type": "s"
+          },
+          "A9": {
+            "value": "B",
+            "type": "s"
+          }
+        }
+      },
+      {
+        "index": 33,
+        "name": "3.5 Summary",
+        "state": "hidden",
+        "dimension": {
+          "ref": "A1:F71"
+        },
+        "xml_rows": 71,
+        "xml_cells": 426,
+        "populated_cells": 25,
+        "formula_counts": {},
+        "missing_formula_samples": [],
+        "error_count": 0,
+        "error_samples": [],
+        "first_values": {
+          "A1": {
+            "value": "3.5. Option 2 Main Summary",
+            "type": "s"
+          },
+          "A2": {
+            "value": "Ref",
+            "type": "s"
+          },
+          "B2": {
+            "value": "Description",
+            "type": "s"
+          },
+          "C2": {
+            "value": "Quantity",
+            "type": "s"
+          },
+          "D2": {
+            "value": "Unit",
+            "type": "s"
+          },
+          "E2": {
+            "value": "Rate",
+            "type": "s"
+          },
+          "F2": {
+            "value": "Total",
+            "type": "s"
+          },
+          "B3": {
+            "value": "Main Summary",
+            "type": "s"
+          },
+          "A5": {
+            "value": "1",
+            "type": "n"
+          },
+          "B5": {
+            "value": "Preambles",
+            "type": "s"
+          },
+          "F5": {
+            "value": "0",
+            "type": "n"
+          },
+          "A7": {
+            "value": "3.1",
+            "type": "n"
+          }
+        }
+      }
+    ],
+    "actual_design_extract": {
+      "ok": true,
+      "chars": 241280
+    },
+    "extract_limit_40": {
+      "documents": 275,
+      "chars": 240732,
+      "notices": [],
+      "last_sections": [
+        "sheet:3. Main Summary:rows:38-68",
+        "sheet:4. TSP Summary:rows:1-32",
+        "sheet:4. TSP Summary:rows:32-69",
+        "sheet:5. Value Engineering:rows:1-32",
+        "sheet:5. Value Engineering:rows:34-64"
+      ]
+    },
+    "extract_limit_100": {
+      "documents": 275,
+      "chars": 240732,
+      "notices": [],
+      "last_sections": [
+        "sheet:3. Main Summary:rows:38-68",
+        "sheet:4. TSP Summary:rows:1-32",
+        "sheet:4. TSP Summary:rows:32-69",
+        "sheet:5. Value Engineering:rows:1-32",
+        "sheet:5. Value Engineering:rows:34-64"
+      ]
+    }
+  }
+]
