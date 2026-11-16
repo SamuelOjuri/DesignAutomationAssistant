@@ -80,7 +80,7 @@ def test_design_processing_defaults_pin_identity_and_remain_off(monkeypatch):
         "thinking-medium:"
         f"request-domains-{hashlib.sha256(b'taperedplus.co.uk').hexdigest()[:12]}:"
         "native-pdf-1:"
-        "output-v20"
+        "output-v22"
     )
     assert configured.gemini_model == "gemini-3.8-flash"
     assert configured.design_processing_extraction_model == "gemini-3.8-flash"

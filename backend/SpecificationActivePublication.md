@@ -110,3 +110,25 @@ prior specification attachments after a verified replacement, and stops in Compl
 Tests use fake Monday/model/storage gateways and isolated PostgreSQL schemas.
 The browser harness uses the actual frontend with a local mocked API. Live Monday
 acceptance and deployment remain separate operations.
+
+## Persistent source-review waits
+
+An unresolved `SpecificationReviewRequired` is parked with outcome and
+`review_json.status` equal to `needs_review`. Its source snapshot, field issues,
+and dependency links remain available to the review workspace. It has no scheduled
+retry, no failure counter escalation, and no `last_error`; the worker logs an INFO
+review-required outcome rather than a refresh-failed warning. A prior published
+PDF remains retained, while incompatible pending publication permission and
+completion approval are invalidated by the existing source-identity checks.
+
+The parked record retains the desired/analyzed input and pipeline identities and
+the source, parser, scope, and publication policy versions. Discovery excludes
+an unchanged parked record before making Monday reads. A changed extraction or
+policy identity, an explicit relevant dependency notification, a reviewer save,
+or refreshed recommendations with changed sources can wake the record. Unchanged pending generations do not
+become completed merely because the worker is waiting for review. Existing
+`conflict` retry records move into this state on their next eligible refresh;
+there is no database migration or bulk status rewrite.
+
+Transient provider/source failures keep their bounded backoff and retry behavior.
+Current-input extraction waiting remains the separate `source_waiting` state.

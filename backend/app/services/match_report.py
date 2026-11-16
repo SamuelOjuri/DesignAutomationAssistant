@@ -31,6 +31,9 @@ class MatchReport:
     candidates: tuple[MatchReportCandidate, ...]
     request_recommendation: str = "Reviewer decision required"
     intent_explanation: str = ""
+    search_complete: bool = True
+    total_qualified_candidate_count: Optional[int] = None
+    candidates_truncated: bool = False
 
     @classmethod
     def from_contract(
@@ -58,6 +61,11 @@ class MatchReport:
             for candidate in match_contract.get("candidates", ())
         )
         intent = match_contract.get("specificationRequestIntent")
+        diagnostics = match_contract.get("searchDiagnostics") or {}
+        search_complete = all(
+            (match_contract.get(key) or {}).get("status") not in {"incomplete", "unavailable"}
+            for key in ("titleLookup", "referenceLookup")
+        )
         from .specification_intent import reason_for_change
         return cls(
             source_item_id=str(source_item_id),
@@ -70,6 +78,9 @@ class MatchReport:
             candidates=candidates,
             request_recommendation=reason_for_change(intent) if intent else "Reviewer decision required",
             intent_explanation=str(intent.get("explanation") or "") if intent else "",
+            search_complete=search_complete,
+            total_qualified_candidate_count=diagnostics.get("totalQualifiedCandidateCount"),
+            candidates_truncated=bool(diagnostics.get("truncated", False)),
         )
 
 
@@ -164,14 +175,34 @@ def render_match_report_pdf(report: MatchReport) -> bytes:
     if report.intent_explanation:
         write(report.intent_explanation)
     write("Project matches support review. Title similarity is not a probability of an amendment.", gap_after=8)
+    if not report.search_complete:
+        write("Project lookup incomplete", font_name="Helvetica-Bold")
+        write(
+            "The candidate list may be incomplete. Retry or narrow the project search before "
+            "deciding whether this is a new project.",
+            gap_after=8,
+        )
     write(
-        f"Total potential matches: {len(report.candidates)}",
+        (f"Potential matches shown: {len(report.candidates)}"
+         if not report.search_complete or report.candidates_truncated
+         else f"Total potential matches: {len(report.candidates)}"),
         font_name="Helvetica-Bold",
         gap_after=8,
     )
+    if report.candidates_truncated:
+        count = report.total_qualified_candidate_count
+        write(
+            (f"{count} candidates qualified in the retrieved results. " if count is not None else "")
+            + "Additional qualifying candidates are omitted. Narrow the project search to review alternatives.",
+            gap_after=8,
+        )
 
     if not report.candidates:
-        write("No matches found.", font_name="Helvetica-Bold", gap_after=8)
+        write(
+            "No candidates are available from this incomplete lookup."
+            if not report.search_complete else "No matches found.",
+            font_name="Helvetica-Bold", gap_after=8,
+        )
     else:
         for candidate in report.candidates:
             reserve([(f"{candidate.rank}. {candidate.project_title}", "Helvetica-Bold"),

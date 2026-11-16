@@ -25,7 +25,7 @@ from .parameter_extraction import (
 )
 from .source_documents import (
     IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_source_records,
-    oversized_archive_file_record, source_record,
+    oversized_archive_file_record, source_failure_details, source_record,
 )
 from ..specification_semantics import (
     COMPLETE_SOURCE_STATUSES, MISSING_CLIENT_EMAIL_REVIEW_STATUS, SpecificationEvidence, missing,
@@ -116,7 +116,8 @@ def analyze_downloaded_email_assets(
                 content, downloaded.source.filename, source_metadata=metadata)
         except Exception as exc:
             manifest.append(source_record(f"asset:{downloaded.source.asset_id}", downloaded.source.filename, content,
-                                          source_type="email_body", status="failed:" + type(exc).__name__))
+                                          source_type="email_body", status="failed:" + type(exc).__name__,
+                                          error=source_failure_details(exc)))
             progress.record({**manifest[-1], "sourceId": f"asset:{downloaded.source.asset_id}:body"})
             continue
         raw_date = next((line[6:] for line in header.splitlines() if line.startswith("Date: ")), "")

@@ -48,10 +48,13 @@ PERMANENT_SOURCE_ERROR_CODES = frozenset({
     "source_size_limit", "workbook_incomplete", "unreadable_pdf", "unreadable_archive",
     "empty_archive", "encrypted_archive", "archive_depth_limit", "archive_member_limit",
     "archive_member_size_limit", "archive_expansion_limit",
+    "email_size_limit", "email_depth_limit", "email_message_limit", "email_expansion_limit",
+    "email_attachment_limit", "email_part_limit", "email_text_limit", "unreadable_attached_email",
+    "unnamed_email_attachment",
 })
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
 DOCUMENT_EXTENSIONS = frozenset({
-    ".pdf", ".docx", ".txt", ".csv", ".tsv", ".json", ".xml", ".html", ".htm",
+    ".pdf", ".docx", ".txt", ".csv", ".tsv", ".json", ".xml", ".html", ".htm", ".eml", ".msg",
     *IMAGE_EXTENSIONS,
 })
 
@@ -337,16 +340,29 @@ class _ArchiveBudget:
 
 
 def extract_source_records(content, filename, extractor, *, source_id, observed_at=None,
-                           file_extension=None, _archive_budget=None, _archive_depth=0, on_source=None):
+                           file_extension=None, _archive_budget=None, _archive_depth=0, on_source=None,
+                           _email_budget=None, _email_depth=0):
     """Extract a source and ZIP members without writing archive paths to disk."""
+    if Path(filename).suffix.lower() in {".eml", ".msg"}:
+        # The bounded parser audits byte/format failures itself. Keep progress
+        # cancellation outside the document reader's parser-error conversion.
+        from .email_extraction import extract_attached_email_records
+        return extract_attached_email_records(content, filename, extractor,
+            source_id=source_id, observed_at=observed_at, on_source=on_source,
+            _email_budget=_email_budget, _email_depth=_email_depth + 1,
+            _archive_budget=_archive_budget, _archive_depth=_archive_depth)
     record = source_record(source_id, filename, content, source_type="attachment", observed_at=observed_at)
     records = [record]
     try:
         if (Path(filename).suffix.lower() == ".zip"
                 or str(file_extension or "").strip().lower() in {"zip", ".zip"}):
+            if _email_budget is None:
+                from .email_extraction import _EmailBudget
+                _email_budget = _EmailBudget()
             budget = _archive_budget if _archive_budget is not None else _ArchiveBudget()
             _extract_archive(content, filename, extractor, source_id, observed_at, budget, _archive_depth,
-                             records, on_source, archive_sha256=record["contentSha256"])
+                             records, on_source, archive_sha256=record["contentSha256"],
+                             email_budget=_email_budget, email_depth=_email_depth)
             record["status"] = ARCHIVE_EXPANDED_STATUS
         else:
             text = extract_document(content, filename, extractor, extraction_metadata=record)
@@ -392,7 +408,7 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
 
 
 def _extract_archive(content, filename, extractor, source_id, observed_at, budget, depth, records,
-                     on_source=None, *, archive_sha256):
+                     on_source=None, *, archive_sha256, email_budget=None, email_depth=0):
     if len(content) > MAX_SOURCE_BYTES:
         raise _oversized_archive_error()
     if depth >= MAX_ARCHIVE_DEPTH:
@@ -428,7 +444,8 @@ def _extract_archive(content, filename, extractor, source_id, observed_at, budge
                 on_source({"sourceId": source_id, "status": ARCHIVE_EXPANDED_STATUS})
                 for index, entry in enumerate(entries):
                     if not entry.is_dir():
-                        on_source({"sourceId": f"{source_id}:member:{index}", "status": "pending"})
+                        suffix = ":body" if Path(entry.filename).suffix.lower() in {".eml", ".msg"} else ""
+                        on_source({"sourceId": f"{source_id}:member:{index}" + suffix, "status": "pending"})
             for index, entry in enumerate(entries):
                 if entry.is_dir():
                     continue
@@ -463,6 +480,7 @@ def _extract_archive(content, filename, extractor, source_id, observed_at, budge
                     member_content, f"{filename}!/{entry.filename}", extractor,
                     source_id=f"{source_id}:member:{index}", observed_at=observed_at,
                     _archive_budget=budget, _archive_depth=depth + 1,
+                    _email_budget=email_budget, _email_depth=email_depth,
                     on_source=on_source,
                 )
                 children[0]["parentSourceId"] = source_id

@@ -1,4 +1,4 @@
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
 from functools import lru_cache
@@ -402,11 +402,18 @@ def monday_graphql_request(
     query: str,
     variables: Optional[dict[str, Any]] = None,
     *,
-    timeout: int = 10,
+    timeout: float = 10,
     allow_unauthorized: bool = False,
+    retry_attempts: int = 4,
 ) -> Optional[dict[str, Any]]:
+    if isinstance(retry_attempts, bool) or not isinstance(retry_attempts, int) or not 1 <= retry_attempts <= 4:
+        raise ValueError("retry_attempts must be between 1 and 4")
+    # Bounded directory searches defer transient failures to their worker rather
+    # than spending their page/time allowance in an internal retry loop.
+    post = (_post_monday_graphql if retry_attempts == 4 else
+            _post_monday_graphql.retry_with(stop=stop_after_attempt(retry_attempts)))
     try:
-        resp = _post_monday_graphql(
+        resp = post(
             access_token,
             query,
             variables,
@@ -1285,6 +1292,44 @@ class MondayProjectBoardItem:
     reference_confirmations: tuple[str, ...] = ()
 
 
+@dataclass(slots=True)
+class MondayProjectSearchBudget:
+    """A shared allowance for the selective stages of one title lookup.
+
+    Time is checked before every data page; each request uses the remaining time
+    as its timeout. This does not bound source-item validation outside this client.
+    """
+
+    max_pages: int = 4
+    max_seconds: float = 30
+    pages_read: int = 0
+    started_at: float = field(default_factory=lambda: monotonic())
+
+    def __post_init__(self) -> None:
+        if isinstance(self.max_pages, bool) or not isinstance(self.max_pages, int) or not 1 <= self.max_pages <= 20:
+            raise ValueError("max_pages must be between 1 and 20")
+        if (isinstance(self.max_seconds, bool) or not isinstance(self.max_seconds, (int, float))
+                or not math.isfinite(self.max_seconds) or not 0 < self.max_seconds <= 120):
+            raise ValueError("max_seconds must be positive and at most 120")
+        if (isinstance(self.pages_read, bool) or not isinstance(self.pages_read, int)
+                or not 0 <= self.pages_read <= self.max_pages):
+            raise ValueError("pages_read must stay within the page allowance")
+        if (isinstance(self.started_at, bool) or not isinstance(self.started_at, (int, float))
+                or not math.isfinite(self.started_at)):
+            raise ValueError("started_at must be a finite monotonic time")
+
+    @property
+    def remaining_seconds(self) -> float:
+        return max(0.0, self.max_seconds - (monotonic() - self.started_at))
+
+
+@dataclass(frozen=True, slots=True)
+class MondayProjectSearchResult:
+    items: tuple[MondayProjectBoardItem, ...]
+    complete: bool
+    reason: str = ""
+
+
 PROJECT_ITEMS_PAGE_FIELDS = """
 cursor
 items {
@@ -1322,6 +1367,95 @@ query ($cursor: String!, $limit: Int!) {{
 """
 
 
+def fetch_project_title_candidates(
+    access_token: str,
+    board_id: str,
+    *,
+    exact_title: Optional[str] = None,
+    words: Sequence[str] = (),
+    match_all: bool = False,
+    budget: MondayProjectSearchBudget,
+) -> MondayProjectSearchResult:
+    """Search active Project Name values across history within a shared budget.
+
+    Exhausting a budget is an explicitly incomplete lookup, including when no
+    row has been read. Upstream failures and unreadable pages remain errors.
+    """
+    normalized_board_id = _normalize_positive_decimal_id(board_id, "board_id")
+    if not isinstance(budget, MondayProjectSearchBudget):
+        raise ValueError("a project search budget is required")
+    if not isinstance(match_all, bool):
+        raise ValueError("match_all must be a boolean")
+    if isinstance(words, (str, bytes)) or not isinstance(words, Sequence):
+        raise ValueError("words must be a sequence of search terms")
+    if any(not isinstance(word, str) or not word.strip() for word in words):
+        raise ValueError("project search words must be nonempty strings")
+    normalized_words = tuple(dict.fromkeys(word.strip() for word in words))
+    if (exact_title is None) == (not normalized_words):
+        raise ValueError("provide either an exact title or search words")
+    if exact_title is not None:
+        if not isinstance(exact_title, str) or not exact_title.strip():
+            raise ValueError("exact_title must not be empty")
+        rules = [{"column_id": PROJECT_TITLE_COLUMN_ID,
+                  "compare_value": [exact_title.strip()], "operator": "any_of"}]
+    else:
+        if len(normalized_words) > 12:
+            raise ValueError("at most 12 project search words are allowed")
+        rules = [{"column_id": PROJECT_TITLE_COLUMN_ID,
+                  "compare_value": [word], "operator": "contains_text"}
+                 for word in normalized_words]
+    query = f"""
+    query ($boardIds: [ID!], $queryParams: ItemsQuery, $limit: Int!) {{
+        boards(ids: $boardIds) {{
+            items_page(query_params: $queryParams, limit: $limit) {{
+                {PROJECT_ITEMS_PAGE_FIELDS}
+            }}
+        }}
+    }}
+    """
+    variables = {"boardIds": [normalized_board_id], "limit": 500,
+                 "queryParams": {"operator": "and" if match_all else "or", "rules": rules}}
+    items_by_id: dict[str, MondayProjectBoardItem] = {}
+    seen_cursors: set[str] = set()
+    while True:
+        if budget.pages_read >= budget.max_pages:
+            return MondayProjectSearchResult(tuple(items_by_id.values()), False, "page_budget_exhausted")
+        remaining = budget.remaining_seconds
+        if remaining <= 0:
+            return MondayProjectSearchResult(tuple(items_by_id.values()), False, "time_budget_exhausted")
+        budget.pages_read += 1
+        payload = monday_graphql_request(access_token, query, variables,
+            timeout=min(20.0, remaining), retry_attempts=1)
+        if "cursor" in variables:
+            data = _require_mapping(payload, "data", context="next project title search page")
+            page = data.get("next_items_page")
+            if not isinstance(page, Mapping):
+                raise MondayReadContractError(detail="monday next project title search page is incomplete")
+        else:
+            page = _extract_project_board_page(payload, context="project title search")
+        parsed = _parse_project_items(page)
+        # A filtered title page must carry the actual searched column. The
+        # legacy parser's numeric item-name fallback cannot establish a title.
+        for raw in page["items"]:
+            if not any(isinstance(column, Mapping) and column.get("id") == PROJECT_TITLE_COLUMN_ID
+                       and isinstance(column.get("text"), str) and column["text"]
+                       for column in raw["column_values"]):
+                raise MondayReadContractError(detail="monday project title search value is missing")
+        for item in parsed:
+            if item.state == "active":
+                items_by_id.setdefault(item.item_id, item)
+        if "cursor" not in page:
+            raise MondayReadContractError(detail="monday project title search page cursor is missing")
+        cursor = page["cursor"]
+        if cursor is None:
+            return MondayProjectSearchResult(tuple(items_by_id.values()), True)
+        if not isinstance(cursor, str) or not cursor or cursor in seen_cursors:
+            raise MondayReadContractError(detail="monday project title search page cursor is malformed or repeated")
+        seen_cursors.add(cursor)
+        query = NEXT_PROJECT_ITEMS_PAGE_QUERY
+        variables = {"cursor": cursor, "limit": 500}
+
+
 def fetch_project_items_matching_references(
     access_token: str,
     board_id: str,
@@ -1334,7 +1468,7 @@ def fetch_project_items_matching_references(
     The numeric component narrows the remote search while a shared-parser check
     retains the actual prefix and leading zeros. This also handles CRM names with
     spaces between prefix and digits without aliasing another issuer's project.
-    Old projects are intentionally not subject to the title search's date cutoff.
+    Printed identity lookup, like the staged title lookup, includes old projects.
     """
     from .services.specification_references import parse_drawing_reference, parse_project_reference
 

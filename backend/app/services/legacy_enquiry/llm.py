@@ -23,7 +23,9 @@ from ..specification_semantics import (
     REVIEW_SOURCE_STATUSES, canonical_label, missing,
 )
 from ..specification_image_text import IMAGE_TRANSCRIPTION_PROMPT
-from ..specification_request_context import request_context_summary, select_client_request
+from ..specification_request_context import (
+    adopted_request_contexts, request_context_summary, select_client_request,
+)
 from ..source_text import require_json_safe_text
 from ..specification_failures import SpecificationEvidenceError
 from ..specification_intent import build_request_intent
@@ -100,6 +102,10 @@ class LegacyGeminiClient:
 
         Selected client-request context (verified headers, not model inference):
         {request_context_summary(select_client_request(source_manifest)) if source_manifest is not None else None}
+
+        Explicitly adopted attached-message contexts (their own current heads;
+        quoted history and their senders' client identity are not adopted):
+        {[request_context_summary(message) for message in adopted_request_contexts(source_manifest)] if source_manifest is not None else []}
 
         Use literal image TEXT REGION blocks as citations. VISUAL CONTEXT is descriptive
         prose, not an alternative spelling or legal-name authority.

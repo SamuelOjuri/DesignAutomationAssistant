@@ -49,6 +49,15 @@ class DesignProcessingReadGateway(Protocol):
 
     def fetch_specification_project(self, item_id: str) -> dict[str, Any]: ...
 
+    def fetch_project_title_candidates(
+        self,
+        *,
+        exact_title: Optional[str] = None,
+        words: Sequence[str] = (),
+        match_all: bool = False,
+        budget: monday_client.MondayProjectSearchBudget,
+    ) -> monday_client.MondayProjectSearchResult: ...
+
     def fetch_project_items_matching_words(
         self,
         words: Sequence[str],
@@ -184,6 +193,19 @@ class MondayDesignProcessingReadGateway:
         return monday_client.inspect_design_processing_file_columns(
             self.access_token,
             item_id,
+        )
+
+    def fetch_project_title_candidates(
+        self,
+        *,
+        exact_title: Optional[str] = None,
+        words: Sequence[str] = (),
+        match_all: bool = False,
+        budget: monday_client.MondayProjectSearchBudget,
+    ) -> monday_client.MondayProjectSearchResult:
+        return monday_client.fetch_project_title_candidates(
+            self.access_token, self.project_board_id, exact_title=exact_title,
+            words=words, match_all=match_all, budget=budget,
         )
 
     def fetch_project_word_hit_counts(

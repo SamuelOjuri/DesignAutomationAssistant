@@ -239,7 +239,7 @@ def reconcile_landing_zone_once(
             if specification_processing_allowed(item.item_id) and check is not None:
                 specification_recovery = (
                     check.last_group_id in specification_group_ids
-                    and specification_needs_reconciliation(specifications.get(item.item_id))
+                    and specification_needs_reconciliation(specifications.get(item.item_id), item=item)
                 )
             if item.state != "ready_for_review" or specification_recovery or (
                 check is not None and check.last_outcome == "unavailable"
@@ -294,7 +294,7 @@ def reconcile_landing_zone_once(
                 observed_group = candidate_groups.get(candidate.item_id, check.last_group_id if check else None)
                 if observed_group in specification_group_ids:
                     specification_changed = specification_needs_reconciliation(
-                        specifications.get(candidate.item_id),
+                        specifications.get(candidate.item_id), item=stored,
                     )
             settled_changed = (
                 check is not None and check.last_outcome == "ignored" and check.last_reason == "ready"

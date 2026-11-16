@@ -122,7 +122,9 @@ def _context(db, board_id, item_id, account_id):
                     PerformanceSpecificationReviewEvent.created_at.desc()).first()
             retained = deepcopy(matching.source_snapshot_json) if matching is not None else None
         if retained is None and spec is not None:
-            retained = deepcopy((spec.source_json or {}).get("reviewSource"))
+            parked = spec.review_json or {}
+            current_source = parked.get("source") if parked.get("status") == "needs_review" else spec.source_json
+            retained = deepcopy((current_source or {}).get("reviewSource"))
         return {
             "item": _copy_row(item), "spec": _copy_row(spec), "review": _copy_row(review),
             "state": state, "artifacts": [_copy_row(row) for row in artifacts],
@@ -240,6 +242,9 @@ def _status(*, spec, review, source_ready, exact, approval, editable, source_err
         return "read_only"
     if source_error:
         return source_error
+    if (spec and (spec.review_json or {}).get("status") == "needs_review"
+            and spec.scheduled_for is None and spec.lease_token is None):
+        return "needs_review"
     if not source_ready or review is None:
         return "source_waiting"
     if spec and spec.last_error:
@@ -364,13 +369,15 @@ def get_status(db, *, board_id, item_id, account_id, editable, manual_publicatio
     try:
         spec_row = db.query(PerformanceSpecification.requested_generation,
             PerformanceSpecification.completed_generation, PerformanceSpecification.lease_token,
+            PerformanceSpecification.scheduled_for,
             PerformanceSpecification.last_error, PerformanceSpecification.current_revision,
             PerformanceSpecification.requested_publication_revision,
             PerformanceSpecification.prepared_revision,
-            PerformanceSpecification.review_json["reviewApiSourceState"].as_string().label("source_state")
+            PerformanceSpecification.review_json["reviewApiSourceState"].as_string().label("source_state"),
+            PerformanceSpecification.review_json["status"].as_string().label("review_status")
         ).filter_by(board_id=board_id, item_id=item_id).one_or_none()
         spec = SimpleNamespace(**spec_row._asdict(),
-            review_json={"reviewApiSourceState": spec_row.source_state}) if spec_row else None
+            review_json={"reviewApiSourceState": spec_row.source_state, "status": spec_row.review_status}) if spec_row else None
         review = db.query(PerformanceSpecificationReview.review_version,
             PerformanceSpecificationReview.monday_account_id, PerformanceSpecificationReview.source_fingerprint,
             PerformanceSpecificationReview.decision_digest, PerformanceSpecificationReview.desired_publication_identity,

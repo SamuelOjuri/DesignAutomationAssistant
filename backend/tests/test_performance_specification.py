@@ -440,7 +440,7 @@ def test_forged_excerpt_and_incomplete_source_manifest_preserve_last_pdf(case):
     next(e for e in extraction["specificationEvidence"] if e["field"] == "Contact")["snippet"] = "An invented excerpt"
     case.item.extracted_parameters_json = deepcopy(extraction)
     case.db.commit()
-    assert run(case) == ["failed"]
+    assert run(case) == ["needs_review"]
     assert "Contact" in current(case).review_json["issues"]
 
 
@@ -539,8 +539,8 @@ def test_unverified_conflicting_candidate_still_prevents_publication(case):
     bad = {**extraction["specificationEvidence"][-1], "scope": "Roof 9", "snippet": "Invented excerpt"}
     extraction["specificationEvidence"].append(bad)
     case.item.extracted_parameters_json = extraction
-    assert run(case) == ["failed"]
-    assert not case.gateway.uploads and current(case).review_json["status"] == "conflict"
+    assert run(case) == ["needs_review"]
+    assert not case.gateway.uploads and current(case).review_json["status"] == "needs_review"
 
 
 def test_model_cannot_choose_one_conflicting_deck_or_inject_review_notes(case):
@@ -611,8 +611,8 @@ def test_reviewed_crm_contact_keeps_email_alternative_and_source_labels(case, ve
     case.item.extracted_parameters_json = extraction
     case.db.commit()
     if not verified:
-        assert run(case) == ["failed"]
-        assert current(case).review_json["status"] == "conflict"
+        assert run(case) == ["needs_review"]
+        assert current(case).review_json["status"] == "needs_review"
         assert not case.gateway.uploads
         return
     assert run(case) == ["published"]

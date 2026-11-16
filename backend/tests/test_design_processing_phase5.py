@@ -26,7 +26,7 @@ from backend.app.models import (
     DesignProcessingItem,
     DesignProcessingJob,
 )
-from backend.app.monday_client import MondayProjectBoardItem
+from backend.app.monday_client import MondayProjectBoardItem, MondayProjectSearchResult
 from backend.app.services.auto_sync import utc_now
 from backend.app.services import design_processing_pipeline, design_processing_worker
 from backend.app.services.ai_data_report import render_ai_data_pdf
@@ -267,7 +267,6 @@ class FakeReadGateway:
     def __init__(self, snapshot, golden_input):
         self.snapshot = snapshot
         self.items = _project_items(golden_input)
-        self.word_counts = golden_input["matching"]["wordHitCounts"]
         self.fetch_target_calls = 0
         self.mutation_calls = []
 
@@ -279,28 +278,13 @@ class FakeReadGateway:
     def inspect_file_columns(self, item_id):
         return {}
 
-    def fetch_project_word_hit_counts(self, words):
-        return {word: int(self.word_counts.get(word, 0)) for word in words}
-
-    def fetch_project_items_matching_words(self, words, *, start_date="2021-01-01"):
-        return self.items
-
-    def fetch_project_items_matching_any_words(self, words, *, start_date="2021-01-01"):
-        return tuple(
-            item for item in self.items
-            if any(word.lower() in item.project_title.lower() for word in words)
-        )
-
-    def fetch_project_items_matching_full_text(
-        self,
-        project_name,
-        *,
-        start_date="2021-01-01",
-    ):
-        return self.items
-
-    def fetch_active_project_items_since(self, *, start_date="2021-01-01"):
-        return tuple(item for item in self.items if item.state == "active")
+    def fetch_project_title_candidates(self, *, exact_title=None, words=(), match_all=False, budget):
+        budget.pages_read += 1
+        items = tuple(item for item in self.items if item.state == "active" and (
+            item.project_title.casefold() == exact_title.casefold() if exact_title is not None
+            else (all if match_all else any)(word.casefold() in item.project_title.casefold() for word in words)
+        ))
+        return MondayProjectSearchResult(items=items, complete=True)
 
     def update_design_owned_columns(self, *args, **kwargs):
         self.mutation_calls.append(("update", args, kwargs))
@@ -502,7 +486,7 @@ def test_attachment_read_failure_retains_manifest_and_schedules_extraction_retry
     failure_log = next(record.getMessage() for record in caplog.records if "failed runtime=" in record.getMessage())
     runtime = json.loads(failure_log.split("runtime=", 1)[1])
     assert runtime["worker_id"] == "phase5-worker"
-    assert runtime["pipeline_revision"] == "output-v20"
+    assert runtime["pipeline_revision"] == "output-v22"
     assert runtime["commit"] == "a" * 12 and runtime["pid"] > 0
     assert "test-token" not in failure_log
 
@@ -616,7 +600,23 @@ def test_shadow_analysis_matches_golden_and_issues_no_monday_writes(
     assert item.extracted_parameters_json["performanceParameters"]["Tapered Insulation"] == "TR27"
     assert item.extracted_parameters_json["performanceParameters"]["Bauder Roof Num"] is None
     assert item.extracted_parameters_json["sources"]["Reason for Change"] == "AI recommendation from Email Context"
-    assert item.match_result_json["legacyDiagnostics"] == golden_expected["matching"]
+    # The historical extraction and relevant candidates remain pinned. Matching
+    # now also records admission rationale and bounded-lookup diagnostics.
+    actual_matching = item.match_result_json["legacyDiagnostics"]
+    expected_matching = golden_expected["matching"]
+    for key in ("exists", "type", "similarity_score", "error"):
+        assert actual_matching[key] == expected_matching[key]
+    assert len(actual_matching["matches"]) == len(expected_matching["matches"])
+    for actual, expected in zip(actual_matching["matches"], expected_matching["matches"], strict=True):
+        assert {key: actual[key] for key in expected} == expected
+        assert actual["match_kind"] == "title_similarity"
+    assert {
+        key: actual_matching["best_match"][key] for key in expected_matching["best_match"]
+    } == expected_matching["best_match"]
+    assert actual_matching["titleLookup"]["status"] == "available"
+    assert actual_matching["titleLookup"]["pagesRead"] == 2
+    assert actual_matching["searchDiagnostics"]["totalQualifiedCandidateCount"] == 2
+    assert actual_matching["searchDiagnostics"]["truncated"] is False
     assert job.status == "completed"
     assert job.attempt_count == 1
     assert {artifact.artifact_kind for artifact in artifacts} == {
@@ -1112,11 +1112,36 @@ def test_analysis_worker_does_not_claim_publication_only_job(db_session):
     assert db_session.get(DesignProcessingJob, job.id).status == "scheduled"
 
 
+def test_incomplete_project_lookup_persists_reviewable_unknown_without_monday_writes(
+    db_session, golden, monkeypatch,
+):
+    golden_input, _ = golden
+    _queue(db_session, _snapshot(golden_input))
+
+    def incomplete(self, **kwargs):
+        return MondayProjectSearchResult(items=(), complete=False, reason="Project title search budget exhausted")
+
+    monkeypatch.setattr(FakeReadGateway, "fetch_project_title_candidates", incomplete)
+    result, gateway, _, _, storage = _run_shadow(db_session, golden_input)
+    item = db_session.query(DesignProcessingItem).one()
+    assert result.analyzed == 1
+    assert item.match_result_json["legacyDiagnostics"]["type"] == "unknown"
+    contract = item.match_result_json["result"]
+    assert contract["titleLookup"]["status"] == "incomplete"
+    assert contract["candidateCount"] == 0
+    assert contract["searchDiagnostics"]["totalQualifiedCandidateCount"] is None
+    assert contract["specificationCandidates"]["lookup"]["status"] == "pending"
+    match_pdf = next(content for (_, key), content in storage.objects.items() if "/Matched_Projects_" in key)
+    assert b"Project lookup incomplete" in match_pdf
+    assert b"No matches found." not in match_pdf
+    assert gateway.mutation_calls == []
+
+
 def test_project_search_failure_is_not_reported_as_no_matches(golden):
     golden_input, _ = golden
 
     class FailingGateway:
-        def fetch_project_word_hit_counts(self, words):
+        def fetch_project_title_candidates(self, **kwargs):
             raise RuntimeError("simulated Monday search failure")
 
     with pytest.raises(RuntimeError, match="simulated Monday search failure"):

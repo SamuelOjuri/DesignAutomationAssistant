@@ -13,7 +13,7 @@ import logging
 import time
 import uuid
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -156,12 +156,67 @@ def _obsolete_policy(record):
     )
 
 
-def specification_needs_reconciliation(record):
+def _review_wait_identity(item):
+    """Inputs which can change a parked recommendation without a notification."""
+    return {
+        "desiredInputRevision": item.latest_desired_input_revision,
+        "analyzedInputRevision": item.latest_analyzed_input_revision,
+        "desiredPipelineVersion": item.latest_desired_pipeline_version,
+        "analyzedPipelineVersion": item.latest_analyzed_pipeline_version,
+        "configuredPipelineVersion": settings.design_processing_pipeline_version,
+        "scopePolicy": SPECIFICATION_SCOPE_POLICY_VERSION,
+        "sourcePolicyVersion": SOURCE_POLICY_VERSION,
+        "referenceParserVersion": REFERENCE_PARSER_VERSION,
+        "publicationVersion": SPECIFICATION_VERSION,
+    }
+
+
+def _review_wait_is_current(record, item=None):
+    review = record.review_json or {}
+    if review.get("status") != "needs_review" or record.scheduled_for is not None:
+        return False
+    identity = review.get("waitingIdentity") or {}
+    if not isinstance(identity, dict) or any(not identity.get(key) for key in (
+            "desiredInputRevision", "analyzedInputRevision", "desiredPipelineVersion", "analyzedPipelineVersion")):
+        return False  # Match discovery's SQL NULL handling; unknown inputs need recovery.
+    if item is not None:
+        return identity == _review_wait_identity(item)
+    return (bool(identity.get("desiredInputRevision"))
+            and identity.get("desiredInputRevision") == identity.get("analyzedInputRevision")
+            and identity.get("desiredPipelineVersion") == identity.get("analyzedPipelineVersion")
+            == identity.get("configuredPipelineVersion") == settings.design_processing_pipeline_version
+            and identity.get("scopePolicy") == SPECIFICATION_SCOPE_POLICY_VERSION
+            and identity.get("sourcePolicyVersion") == SOURCE_POLICY_VERSION
+            and identity.get("referenceParserVersion") == REFERENCE_PARSER_VERSION
+            and identity.get("publicationVersion") == SPECIFICATION_VERSION)
+
+
+def _unchanged_review_wait_predicate():
+    """Keep unchanged review waits out of the bounded discovery set entirely."""
+    spec, item = PerformanceSpecification, DesignProcessingItem
+    identity = spec.review_json["waitingIdentity"]
+    return func.coalesce(and_(
+        spec.review_json["status"].as_string() == "needs_review", spec.scheduled_for.is_(None),
+        identity["desiredInputRevision"].as_string() == item.latest_desired_input_revision,
+        identity["analyzedInputRevision"].as_string() == item.latest_analyzed_input_revision,
+        identity["desiredPipelineVersion"].as_string() == item.latest_desired_pipeline_version,
+        identity["analyzedPipelineVersion"].as_string() == item.latest_analyzed_pipeline_version,
+        identity["configuredPipelineVersion"].as_string() == settings.design_processing_pipeline_version,
+        identity["scopePolicy"].as_string() == SPECIFICATION_SCOPE_POLICY_VERSION,
+        identity["sourcePolicyVersion"].as_string() == SOURCE_POLICY_VERSION,
+        identity["referenceParserVersion"].as_string() == REFERENCE_PARSER_VERSION,
+        identity["publicationVersion"].as_string() == SPECIFICATION_VERSION,
+    ), False)
+
+
+def specification_needs_reconciliation(record, *, item=None):
     """Recover missing/cancelled or obsolete settled work without waking retries."""
     if record is None:
         return True
     if (record.lease_token is not None and record.lease_until is not None
             and _aware(record.lease_until) > utc_now()):
+        return False
+    if _review_wait_is_current(record, item):
         return False
     if record.scheduled_for is None:
         return True  # Also repair legacy rows with an outstanding, unscheduled generation.
@@ -185,10 +240,11 @@ def enqueue_specification(db, board_id, item_id, *, group_id=None, immediate=Fal
     if not decision.allowed:
         return None
     db.flush()
-    if db.query(DesignProcessingItem.id).filter_by(board_id=board_id, item_id=item_id).first() is None:
+    item = db.query(DesignProcessingItem).filter_by(board_id=board_id, item_id=item_id).one_or_none()
+    if item is None:
         return None  # Registered admission/extraction, never a Task, is the prerequisite.
     record = _ensure_record(db, board_id, item_id)
-    if reconcile and not specification_needs_reconciliation(record):
+    if reconcile and not specification_needs_reconciliation(record, item=item):
         return record
     record.requested_generation += 1
     due = utc_now() + timedelta(seconds=0 if immediate else settings.auto_sync_debounce_seconds)
@@ -281,6 +337,9 @@ def discover_specifications(db, limit=100, *, gateway=None):
         # Scheduled rows already have periodic worker checks; cancelled/missing
         # rows need discovery. A newer eligible observation bypasses the delay.
         or_(spec.item_id.is_(None), and_(
+            spec.review_json["status"].as_string() == "needs_review",
+            spec.scheduled_for.is_(None), ~_unchanged_review_wait_predicate(),
+        ), and_(
             spec.scheduled_for.is_(None),
             or_(spec.checked_at.is_(None), spec.checked_at <= stale_before,
                 check.last_checked_at > spec.checked_at),
@@ -305,7 +364,8 @@ def discover_specifications(db, limit=100, *, gateway=None):
                 spec.checked_at.is_(None), spec.checked_at <= stale_before,
                 check.last_checked_at > spec.checked_at),
         )),
-    ).filter(availability_read_predicate(DesignProcessingItem.board_id, DesignProcessingItem.item_id))
+    ).filter(availability_read_predicate(DesignProcessingItem.board_id, DesignProcessingItem.item_id),
+             ~_unchanged_review_wait_predicate())
     candidates = candidates.filter(DesignProcessingItem.item_id.in_(settings.performance_specification_allowlist_item_ids)
              if settings.performance_specification_mode == "allowlist" else True
     ).order_by(spec.checked_at.asc().nulls_first(), DesignProcessingItem.item_id).limit(limit).all()
@@ -370,7 +430,8 @@ def discover_specifications(db, limit=100, *, gateway=None):
             record.checked_at = now  # Discovery visit, including excluded/error rows, rotates fairly.
             if reason is not None:
                 cancel_specification(db, board_id, item_id, reason=reason)
-            elif specification_needs_reconciliation(record):
+            elif specification_needs_reconciliation(record, item=db.query(DesignProcessingItem).filter_by(
+                    board_id=board_id, item_id=item_id).one()):
                 enqueue_specification(db, board_id, item_id, group_id=target.group_id,
                                       immediate=True, reconcile=True)
                 recovered += 1
@@ -727,14 +788,30 @@ def execute_specification(db, claim, *, gateway, client, storage):
             record.review_json = {"status": "source_waiting", "reason": str(exc)[:2000], "source": source}
             outcome = "waiting"
             logger.info("Specification waiting item=%s reason=%s", item_id, exc)
+        elif isinstance(exc, SpecificationReviewRequired):
+            item = db.query(DesignProcessingItem).filter_by(board_id=board_id, item_id=item_id).one()
+            if (record.requested_generation != generation
+                    or exc.source.get("emailRevision") != item.latest_desired_input_revision
+                    or exc.source.get("extractionPipeline") != item.latest_desired_pipeline_version):
+                # A late review result must not park newer extraction or a
+                # reviewer/dependency notification already waiting to run.
+                record.scheduled_for = record.scheduled_for or utc_now()
+                outcome = "superseded"
+            else:
+                record.scheduled_for = None
+                record.checked_at = utc_now()
+                record.last_error, record.attempt_count = None, 0
+                record.requested_publication_revision = None
+                record.review_json = {"status": "needs_review", "source": exc.source,
+                    "issues": exc.issues, "waitingIdentity": _review_wait_identity(item)}
+                _replace_dependencies(db, record, exc.source)
+                outcome = "needs_review"
+                logger.info("Specification needs review item=%s", item_id)
         else:
             record.attempt_count += 1
             record.scheduled_for = utc_now() + timedelta(seconds=min(3600, 30 * 2 ** min(record.attempt_count, 7)))
             record.last_error = f"{type(exc).__name__}: {str(exc)[:400]}"
-            if isinstance(exc, SpecificationReviewRequired):
-                record.review_json = {"status": "conflict", "source": exc.source, "issues": exc.issues}
-                _replace_dependencies(db, record, exc.source)
-            elif isinstance(exc, SpecificationSourceError):
+            if isinstance(exc, SpecificationSourceError):
                 record.review_json = {"status": "source_failure", "reason": str(exc)[:2000], "source": source}
             outcome = "failed"
             logger.warning("Specification refresh failed item=%s error_type=%s", item_id, type(exc).__name__)

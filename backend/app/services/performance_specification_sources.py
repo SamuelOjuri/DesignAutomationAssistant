@@ -403,6 +403,14 @@ def prepare_specification_candidates(gateway, match_contract, intent, *, project
             # Errors deliberately contain no upstream bodies, tokens or email text.
             lookup.status = "unavailable"
             lookup.issues.append(f"Project {item_id} recommendations are unavailable; retry the lookup")
+    if (match_contract.get("titleLookup") or {}).get("status") == "incomplete":
+        if lookup.status == "available":
+            lookup.status = "pending"
+        lookup.issues.append("Project title lookup is incomplete; retry or narrow the search before deciding whether this is a new project")
+    if (match_contract.get("searchDiagnostics") or {}).get("truncated"):
+        if lookup.status == "available":
+            lookup.status = "pending"
+        lookup.issues.append("Additional qualifying projects are omitted; narrow the project search to review alternatives")
     if any((match_contract.get(key) or {}).get("status") == "unavailable"
            for key in ("referenceLookup", "titleLookup")):
         lookup.status = "unavailable"

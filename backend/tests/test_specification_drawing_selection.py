@@ -84,8 +84,8 @@ def test_unverified_baseline_identity_still_blocks(case, change):
     evidence = add_baseline(data)
     evidence.update(change)
     add_drawing(case)
-    assert run(case) == ["failed"]
-    assert current(case).review_json["status"] == "conflict"
+    assert run(case) == ["needs_review"]
+    assert current(case).review_json["status"] == "needs_review"
     assert not case.gateway.uploads
 
 
@@ -95,7 +95,7 @@ def test_several_baseline_drawing_identities_are_not_resolved_by_date(case):
     add_baseline(data, "TP00901_26.02 - A", message_date="30 October 2026 12:00")
     data["sourceManifest"][0]["text"] += "\n29 October 2026 12:00\n30 October 2026 12:00"
     add_drawing(case)
-    assert run(case) == ["failed"]
+    assert run(case) == ["needs_review"]
     assert "Conflicting" in current(case).review_json["issues"]["Drawing Reference"]
     assert not case.gateway.uploads
 
@@ -175,7 +175,7 @@ def test_conflicting_requested_references_still_block(case):
     data["performanceParameters"]["Drawing Reference"] = None
     case.item.extracted_parameters_json = data
     add_drawing(case)
-    assert run(case) == ["failed"]
+    assert run(case) == ["needs_review"]
     assert not case.gateway.uploads
 
 

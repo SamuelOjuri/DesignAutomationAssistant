@@ -156,7 +156,8 @@ def select_client_request(manifest):
     """Select the latest external message sent to the configured organisation."""
     candidates = []
     for source in manifest:
-        if source.get("sourceType") != "email_body" or source.get("status") != "read":
+        if (source.get("sourceType") != "email_body" or source.get("status") != "read"
+                or source.get("parentSourceId") or source.get("attachedEmail")):
             continue
         for message in source_email_messages(source):
             if (message["sender"] and not internal_address(message["sender"])
@@ -178,12 +179,136 @@ def request_context_summary(context):
     return {key: value for key, value in context.items() if key != "text"} if context else None
 
 
+def source_parent_chain(source, sources):
+    """Validate explicit MIME/archive ownership, including standalone archives."""
+    child, visited, chain = source, {source.get("sourceId")}, []
+    for _ in range(16):
+        parent_id = child.get("parentSourceId")
+        if parent_id is None:
+            return chain
+        parent = sources.get(parent_id) if isinstance(parent_id, str) else None
+        if parent is None or parent_id in visited:
+            return None
+        visited.add(parent_id)
+        is_body = parent.get("sourceType") == "email_body" and parent.get("status") == "read"
+        is_archive = parent.get("sourceType") == "attachment" and parent.get("status") == "expanded:archive"
+        prefix = (parent_id.removesuffix(":body") + ":attachment:" if is_body
+                  else parent_id + ":member:" if is_archive else "")
+        # Every provenance edge follows a deterministic MIME/archive ID.
+        if not prefix or not child.get("sourceId", "").startswith(prefix):
+            return None
+        chain.append(parent)
+        child = parent
+    return None
+
+
 def parent_email(source, sources):
     identity = source.get("sourceId", "")
+    if source.get("parentSourceId") is not None:
+        chain = source_parent_chain(source, sources)
+        return next((parent for parent in chain if parent.get("sourceType") == "email_body"), None) if chain is not None else None
     if source.get("sourceType") != "attachment" or ":attachment:" not in identity:
         return None
     parent = sources.get(identity.split(":attachment:", 1)[0] + ":body")
     return parent if parent and parent.get("status") == "read" and parent.get("sourceType") == "email_body" else None
+
+
+def _head_message(source):
+    heads = [message for message in source_email_messages(source) if message["messageIndex"] == 0]
+    return heads[0] if len(heads) == 1 else None
+
+
+def _adopts_attachments(message):
+    text = message["text"].removeprefix(message["headerSnippet"])
+    if (re.search(r"\b(?:ignore|disregard|do not use|don't use)\b.{0,100}\battach", text, re.I | re.S)
+            or re.search(r"\battach\w*\b.{0,80}\b(?:for information only|fyi only|do not use)\b", text, re.I | re.S)):
+        return False
+    return bool(re.search(
+        r"\b(?:see|refer to|review|amend|revise|update|use|follow|as per|in accordance with)\b"
+        r".{0,120}\battach(?:ed|ment)s?\b", text, re.I | re.S))
+
+
+def adopted_attached_message(source, sources, context=None):
+    """An attached email's own current message, explicitly adopted by its parent.
+
+    Parent links and literal request pointers establish applicability; neither
+    a newer attachment date nor a model's direct-request label can do so.
+    """
+    context = context or select_client_request(list(sources.values()))
+    if context is None:
+        return None
+    body = source if source.get("sourceType") == "email_body" else parent_email(source, sources)
+    if not body or not body.get("attachedEmail"):
+        return None
+    current = body
+    visited = set()
+    head = _head_message(body)
+    if not head or not head["sender"] or not head["sentAt"]:
+        return None
+    for _ in range(4):
+        identity = current.get("sourceId")
+        if identity in visited or not current.get("attachedEmail"):
+            return None
+        visited.add(identity)
+        parent = parent_email(current, sources)
+        if parent is None:
+            return None
+        parent_message = (context if parent["sourceId"] == context["sourceId"] else _head_message(parent))
+        current_head = _head_message(current)
+        if (not parent_message or not current_head or not current_head["sentAt"]
+                or not parent_message["sentAt"] or current_head["sentAt"] > parent_message["sentAt"]
+                or not _adopts_attachments(parent_message)):
+            return None
+        if parent["sourceId"] == context["sourceId"]:
+            return {**head, "sourceId": body["sourceId"], "parentSourceId": body["parentSourceId"],
+                    "adoptedBySourceId": context["sourceId"]}
+        current = parent
+    return None
+
+
+def adopted_request_contexts(manifest):
+    sources = {source["sourceId"]: source for source in manifest}
+    context = select_client_request(manifest)
+    return [message for source in manifest
+            if source.get("sourceType") == "email_body" and source.get("attachedEmail")
+            and (message := adopted_attached_message(source, sources, context))]
+
+
+def technical_evidence_context(evidence, source, sources, context, contains):
+    """Return applicability priority and verified own-message attribution.
+
+    None means an attached message is not adopted, or the excerpt belongs only
+    to its quoted history. Zero retains the existing historical-context policy.
+    """
+    if source.get("parentSourceId") is not None and source_parent_chain(source, sources) is None:
+        return None
+    body = source if source.get("sourceType") == "email_body" else parent_email(source, sources)
+    if ((source.get("sourceType") == "email_body" and (source.get("attachedEmail") or source.get("parentSourceId")))
+            or body and body.get("attachedEmail")):
+        adopted = adopted_attached_message(source, sources, context)
+        if adopted is None:
+            return None
+        if source.get("sourceType") == "email_body":
+            if not contains(evidence["snippet"], adopted["text"]):
+                return None
+        elif source.get("contentId"):
+            containing = attachment_message(source, sources)
+            if not containing or containing["messageIndex"] != 0:
+                return None
+        return 1, adopted
+    if (context and source.get("sourceId") == context["sourceId"]
+            and contains(evidence["snippet"], context["text"])):
+        return 2, context
+    if (context and body and body.get("sourceId") == context["sourceId"]
+            and source.get("sourceType") == "attachment" and _adopts_attachments(context)):
+        containing = attachment_message(source, sources) if source.get("contentId") else None
+        if (not source.get("contentId") and evidence.get("role") == "requested"
+                or containing and containing["sender"] == context["sender"]
+                and containing["sentAt"] == context["sentAt"]):
+            # Other explicitly requested documents in the same current envelope
+            # remain peers of an adopted email, not silently displaced history.
+            return 1, {**context, "sourceId": body["sourceId"]}
+    return 0, None
 
 
 def contains_content_id(text, content_id):
@@ -213,6 +338,11 @@ def attachment_message(source, sources):
 
 def client_evidence_applies(evidence, source, sources, context, contains):
     """Company/contact/date must belong to the same selected client message."""
+    parent = parent_email(source, sources)
+    if (source.get("attachedEmail") or source.get("sourceType") == "email_body" and source.get("parentSourceId")
+            or source.get("parentSourceId") is not None and source_parent_chain(source, sources) is None
+            or parent and parent.get("attachedEmail")):
+        return False  # Attached correspondents do not replace the outer requester.
     if context is None:
         parent = source if source.get("sourceType") == "email_body" else parent_email(source, sources)
         messages = source_email_messages(parent) if parent else []

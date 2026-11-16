@@ -18,7 +18,7 @@ from .specification_semantics import (
 )
 from .specification_request_context import (
     CLIENT_FIELDS, attachment_message, client_evidence_applies,
-    parent_email, select_client_request, source_email_messages,
+    parent_email, select_client_request, source_email_messages, technical_evidence_context,
 )
 from .specification_image_text import literal_source_texts
 
@@ -263,12 +263,15 @@ def request_note_diagnostics(extraction):
 
 def resolve_request_notes(extraction):
     sources = {entry["sourceId"]: entry for entry in extraction.get("sourceManifest", [])}
+    context = select_client_request(list(sources.values()))
     notes = []
     for index, value in enumerate(extraction.get("specificationRequestNotes") or []):
         note = SpecificationRequestNote.model_validate(value).model_dump()
         if reason := _request_note_issue(note, sources):
             raise ValueError(f"{reason} (note index {index})")
         source = sources.get(note["source_id"])
+        if technical_evidence_context(note, source, sources, context, _contains_excerpt) is None:
+            continue
         note.update(filename=source["filename"], contentSha256=source["contentSha256"], observedAt=source.get("observedAt"))
         if note not in notes:
             notes.append(note)
@@ -293,7 +296,7 @@ def _has_parent_request_date(evidence, source, sources):
     if (source.get("sourceType") != "attachment" or ":attachment:" not in source_id
             or evidence["request_role"] == "forwarded_request" or not source.get("observedAt")):
         return False
-    parent = sources.get(source_id.split(":attachment:", 1)[0] + ":body")
+    parent = parent_email(source, sources)
     if (not parent or parent.get("sourceType") != "email_body" or parent["status"] != "read"
             or parent.get("observedAt") != source["observedAt"]):
         return False
@@ -359,6 +362,13 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
                                                 joined_identifier=label in REFERENCE_FIELDS)):
             reject("Supporting source/excerpt could not be verified")
             continue
+        technical_context = (0, None)
+        if label not in CLIENT_FIELDS:
+            technical_context = technical_evidence_context(evidence, source, sources, client_request, _contains_excerpt)
+            if technical_context is None:
+                excluded[label].append({**evidence,
+                    "reason": "Attached email evidence is not part of its adopted current request"})
+                continue
         if label in {"Bauder Roof Num", "Date Received"} and source["sourceType"] != "email_body":
             reject("Evidence does not meet this field's required email/request scope")
             continue
@@ -392,6 +402,8 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         containing = attachment_message(source, sources)
         if containing:
             observed_at = containing["sentAt"]
+        if technical_context[0] == 1 and source["sourceType"] == "email_body":
+            observed_at = technical_context[1]["sentAt"]
         if evidence["message_date"]:
             try:
                 messages = source_email_messages(source, include_plain=True) if source["sourceType"] == "email_body" else []
@@ -422,6 +434,9 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         candidates[label].append({**evidence, "observedAt": observed_at,
                                   "sourceObservedAt": source.get("observedAt"),
                                   "filename": source["filename"], "contentSha256": source["contentSha256"],
+                                  "requestContextPriority": technical_context[0],
+                                  **({"attachedMessageSourceId": technical_context[1]["sourceId"]}
+                                     if technical_context[0] == 1 else {}),
                                   **({"crmConfirmation": "required"} if unconfirmed_reference else {})})
         if label == "Page Size" and re.fullmatch(r"(?:ISO\s*)?[ABC][A-Z]", evidence["value"].strip(), re.IGNORECASE):
             issues[label] = PAGE_SIZE_UNCERTAIN
@@ -481,6 +496,9 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
             by_scope[_scope_key(evidence["scope"])].append(evidence)
         current = []
         for scoped in by_scope.values():
+            priority = max((entry.get("requestContextPriority", 0) for entry in scoped), default=0)
+            if priority:
+                scoped = [entry for entry in scoped if entry.get("requestContextPriority", 0) == priority]
             # Explicit supersession is accepted only within the same scope and
             # with a later known request timestamp. Upload IDs never decide.
             superseded = set()
@@ -491,7 +509,8 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
                         superseded.add(older["value"])
             scoped = [e for e in scoped if e["value"] not in superseded]
             times = [e["observedAt"] for e in scoped if e["observedAt"]]
-            if times and all(e["observedAt"] for e in scoped):
+            attached_messages = {e["attachedMessageSourceId"] for e in scoped if e.get("attachedMessageSourceId")}
+            if times and all(e["observedAt"] for e in scoped) and len(attached_messages) <= 1:
                 newest = max(times)
                 scoped = [e for e in scoped if e["observedAt"] == newest]
             current.extend(scoped)
@@ -532,6 +551,13 @@ def resolve_baseline_drawing_identity(extraction):
     _, provenance, issues = resolve_email_evidence(extraction, _include_baseline_references=True)
     reference = provenance["Drawing Reference"]
     candidates = reference["candidates"]
+    by_scope = defaultdict(list)
+    for candidate in candidates:
+        by_scope[_scope_key(candidate["scope"])].append(candidate)
+    candidates = []
+    for scoped in by_scope.values():
+        priority = max((candidate.get("requestContextPriority", 0) for candidate in scoped), default=0)
+        candidates.extend(candidate for candidate in scoped if candidate.get("requestContextPriority", 0) == priority)
     reason = issues.get("Drawing Reference")
     if len({drawing_reference_key(candidate["value"]) for candidate in candidates}) > 1:
         reason = VALUE_CONFLICT

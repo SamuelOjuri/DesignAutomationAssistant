@@ -120,14 +120,14 @@ class MatchingBoard:
         self.calls["references"] += 1
         return self.exact
 
-    def fetch_project_word_hit_counts(self, words):
-        return {word: 1 for word in words}
-
-    def fetch_project_items_matching_any_words(self, words, *, start_date):
-        return self.title
-
-    def fetch_active_project_items_since(self, *, start_date):
-        return self.title
+    def fetch_project_title_candidates(self, *, exact_title=None, words=(), match_all=False, budget):
+        self.calls["title"] += 1
+        budget.pages_read += 1
+        items = tuple(item for item in self.title if item.state == "active" and (
+            item.project_title.casefold() == exact_title.casefold() if exact_title is not None
+            else (all if match_all else any)(word.casefold() in item.project_title.casefold() for word in words)
+        ))
+        return monday_client.MondayProjectSearchResult(items=items, complete=True)
 
 
 def test_exact_and_title_candidates_remain_distinct_and_similarity_is_not_intent():
@@ -142,9 +142,9 @@ def test_exact_and_title_candidates_remain_distinct_and_similarity_is_not_intent
     contract = build_matching_contract("Existing roof", result)
     assert contract["schemaVersion"] == 2
     assert contract["candidates"][0]["matchKind"] == "exact_reference"
-    assert contract["candidates"][-1]["matchKind"] == "title_similarity"
+    assert contract["candidates"][-1]["matchKind"] == "exact_title"
     assert "recommended_type" not in result
-    assert board.calls == {"references": 1}
+    assert board.calls == {"references": 1, "title": 1}
 
 
 def test_optional_reference_failure_retains_title_candidates_and_reports_unavailable():
@@ -165,6 +165,19 @@ def test_empty_reference_result_is_available_and_not_a_lookup_failure():
     assert result["matches"] == []
     assert result["referenceLookup"]["status"] == "available"
     assert result["referenceLookup"]["candidates"] == []
+
+
+def test_incomplete_title_search_preserves_independently_confirmed_reference():
+    board = MatchingBoard(exact=[project(1, "AB00123")])
+    board.fetch_project_title_candidates = lambda **kwargs: monday_client.MondayProjectSearchResult(
+        items=(), complete=False, reason="Project title lookup budget exhausted",
+    )
+    result = match_projects("Existing roof", board, detected_references=["AB00123"])
+    assert [match["id"] for match in result["matches"]] == ["1"]
+    assert result["matches"][0]["match_kind"] == "exact_reference"
+    assert result["referenceLookup"]["status"] == "available"
+    assert result["titleLookup"]["status"] == "incomplete"
+    assert build_matching_contract("Existing roof", result)["titleLookup"]["status"] == "incomplete"
 
 
 def test_gateway_cache_is_short_lived_typed_and_bound_to_instance(monkeypatch):

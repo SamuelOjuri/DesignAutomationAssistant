@@ -1,8 +1,6 @@
-"""Matching parity and request budgets, using an offline Monday board."""
+"""Project identity, relevance and request budgets, using an offline board."""
 
 from collections import Counter
-import itertools
-import random
 
 from fastapi import HTTPException
 import pytest
@@ -19,130 +17,146 @@ def project(item_id, title, *, state="active", created_date="2025-02-10"):
 
 
 class Board:
-    def __init__(self, items=(), *, counts=None):
+    def __init__(self, items=()):
         self.items = tuple(items)
-        self.counts = counts
         self.calls = Counter()
+        self.requests = []
 
-    def eligible(self, start_date):
-        return tuple(item for item in self.items if (
-            item.state == "active" and item.created_date and item.created_date >= start_date
-        ))
-
-    def fetch_project_word_hit_counts(self, words):
-        self.calls["counts"] += 1
-        if self.counts is not None:
-            return {word: self.counts[word] for word in words}
-        return {word: min(50, sum(
-            item.state == "active" and word.lower() in item.project_title.lower()
-            for item in self.items
-        )) for word in words}
-
-    def fetch_project_items_matching_words(self, words, *, start_date):
-        self.calls["subsets"] += 1
-        return tuple(item for item in self.eligible(start_date) if all(
-            word.lower() in item.project_title.lower() for word in words
-        ))[:500]
-
-    def fetch_project_items_matching_any_words(self, words, *, start_date):
-        self.calls["candidates"] += 1
-        return tuple(item for item in self.eligible(start_date) if any(
-            word.lower() in item.project_title.lower() for word in words
-        ))
-
-    def fetch_project_items_matching_full_text(self, name, *, start_date):
-        self.calls["phrase"] += 1
-        return tuple(item for item in self.eligible(start_date)
-                     if name.lower() in item.project_title.lower())[:500]
-
-    def fetch_active_project_items_since(self, *, start_date):
-        self.calls["fallback"] += 1
-        return self.eligible(start_date)
+    def fetch_project_title_candidates(self, *, exact_title=None, words=(), match_all=False, budget):
+        self.calls["exact" if exact_title is not None else "candidates"] += 1
+        self.requests.append({"exact_title": exact_title, "words": tuple(words), "match_all": match_all})
+        budget.pages_read += 1
+        eligible = [item for item in self.items if item.state == "active"]
+        if exact_title is not None:
+            items = [item for item in eligible if item.project_title == exact_title]
+        else:
+            predicate = all if match_all else any
+            items = [item for item in eligible if predicate(
+                word.casefold() in item.project_title.casefold() for word in words)]
+        return monday_client.MondayProjectSearchResult(tuple(items), True)
 
 
-def legacy_match(name, gateway, *, similarity_threshold=0.55):
-    """The prior remote-subset policy, retained only as an independent oracle."""
-    words = matching.filter_meaningful_words(name)
-    if not words:
-        return matching._result_with_matches(matching._ordered_matches(
-            gateway.fetch_project_items_matching_full_text(
-                name, start_date=matching.PROJECT_SEARCH_START_DATE,
-            ), name,
-        ))
-    counts = gateway.fetch_project_word_hit_counts(words)
-    ordered = sorted(words, key=lambda word: counts.get(word, 1_000_000))
-    for size in range(len(ordered), 0, -1):
-        for subset in itertools.combinations(ordered, size):
-            matches = matching._ordered_matches(
-                gateway.fetch_project_items_matching_words(
-                    subset, start_date=matching.PROJECT_SEARCH_START_DATE,
-                ), name,
-            )
-            if matches:
-                return matching._result_with_matches(matches)
-    return matching._result_with_matches(matching._ordered_matches(
-        gateway.fetch_active_project_items_since(start_date=matching.PROJECT_SEARCH_START_DATE),
-        name, similarity_threshold=similarity_threshold,
-    ))
+def test_pomeroy_historical_exact_matches_do_not_expand_to_street_projects():
+    board = Board([project(3861, "Pomeroy Street", created_date="2018-10-16"),
+                   project(684, "Pomeroy Street", created_date="2015-10-08"),
+                   *[project(index, "Ebury Street") for index in range(1, 590)]])
+    result = matching.match_projects("Pomeroy Street", board)
+    assert {item["id"] for item in result["matches"]} == {"3861", "684"}
+    assert all(item["match_kind"] == "exact_title" for item in result["matches"])
+    assert board.calls == {"exact": 1}
+    assert result["titleLookup"]["pagesRead"] == 1
+    assert result["searchDiagnostics"]["totalQualifiedCandidateCount"] == 2
 
 
-@pytest.mark.parametrize("seed", range(40))
-def test_candidate_selection_matches_legacy_combinations(seed):
-    rng = random.Random(seed)
-    words = ["Ashford", "Briarwick", "Cedarwood", "Dunelm", "Eastbrook"]
-    items = [project(
-        index + 1,
-        " ".join(rng.sample(words, rng.randrange(1, 6))) + f" building {index}",
-        state="archived" if index % 9 == 0 else "active",
-        created_date="2020-12-31" if index % 7 == 0 else "2025-02-10",
-    ) for index in range(25)]
-    counts = {word: rng.randrange(51) for word in words}
-    name = " ".join(words)
-    board = Board(items, counts=counts)
-    assert matching.match_projects(name, board) == legacy_match(name, Board(items, counts=counts))
-    assert board.calls == {"counts": 1, "candidates": 1}
+def test_missing_dates_do_not_exclude_exact_identity_and_inactive_rows_are_excluded():
+    board = Board([project(1, "Pomeroy Street", created_date=None),
+                   project(2, "Pomeroy Street", state="archived"),
+                   project(3, "Pomeroy Street", state="deleted")])
+    assert [item["id"] for item in matching.match_projects("Pomeroy Street", board)["matches"]] == ["1"]
 
 
-@pytest.mark.parametrize("name, titles, counts, expected", [
-    ("Alpha Beta Gamma", ["Alpha Beta", "Beta Gamma"],
-     {"Alpha": 50, "Beta": 1, "Gamma": 2}, ["2"]),
-    ("Kings Kings Road", ["Road", "Kings"], {"Kings": 3, "Road": 1}, ["2"]),
-    ("KINGs Road", ["kings-road", "KINGS ROAD extension", "Road"],
-     {"KINGs": 1, "Road": 1}, ["1", "2"]),
-    ("Ashford Heath", ["AshfordHeath", "Heath"], {"Ashford": 1, "Heath": 2}, ["1"]),
+@pytest.mark.parametrize("project_name,title", [
+    ("Pomeroy Street", " POMEROY   STREET "),
+    ("Pomeroy Street", "Pomeroy-Street"),
+    ("St John's House", "ST JOHN\u2019S HOUSE"),
+    ("40-42 Holden Rd", "40 / 42 Holden Rd"),
 ])
-def test_specificity_ties_repeated_words_case_and_substrings(name, titles, counts, expected):
-    items = [project(index + 1, title) for index, title in enumerate(titles)]
-    result = matching.match_projects(name, Board(items, counts=counts))
-    assert result == legacy_match(name, Board(items, counts=counts))
-    assert [item["id"] for item in result["matches"]] == expected
+def test_normalized_whole_title_matches_are_retrieved_and_preferred(project_name, title):
+    board = Board([project(1, title), project(2, "Pomeroy Road extension")])
+    result = matching.match_projects(project_name, board)
+    assert [item["id"] for item in result["matches"]] == ["1"]
+    assert result["matches"][0]["match_kind"] == "normalized_title"
+    assert board.calls == {"exact": 1, "candidates": 1}
+
+
+def test_title_normalization_preserves_numbers_and_does_not_expand_street_saint():
+    assert matching.normalize_project_title("12 Pomeroy Street") != matching.normalize_project_title("14 Pomeroy Street")
+    assert matching.normalize_project_title("St John") != matching.normalize_project_title("Saint John")
 
 
 @pytest.mark.parametrize("threshold", [0.55, 0.99])
-def test_empty_candidate_pool_preserves_fuzzy_fallback(threshold):
-    items = [project(1, "Briarwic"), project(2, "Briarwick", state="deleted"),
-             project(3, "Briarwick", created_date="2020-01-01")]
-    board = Board(items)
-    result = matching.match_projects("Briarwick", board, similarity_threshold=threshold)
-    assert result == legacy_match("Briarwick", Board(items), similarity_threshold=threshold)
-    assert result["exists"] == (threshold == 0.55)
-    assert board.calls == {"counts": 1, "candidates": 1, "fallback": 1}
+def test_generic_word_cannot_admit_a_candidate_regardless_of_character_score(threshold):
+    board = Board([project(1, "Ebury Street"), project(2, "Pedro Street, E")])
+    result = matching.match_projects("Pomeroy Street", board, similarity_threshold=threshold)
+    assert result["matches"] == []
+    assert board.requests[1]["words"] == ("pomer",)
+    assert board.calls == {"exact": 1, "candidates": 1}
 
 
-def test_no_meaningful_words_preserves_phrase_path():
-    items = [project(1, "100 SE1"), project(2, "100 other SE1")]
-    board = Board(items)
-    assert matching.match_projects("100 SE1", board) == legacy_match("100 SE1", Board(items))
-    assert board.calls == {"phrase": 1}
+def test_relaxed_matches_require_whole_identifying_words():
+    board = Board([project(1, "Pomeroy Road"), project(2, "Pomeroysmith Street"),
+                   project(3, "Ebury Street")])
+    result = matching.match_projects("Pomeroy Street", board)
+    assert [item["id"] for item in result["matches"]] == ["1"]
+    assert result["matches"][0]["match_kind"] == "title_similarity"
 
 
-def test_preserves_first_500_matching_items_before_similarity_sort():
-    items = [project(index, "Kings Road extension") for index in range(1, 501)]
-    items.append(project(501, "Kings Road"))
+@pytest.mark.parametrize("name,title", [
+    ("Briarwic", "Briarwick"),
+    ("Pomeroy Street", "Pomery Road"),
+])
+def test_small_identifier_spelling_variants_use_the_same_two_search_stages(name, title):
+    board = Board([project(1, title), project(2, "Ebury Street"), project(3, "Pomeroysmith Street")])
+    result = matching.match_projects(name, board)
+    assert [item["id"] for item in result["matches"]] == ["1"]
+    assert board.calls == {"exact": 1, "candidates": 1}
+
+
+def test_address_location_cannot_independently_admit_an_unrelated_project():
+    board = Board([project(1, "Pomeroy Street phase 2"), project(2, "Cardiff Hospital")])
+    result = matching.match_projects("Pomeroy Street Cardiff", board)
+    assert [item["id"] for item in result["matches"]] == ["1"]
+    assert board.requests[1]["words"] == ("pomer",)
+
+
+def test_location_only_results_do_not_qualify_when_the_street_name_is_missing():
+    result = matching.match_projects("Pomeroy Street Cardiff", Board([project(1, "Cardiff Hospital")]))
+    assert result["matches"] == []
+
+
+def test_identifying_word_coverage_precedes_character_similarity():
+    board = Board([project(1, "Alpha Beta Gamma extremely long development title"),
+                   project(2, "Alpha Beta"), project(3, "Beta Gamma")])
+    result = matching.match_projects("Alpha Beta Gamma", board)
+    assert result["matches"][0]["id"] == "1"
+    assert {item["id"] for item in result["matches"]} == {"1", "2", "3"}
+
+
+@pytest.mark.parametrize("name,title,expected", [
+    ("Industrial Estate", "INDUSTRIAL-ESTATE", ["1"]),
+    ("Street", "Streetsbrook Infant Academy", []),
+    ("100 SE1", "100 other SE1", []),
+    ("100 SE1", "100   se1", ["1"]),
+])
+def test_generic_or_numeric_only_names_require_whole_title_agreement(name, title, expected):
+    board = Board([project(1, title)])
+    assert [item["id"] for item in matching.match_projects(name, board)["matches"]] == expected
+    assert board.requests[1]["match_all"]
+
+
+@pytest.mark.parametrize("name", ["", "   ", "---"])
+def test_empty_or_unsearchable_titles_do_not_call_monday(name):
+    board = Board()
+    result = matching.match_projects(name, board)
+    assert result["matches"] == [] and result["titleLookup"]["status"] == "not_requested"
+    assert not board.calls
+
+
+def test_ranks_all_qualified_candidates_before_display_limit_and_exposes_truncation():
+    items = [project(index, f"Kings Road extension {index}") for index in range(1, 501)]
+    items.append(project(501, "Kings Road Annex"))
     result = matching.match_projects("Kings Road", Board(items))
-    assert result == legacy_match("Kings Road", Board(items))
-    assert len(result["matches"]) == 500
-    assert "501" not in {item["id"] for item in result["matches"]}
+    assert len(result["matches"]) == 500 and result["matches"][0]["id"] == "501"
+    contract = matching.build_matching_contract("Kings Road", result)
+    assert contract["candidateCount"] == 500
+    assert contract["searchDiagnostics"]["totalQualifiedCandidateCount"] == 501
+    assert contract["searchDiagnostics"]["truncated"] is True
+
+
+def test_ties_are_deterministic_independent_of_page_order():
+    items = [project(2, "Kings Road extension"), project(1, "Kings Road extension")]
+    assert matching.match_projects("Kings Road", Board(items))["matches"] == matching.match_projects(
+        "Kings Road", Board(reversed(items)))["matches"]
 
 
 def raw_project(item_id, title="Kings Road", *, state="active"):
@@ -184,22 +198,45 @@ def test_candidate_query_keeps_date_outside_word_or_and_paginates(monkeypatch):
     assert [item.item_id for item in result] == ["1", "3"]
 
 
-def test_winning_combination_can_be_found_after_first_candidate_page(monkeypatch):
+def test_normalized_whole_title_can_be_found_after_first_candidate_page(monkeypatch):
     calls = []
 
     def request(token, query, variables=None, **kwargs):
         calls.append((query, variables))
-        if "w0: boards" in query:
-            return {"data": {"w0": [{"items_page": {"items": [{}] * 50}}],
-                             "w1": [{"items_page": {"items": [{}]}}]}}
+        if variables and variables.get("queryParams", {}).get("rules", [{}])[0].get("operator") == "any_of":
+            return board_page()
         if variables and "queryParams" in variables:
             return board_page([raw_project(index, "Alpha") for index in range(1, 501)], "page-2")
-        return {"data": {"next_items_page": {"items": [raw_project(501, "Alpha Beta")], "cursor": None}}}
+        return {"data": {"next_items_page": {"items": [raw_project(501, "ALPHA-BETA")], "cursor": None}}}
 
     monkeypatch.setattr(monday_client, "monday_graphql_request", request)
     result = matching.match_projects("Alpha Beta", MondayDesignProcessingReadGateway("offline", "1825117125"))
     assert [item["id"] for item in result["matches"]] == ["501"]
     assert len(calls) == 3
+
+
+@pytest.mark.parametrize("has_partial_candidates", [False, True])
+def test_shared_page_budget_is_explicitly_incomplete_and_does_not_mean_new(monkeypatch, has_partial_candidates):
+    calls = []
+
+    def request(token, query, variables=None, **kwargs):
+        calls.append((query, variables, kwargs))
+        if len(calls) == 1:
+            return board_page()
+        items = [raw_project(len(calls), "Pomeroy Road")] if has_partial_candidates else []
+        page = {"items": items, "cursor": f"page-{len(calls)}"}
+        return ({"data": {"boards": [{"items_page": page}]}} if "queryParams" in variables
+                else {"data": {"next_items_page": page}})
+
+    monkeypatch.setattr(monday_client, "monday_graphql_request", request)
+    result = matching.match_projects("Pomeroy Street", MondayDesignProcessingReadGateway("offline", "1825117125"))
+    contract = matching.build_matching_contract("Pomeroy Street", result)
+    assert len(calls) == 4 and all(call[2]["retry_attempts"] == 1 for call in calls)
+    assert contract["titleLookup"]["status"] == "incomplete"
+    assert contract["titleLookup"]["pagesRead"] == 4
+    assert contract["searchDiagnostics"]["totalQualifiedCandidateCount"] is None
+    assert result["type"] == ("existing" if has_partial_candidates else "unknown")
+    assert len(contract["candidates"]) == (3 if has_partial_candidates else 0)
 
 
 @pytest.mark.parametrize("page", [
@@ -228,17 +265,18 @@ def test_repeated_cursor_stops_without_looping(monkeypatch):
     assert len(calls) == 2
 
 
-@pytest.mark.parametrize("phase", ["counts", "candidates", "fallback"])
+@pytest.mark.parametrize("phase", ["exact", "candidates"])
 def test_upstream_failures_do_not_become_new_projects(phase):
     board = Board()
-    method = {"counts": "fetch_project_word_hit_counts", "candidates": "fetch_project_items_matching_any_words",
-              "fallback": "fetch_active_project_items_since"}[phase]
     error = HTTPException(502, "Monday unavailable")
+    original = board.fetch_project_title_candidates
 
     def fail(*args, **kwargs):
-        raise error
+        if (kwargs.get("exact_title") is not None) == (phase == "exact"):
+            raise error
+        return original(*args, **kwargs)
 
-    setattr(board, method, fail)
+    board.fetch_project_title_candidates = fail
     with pytest.raises(HTTPException) as raised:
         matching.match_projects("Kings Road", board)
     assert raised.value is error
@@ -278,24 +316,26 @@ def test_invalid_candidate_queries_never_call_monday(monkeypatch, words, board_i
 def test_no_match_requests_stay_constant_as_word_count_grows(monkeypatch, word_count):
     words = "Ashford Briarwick Cedarwood Dunelm Eastbrook Fairhaven Glenwood Heathside Ivydale Juniperfield Kingswood Larchmont".split()[:word_count]
     name = " ".join(words)
-    calls, checks, legacy_checks = [], [], []
+    calls, checks = [], []
 
     def request(token, query, variables=None, **kwargs):
         calls.append((query, variables))
-        if "w0: boards" in query:
-            return {"data": {f"w{index}": [{"items_page": {"items": []}}]
-                             for index in range(word_count)}}
         return board_page()
 
     monkeypatch.setattr(monday_client, "monday_graphql_request", request)
     gateway = _CheckedMatchingGateway(
         MondayDesignProcessingReadGateway("offline", "1825117125"), lambda: checks.append(True),
     )
-    legacy_board = Board()
-    old_result = legacy_match(name, _CheckedMatchingGateway(legacy_board, lambda: legacy_checks.append(True)))
-    assert matching.match_projects(name, gateway) == old_result
-    old_requests = sum(legacy_board.calls.values()) + len(legacy_checks)
+    result = matching.match_projects(name, gateway)
+    assert result["matches"] == [] and result["titleLookup"]["status"] == "available"
     new_requests = len(calls) + len(checks)
-    assert old_requests == 3 * (2 ** word_count + 1)
-    assert (len(calls), len(checks), new_requests) == (3, 6, 9)
-    print(f"words={word_count} legacy_requests={old_requests} candidate_requests={new_requests}")
+    assert (len(calls), len(checks), new_requests) == (2, 4, 6)
+
+
+def test_long_titles_do_not_expand_the_number_of_queries_or_claim_completeness():
+    name = "Ashford Briarwick Cedarwood Dunelm Eastbrook Fairhaven Glenwood Heathside Ivydale Juniperfield Kingswood Larchmont Meadowbrook"
+    board = Board()
+    result = matching.match_projects(name, board)
+    assert board.calls == {"exact": 1, "candidates": 1}
+    assert len(board.requests[1]["words"]) == 12
+    assert result["titleLookup"]["status"] == "incomplete" and result["type"] == "unknown"

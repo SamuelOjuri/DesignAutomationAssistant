@@ -10,7 +10,10 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from .specification_request_context import parent_email, select_client_request, source_email_messages
+from .specification_request_context import (
+    adopted_attached_message, adopted_request_contexts, parent_email,
+    select_client_request, source_email_messages,
+)
 from .specification_review_contract import (
     REQUEST_INTENT_SCHEMA_VERSION, DetectedReference, EmailCitation, ProjectMatch,
     RequestIntentRecommendation,
@@ -41,6 +44,12 @@ def _regions(manifest, context):
         regions.append((context["sourceId"], "selected client request subject/body",
                         context["text"], "current_request"))
         source = sources[context["sourceId"]]
+        for variant in source_email_messages(source, include_plain=True):
+            if (variant["messageIndex"] == context["messageIndex"]
+                    and variant["sender"] == context["sender"] and variant["sentAt"] == context["sentAt"]
+                    and variant["text"] != context["text"]):
+                regions.append((context["sourceId"], "literal alternative of selected client request",
+                                variant["text"], "current_request"))
         for message in source_email_messages(source):
             if (message["text"] != context["text"] and message.get("sentAt")
                     and message["sentAt"] < context["sentAt"]):
@@ -53,10 +62,35 @@ def _regions(manifest, context):
             if source.get("status") == "read" and source.get("sourceType") == "email_body":
                 regions.append((source["sourceId"], "unselected email context",
                                 source.get("text", ""), "forwarded_context"))
+    if context:
+        for message in adopted_request_contexts(manifest):
+            regions.append((message["sourceId"], "explicitly adopted attached request",
+                            message["text"], "document"))
+            for variant in source_email_messages(sources[message["sourceId"]], include_plain=True):
+                if (variant["messageIndex"] == 0 and variant["sender"] == message["sender"]
+                        and variant["sentAt"] == message["sentAt"] and variant["text"] != message["text"]):
+                    regions.append((message["sourceId"], "literal alternative of adopted attached request",
+                                    variant["text"], "document"))
+            for earlier in source_email_messages(sources[message["sourceId"]]):
+                if earlier["messageIndex"] != 0:
+                    regions.append((message["sourceId"], "quoted history in attached email",
+                                    earlier["text"], "forwarded_context"))
     for source in manifest:
         if source.get("status") != "read" or source.get("sourceType") == "email_body":
             continue
         parent = parent_email(source, sources)
+        if parent and parent.get("attachedEmail"):
+            adopted = adopted_attached_message(source, sources, context)
+            if adopted is None:
+                continue
+            if source.get("contentId"):
+                from .specification_request_context import attachment_message
+                containing = attachment_message(source, sources)
+                if not containing or containing["messageIndex"] != 0:
+                    continue
+            regions.append((source["sourceId"], "document in explicitly adopted attached request",
+                            source.get("text", ""), "document"))
+            continue
         # Standalone supplementary documents belong to this input inventory;
         # attachments of an unrelated email do not establish this request.
         if parent and (not context or parent["sourceId"] != context["sourceId"]):

@@ -2,16 +2,21 @@ from __future__ import annotations
 
 from difflib import SequenceMatcher
 import re
+import unicodedata
 from typing import Any, Protocol, Sequence
 
 from fastapi import HTTPException
 
-from ...monday_client import MondayProjectBoardItem
+from ...monday_client import (
+    MondayProjectBoardItem,
+    MondayProjectSearchBudget,
+    MondayProjectSearchResult,
+)
 
 
-PROJECT_SEARCH_START_DATE = "2021-01-01"
-# The old per-combination query returned at most one page of 500 matches.
+# A display limit, applied only after all admitted candidates have been ranked.
 PROJECT_MATCH_LIMIT = 500
+MAX_PROJECT_SEARCH_WORDS = 12
 
 
 class ProjectMatchingGateway(Protocol):
@@ -19,30 +24,10 @@ class ProjectMatchingGateway(Protocol):
         self, references: Sequence[str],
     ) -> tuple[MondayProjectBoardItem, ...]: ...
 
-    def fetch_project_word_hit_counts(
-        self,
-        words: Sequence[str],
-    ) -> dict[str, int]: ...
-
-    def fetch_project_items_matching_any_words(
-        self,
-        words: Sequence[str],
-        *,
-        start_date: str = PROJECT_SEARCH_START_DATE,
-    ) -> tuple[MondayProjectBoardItem, ...]: ...
-
-    def fetch_project_items_matching_full_text(
-        self,
-        project_name: str,
-        *,
-        start_date: str = PROJECT_SEARCH_START_DATE,
-    ) -> tuple[MondayProjectBoardItem, ...]: ...
-
-    def fetch_active_project_items_since(
-        self,
-        *,
-        start_date: str = PROJECT_SEARCH_START_DATE,
-    ) -> tuple[MondayProjectBoardItem, ...]: ...
+    def fetch_project_title_candidates(
+        self, *, exact_title: str | None = None, words: Sequence[str] = (),
+        match_all: bool = False, budget: MondayProjectSearchBudget,
+    ) -> MondayProjectSearchResult: ...
 
 
 ENGLISH_STOP_WORDS = frozenset(
@@ -68,6 +53,29 @@ UK_POSTCODE_TOKEN_PATTERNS = (
     r"0[A-Z]{2}",
 )
 
+# These words still contribute to title comparison, but cannot establish an
+# identity by themselves in a relaxed search. This is deliberately separate
+# from stop-word removal: exact titles such as "High Street" remain searchable.
+GENERIC_PROJECT_WORDS = frozenset({
+    "street", "st", "road", "rd", "avenue", "ave", "lane", "drive", "dr",
+    "close", "court", "place", "way", "crescent", "terrace", "building",
+    "buildings", "house", "houses", "roof", "roofs", "block", "blocks",
+    "phase", "plot", "plots", "site", "project", "development", "industrial",
+    "estate", "school", "academy", "college", "university", "hospital",
+    "centre", "center", "extension", "refurbishment", "works", "unit", "units",
+    "apartment", "apartments",
+})
+ADDRESS_SUFFIX_WORDS = frozenset({
+    "street", "st", "road", "rd", "avenue", "ave", "lane", "drive", "dr",
+    "close", "court", "place", "way", "crescent", "terrace",
+})
+
+
+def normalize_project_title(text: str) -> str:
+    """Compare whole titles without losing house numbers or expanding St/Saint."""
+    text = unicodedata.normalize("NFKC", text).casefold()
+    return " ".join(re.findall(r"[^\W_]+", text))
+
 
 def filter_meaningful_words(text: str) -> list[str]:
     normalized = re.sub(r"\b(St|Dr|Rd)\.\s*", r"\1 ", text)
@@ -90,6 +98,38 @@ def filter_meaningful_words(text: str) -> list[str]:
             continue
         meaningful.append(word)
     return meaningful
+
+
+def _identifying_words(normalized_title: str) -> tuple[str, ...]:
+    def meaningful(text):
+        return tuple(dict.fromkeys(word for word in filter_meaningful_words(text)
+                                   if word not in GENERIC_PROJECT_WORDS))
+
+    tokens = normalized_title.split()
+    for index, word in enumerate(tokens):
+        if word in ADDRESS_SUFFIX_WORDS:
+            before_address_suffix = meaningful(" ".join(tokens[:index]))
+            if before_address_suffix:
+                # In "Pomeroy Street Cardiff", Cardiff supplies context; it
+                # cannot independently identify a different Cardiff project.
+                return before_address_suffix
+            break
+    return meaningful(normalized_title)
+
+
+def _identifying_word_agrees(requested: str, candidate: str) -> bool:
+    if requested == candidate:
+        return True
+    # Small spelling differences are suggestions only. A common prefix alone
+    # must not admit names such as Pomeroysmith or AshfordHeath.
+    return (min(len(requested), len(candidate)) >= 5
+            and abs(len(requested) - len(candidate)) <= 1
+            and requested[:3] == candidate[:3]
+            and SequenceMatcher(None, requested, candidate).ratio() >= 0.88)
+
+
+def _identifying_coverage(identifying: Sequence[str], tokens: set[str]) -> int:
+    return sum(any(_identifying_word_agrees(word, token) for token in tokens) for word in identifying)
 
 
 def _similarity(project_name: str, item: MondayProjectBoardItem) -> float:
@@ -142,7 +182,9 @@ def _ordered_matches(
             for match in matches
             if match["similarity"] >= similarity_threshold
         ]
-    return sorted(matches, key=lambda match: match["similarity"], reverse=True)
+    return sorted(matches, key=lambda match: (
+        -match["similarity"], match["title"].casefold(), str(match["name"]), str(match["id"]),
+    ))
 
 
 def _result_with_matches(matches: list[dict[str, Any]]) -> dict[str, Any]:
@@ -166,60 +208,108 @@ def _result_with_matches(matches: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _title_search_result(
+    matches: list[dict[str, Any]], *, stage: str, budget: MondayProjectSearchBudget,
+    complete: bool = True, detail: str = "",
+) -> dict[str, Any]:
+    result = _result_with_matches(matches)
+    result["titleLookup"] = {
+        "status": "available" if complete else "incomplete", "stage": stage,
+        "pagesRead": budget.pages_read, "maxPages": budget.max_pages,
+        "maxSeconds": budget.max_seconds,
+        **({"detail": detail or "Project title lookup is incomplete; narrow the title or retry"}
+           if not complete else {}),
+    }
+    return result
+
+
+def _title_matches(
+    items: Sequence[MondayProjectBoardItem], project_name: str, *, kind: str,
+) -> list[dict[str, Any]]:
+    rationale = {
+        "exact_title": "Project title matches the request; reviewer confirmation is required",
+        "normalized_title": "Project title matches after normalizing case, spacing and punctuation",
+        "title_similarity": "Project title shares identifying words or close spellings; similarity is not request intent",
+    }[kind]
+    return [{**match, "match_kind": kind, "match_rationale": rationale}
+            for match in _ordered_matches(items, project_name)]
+
+
+def _apply_match_limit(result: dict[str, Any]) -> dict[str, Any]:
+    matches = result["matches"]
+    complete = all((result.get(key) or {}).get("status") not in {"incomplete", "unavailable"}
+                   for key in ("titleLookup", "referenceLookup"))
+    limited = matches[:PROJECT_MATCH_LIMIT]
+    result.update(_result_with_matches(limited))
+    result["searchDiagnostics"] = {
+        "policyVersion": "project-title-v2",
+        "totalQualifiedCandidateCount": len(matches) if complete else None,
+        "qualifiedCandidateCountObserved": len(matches),
+        "returnedCandidateCount": len(limited), "truncated": len(matches) > len(limited),
+    }
+    if not complete and not limited:
+        result.update(type="unknown", error="Project lookup is incomplete; retry or narrow the request")
+    return result
+
+
 def _match_projects_by_title(
     project_name: str,
     gateway: ProjectMatchingGateway,
     *,
     similarity_threshold: float = 0.55,
 ) -> dict[str, Any]:
-    meaningful_words = filter_meaningful_words(project_name)
-    if not meaningful_words:
-        items = gateway.fetch_project_items_matching_full_text(
-            project_name,
-            start_date=PROJECT_SEARCH_START_DATE,
-        )
-        return _result_with_matches(_ordered_matches(items, project_name))
+    # Kept in the public signature for existing callers. Character similarity
+    # ranks admitted candidates; it cannot substitute for identifying words.
+    del similarity_threshold
+    budget = MondayProjectSearchBudget()
+    normalized = normalize_project_title(project_name)
+    if not normalized:
+        result = _result_with_matches([])
+        result["titleLookup"] = {"status": "not_requested"}
+        return result
 
-    counts = gateway.fetch_project_word_hit_counts(meaningful_words)
-    ordered_words = sorted(
-        meaningful_words,
-        key=lambda word: counts.get(word, 1_000_000),
-    )
-    candidates = gateway.fetch_project_items_matching_any_words(
-        ordered_words,
-        start_date=PROJECT_SEARCH_START_DATE,
-    )
-    # Every item satisfies all subsets of its matching word positions. The first
-    # nonempty legacy combination is therefore the longest signature, breaking
-    # ties by position in the specificity-ordered word list. This avoids both
-    # remote subset queries and exponential local combination enumeration.
-    lowered_words = [word.lower() for word in ordered_words]
-    by_signature: dict[tuple[int, ...], list[MondayProjectBoardItem]] = {}
-    for item in candidates:
-        if item.state != "active":
-            continue
-        title = item.project_title.lower()
-        signature = tuple(
-            index for index, word in enumerate(lowered_words) if word in title
-        )
-        if signature:
-            by_signature.setdefault(signature, []).append(item)
-    if by_signature:
-        winning_signature = min(by_signature, key=lambda value: (-len(value), value))
-        return _result_with_matches(_ordered_matches(
-            by_signature[winning_signature][:PROJECT_MATCH_LIMIT], project_name,
-        ))
+    exact = gateway.fetch_project_title_candidates(exact_title=project_name.strip(), budget=budget)
+    exact_items = tuple(item for item in exact.items
+                        if item.state == "active" and normalize_project_title(item.project_title) == normalized)
+    if exact_items or not exact.complete:
+        return _title_search_result(_title_matches(exact_items, project_name, kind="exact_title"),
+            stage="exact_title", budget=budget, complete=exact.complete, detail=exact.reason)
 
-    fallback_items = gateway.fetch_active_project_items_since(
-        start_date=PROJECT_SEARCH_START_DATE,
-    )
-    return _result_with_matches(
-        _ordered_matches(
-            fallback_items,
-            project_name,
-            similarity_threshold=similarity_threshold,
-        )
-    )
+    identifying = _identifying_words(normalized)
+    # Generic/numeric-only names can still have normalized whole-title matches.
+    # AND keeps that retrieval narrow; such words never admit relaxed matches.
+    search_words = identifying or tuple(dict.fromkeys(normalized.split()))
+    # A short prefix for long identifiers retrieves nearby spellings in the same
+    # query. Local whole-word/near-spelling checks still decide admission.
+    retrieval_words = tuple(dict.fromkeys(word[:-2] if identifying and len(word) >= 7 else word
+                                         for word in search_words[:MAX_PROJECT_SEARCH_WORDS]))
+    candidates = gateway.fetch_project_title_candidates(
+        words=retrieval_words, match_all=not identifying, budget=budget)
+    items = tuple({item.item_id: item for item in candidates.items if item.state == "active"}.values())
+    normalized_items = tuple(item for item in items if normalize_project_title(item.project_title) == normalized)
+    if normalized_items:
+        return _title_search_result(_title_matches(normalized_items, project_name, kind="normalized_title"),
+            stage="normalized_title", budget=budget, complete=candidates.complete, detail=candidates.reason)
+
+    if len(search_words) > MAX_PROJECT_SEARCH_WORDS:
+        return _title_search_result([], stage="distinctive_words", budget=budget, complete=False,
+            detail="Project title has too many search words; narrow the title and retry")
+
+    requested_tokens = set(normalized.split())
+    admitted = [item for item in items
+                if _identifying_coverage(identifying, set(normalize_project_title(item.project_title).split()))]
+    # Coverage precedes character overlap. Every admitted candidate shares an
+    # identifying word or conservative spelling variant; stable ties do not
+    # depend on Monday page order.
+    def rank(match):
+        tokens = set(normalize_project_title(match["title"]).split())
+        return (-_identifying_coverage(identifying, tokens), -len(requested_tokens & tokens),
+                -match["similarity"], normalize_project_title(match["title"]),
+                str(match["name"]), str(match["id"]))
+
+    matches = sorted(_title_matches(admitted, project_name, kind="title_similarity"), key=rank)
+    return _title_search_result(matches, stage="distinctive_words" if identifying else "normalized_title",
+        budget=budget, complete=candidates.complete, detail=candidates.reason)
 
 
 def match_projects(
@@ -245,7 +335,8 @@ def match_projects(
         if reference is not None:
             references.setdefault(reference.project_key, literal)
     if not references:
-        return _match_projects_by_title(project_name, gateway, similarity_threshold=similarity_threshold)
+        return _apply_match_limit(_match_projects_by_title(
+            project_name, gateway, similarity_threshold=similarity_threshold))
 
     lookup: dict[str, Any] = {"status": "available", "references": list(references), "candidates": []}
     exact_items = ()
@@ -287,7 +378,7 @@ def match_projects(
     else:
         try:
             title_result = _match_projects_by_title(project_name, gateway, similarity_threshold=similarity_threshold)
-            title_lookup = {"status": "available"}
+            title_lookup = title_result["titleLookup"]
         except HTTPException:
             title_result = _result_with_matches([])
             title_lookup = {"status": "unavailable", "detail": "Project title lookup could not be completed; retry or review references"}
@@ -296,11 +387,10 @@ def match_projects(
         for match in lookup["candidates"] if match["state"] == "active"
     }
     for match in title_result["matches"]:
-        matches_by_id.setdefault(str(match["id"]), {**match, "match_kind": "title_similarity",
-            "match_rationale": "Project title resembles the request; similarity is not request intent"})
+        matches_by_id.setdefault(str(match["id"]), match)
     result = _result_with_matches(list(matches_by_id.values()))
     result.update(referenceLookup=lookup, titleLookup=title_lookup)
-    return result
+    return _apply_match_limit(result)
 
 
 def build_matching_contract(
@@ -328,7 +418,7 @@ def build_matching_contract(
         for rank, match in enumerate(legacy_result.get("matches", []), start=1)
     ]
     return {
-        "schemaVersion": 2 if "referenceLookup" in legacy_result else 1,
+        "schemaVersion": 2 if "titleLookup" in legacy_result or "referenceLookup" in legacy_result else 1,
         "extractedProjectTitle": project_name,
         "candidateCount": len(candidates),
         "candidates": candidates,
@@ -336,6 +426,7 @@ def build_matching_contract(
             "exists": bool(legacy_result.get("exists")),
             "bestMatch": legacy_result.get("best_match"),
         },
-        **({"referenceLookup": legacy_result["referenceLookup"],
-            "titleLookup": legacy_result["titleLookup"]} if "referenceLookup" in legacy_result else {}),
+        **({"referenceLookup": legacy_result["referenceLookup"]} if "referenceLookup" in legacy_result else {}),
+        **({"titleLookup": legacy_result["titleLookup"]} if "titleLookup" in legacy_result else {}),
+        **({"searchDiagnostics": legacy_result["searchDiagnostics"]} if "searchDiagnostics" in legacy_result else {}),
     }
