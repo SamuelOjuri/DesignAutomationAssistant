@@ -345,6 +345,25 @@ above, once each is confirmed failed/current. Do not retry `3353889887` or
 citation and U-value conflict are reviewed, or `3353070362`, which is now outside
 the Landing Zone.
 
+The 17 November update also keeps the pipeline identity and needs no migration. A
+job whose assigned execution was superseded while waiting to retry is now cancelled
+and replaced at its next claim. Previously `resume_execution` failed on every claim
+without consuming an attempt: job `537ea3a8` (item `3362399426`) looped in
+`retry_wait` from 13:23 until reconciliation replaced it at 13:31. Worker recovery
+paths also no longer re-raise `Newer item availability was observed` as an unhandled
+error. Staff-only email chains no longer fail on Company/Contact (see
+[the specification notes](PerformanceSpecification.md)). Deploy the design workers,
+reconciliation, API and specification publisher from the same revision, then retry
+items `3362399426` (`fa5c9ec3`) and `3359486811` (`d73a99ee`) once each is confirmed
+failed/current. Item `3363842601` (`7278fc41`) timed out (`ReadTimeout`) transcribing
+`7628-P-0710-C01 Proposed Elevations.pdf` on all three attempts; that request was
+13 MB including detail views. Raise `GEMINI_REQUEST_TIMEOUT_SECONDS` on the design
+workers (for example to `600`, keeping `GEMINI_SHARED_LEASE_SECONDS` above it)
+before retrying it. Items `3363220066` (`35142e0c`) and `3363595169` (`ca539cbf`)
+failed on model citations: an architect's drawing number cited as the requested
+Drawing Reference, and a request note spliced across two image text regions. A retry
+re-runs extraction and may succeed; three other items recovered that way on 17 November.
+
 Local verification on 11 November exercised the backend tests, PostgreSQL checks,
 44 frontend Node tests and the frontend production build. Browser journey
 assertions were not completed: the in-app browser was unavailable and the

@@ -24,7 +24,7 @@ from ..specification_semantics import (
 )
 from ..specification_image_text import IMAGE_TRANSCRIPTION_PROMPT
 from ..specification_request_context import (
-    adopted_request_contexts, request_context_summary, select_client_request,
+    adopted_request_contexts, internal_only_correspondence, request_context_summary, select_client_request,
 )
 from ..source_text import require_json_safe_text
 from ..specification_failures import SpecificationEvidenceError
@@ -113,15 +113,23 @@ class LegacyGeminiClient:
         requester = GeminiJSONRequester(self.generate_content, self.model, self.parameter_extraction_config, DesignParameterExtraction)
         missing_client = any(source.get("status") == MISSING_CLIENT_EMAIL_REVIEW_STATUS
                              for source in source_manifest or [])
+        # analyze_downloaded_email_assets clears these after extraction too; the
+        # verifier below would otherwise reject them first and fail every attempt.
+        internal_only = (source_manifest is not None and not missing_client
+                         and internal_only_correspondence(source_manifest))
         if missing_client:
             prompt += ("\nNo client email was provided. Extract supported technical facts from the files, "
                        "using request_role=document and no message_date unless the source actually establishes it. "
                        "Company, Contact, Date Received and Hour Received must remain null; document issuer, "
                        "survey contact, visit date, export date and file upload time do not establish client-request "
                        "identity or chronology. Request intent requires reviewer classification.\n")
+        elif internal_only:
+            prompt += ("\nEvery supplied email was sent by our own staff and no external client request was "
+                       "provided. Company, Contact, Date Received and Hour Received must remain null; a client "
+                       "named inside internal correspondence requires reviewer confirmation.\n")
 
         def client_identity(result):
-            if missing_client:
+            if missing_client or internal_only:
                 # Survey/document contacts and visit/export dates do not establish
                 # who sent a client request or when it was received.
                 result.company = result.contact = result.date_received = result.hour_received = None

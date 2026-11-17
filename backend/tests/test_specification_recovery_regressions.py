@@ -933,3 +933,42 @@ def test_dropped_blank_citation_leaves_a_populated_scalar_for_recovery():
         LegacyGeminiClient("offline", generate_content=generate).extract_design_parameters_with_manifest(
             "Synthetic source context", manifest)
     assert len(calls) == 2 and "Drawing Title" in calls[1]
+
+
+STAFF_RELAY = ("From: Sales Rep <rep@taperedplus.co.uk>\nTo: Sales <sales@taperedplus.co.uk>\n"
+               f"Subject: Example Roof\nDate: {SENT}\n\nDesign and quotation please for Alex Example - Example Roofing")
+
+
+def test_staff_relay_without_a_client_email_clears_client_identity_before_verification():
+    # Render jobs d73a99ee (item 3359486811) and d1c91622/fa5c9ec3 (item 3362399426):
+    # a salesperson emailed sales naming the client. No external request exists, so
+    # these citations are excluded; populated scalars then failed every attempt.
+    snippet = "Alex Example - Example Roofing"
+    cited = dict(source_id="asset:1:body", request_role="direct_request", message_date=SENT)
+    reply = parameters(company="Example Roofing", contact="Alex Example", specification_evidence=[
+        candidate("Company", "Example Roofing", snippet, **cited),
+        candidate("Contact", "Alex Example", snippet, **cited)]).model_dump()
+    calls = []
+
+    def generate(model, prompt, config):
+        calls.append(prompt)
+        return SimpleNamespace(parsed=dict(reply))
+
+    result = LegacyGeminiClient("offline", generate_content=generate).extract_design_parameters_with_manifest(
+        "Synthetic source context", [source("asset:1:body", STAFF_RELAY, kind="email_body")])
+    assert result.company is None and result.contact is None
+    assert not {e.field for e in result.specification_evidence} & {"Company", "Contact", "Date Received"}
+    assert "Company, Contact, Date Received and Hour Received must remain null" in calls[0]
+
+
+def test_external_client_identity_is_kept_beside_a_staff_relay():
+    client_email = (f"From: Alex Example <alex@example.com>\nTo: Sales <sales@taperedplus.co.uk>\n"
+                    f"Subject: Example Roof\nDate: {SENT}\n\nPlease price this roof.\nAlex Example")
+    manifest = [source("asset:1:body", STAFF_RELAY, kind="email_body"),
+                source("asset:2:body", client_email, kind="email_body")]
+    evidence = candidate("Contact", "Alex Example", "Alex Example", source_id="asset:2:body",
+                         request_role="direct_request", message_date=SENT)
+    reply = parameters(contact="Alex Example", specification_evidence=[evidence]).model_dump()
+    result = LegacyGeminiClient("offline", generate_content=lambda *args: SimpleNamespace(parsed=dict(reply))
+                                ).extract_design_parameters_with_manifest("Synthetic source context", manifest)
+    assert result.contact == "Alex Example"

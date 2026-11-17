@@ -1134,6 +1134,11 @@ def execute_claimed_analysis_job(
                 )
                 db.commit()
                 return "cancelled"
+            if execution_identity(job) != desired_identity(item):
+                # Newer input arrived while this execution awaited its retry.
+                # Reconcile it instead of failing resume_execution on every claim.
+                raise DesignProcessingTargetMismatch(
+                    "stored_identity_changed", "execution identity has been superseded")
             obligation = resume_execution(
                 item,
                 job,
@@ -1200,7 +1205,10 @@ def execute_claimed_analysis_job(
             attempt_count=attempts_before, worker_id=worker_id)
     except DesignProcessingTargetMismatch as mismatch:
         db.rollback()
-        _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token)
+        # Recovery paths only persist the read; availability_decision and the
+        # reconciliation below already account for any newer observation.
+        _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token,
+                             reject_stale=False)
         decision = availability_decision(db, registered_board_id, registered_item_id,
                                          access_token=access_token, now=now or utc_now())
         if not decision.allowed:
@@ -1231,7 +1239,8 @@ def execute_claimed_analysis_job(
                 operation_name=f"reconcile design-processing job {job_id}",
                 retry_if=is_postgres_deadlock,
             )
-            _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token)
+            _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token,
+                                 reject_stale=False)
             db.commit()
             return outcome
         except MondayItemUnavailable:
@@ -1253,7 +1262,8 @@ def execute_claimed_analysis_job(
     except Exception as exc:
         db.rollback()
         _raise_if_shutting_down(exc)
-        _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token)
+        _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token,
+                             reject_stale=False)
         db.commit()
         # An external call can fail at the same time that the item is completed.
         # Prefer cancellation to scheduling another attempt when that is known.
@@ -1261,7 +1271,8 @@ def execute_claimed_analysis_job(
             if isinstance(exc, HTTPException):
                 raise exc  # Auth/API errors do not justify another target lookup.
             current = gateway.fetch_target(str(job.item_id))
-            _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token)
+            _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token,
+                                 reject_stale=False)
             db.commit()
             exclusion = design_scope_exclusion(
                 current, expected_board_id=str(settings.design_processing_board_id),

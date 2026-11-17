@@ -1003,6 +1003,83 @@ def test_transient_stored_supersession_retries_current_execution(
     assert db_session.query(DesignProcessingJob).count() == 1
 
 
+def test_supersession_after_a_newer_availability_event_is_reconciled(
+    db_session, golden, monkeypatch, caplog,
+):
+    # Render job 537ea3a8 (item 3362399426, 17 Nov): a webhook superseded the
+    # analysis after its target read. The mismatch handler re-raised "Newer item
+    # availability was observed", so the job became retry_wait, not a successor.
+    from backend.app.services.monday_item_availability import observe_item
+
+    golden_input, _ = golden
+    _queue(db_session, _snapshot(golden_input, revision="revision-a"))
+    gateway = FakeReadGateway(_snapshot(golden_input, revision="revision-a"), golden_input)
+    superseding = _snapshot(golden_input, revision="revision-b")
+
+    def analyze(downloaded_assets, *, check_local, **kwargs):
+        with sessionmaker(bind=db_session.bind)() as writer:
+            writer.query(DesignProcessingItem).one().latest_desired_input_revision = "revision-b"
+            observe_item(writer, BOARD_ID, {"id": ITEM_ID, "state": "active", "board": {"id": BOARD_ID},
+                                            "group": {"id": GROUP_ID}},
+                         access_token="test-token", observed_at=utc_now() + timedelta(seconds=1))
+            writer.commit()
+        gateway.snapshot = superseding
+        check_local()
+
+    monkeypatch.setattr(design_processing_pipeline, "run_interruptible_analysis", analyze)
+    result = run_worker_once(
+        db_session, worker_id="availability-supersession-worker", access_token="test-token",
+        gateway=gateway, analysis_client=FakeLegacyClient(golden_input), artifact_storage=MemoryArtifactStorage(),
+        downloader=FixtureDownloader(WORKSPACE_ROOT / golden_input["sourceEmail"]["path"]),
+        mode="shadow", claim_limit=1, recover_leases=False, heartbeat_interval_seconds=0,
+    )
+
+    jobs = db_session.query(DesignProcessingJob).order_by(DesignProcessingJob.created_at).all()
+    assert result.cancelled == 1
+    assert [job.status for job in jobs] == ["cancelled", "scheduled"]
+    assert jobs[0].superseded_by_revision == "revision-b"
+    assert "Unhandled error" not in caplog.text
+
+
+def test_retry_of_a_superseded_execution_is_replaced_without_failing(db_session, golden, caplog):
+    # Render job 537ea3a8 then failed resume_execution on every claim
+    # ("execution identity has been superseded") without consuming an attempt,
+    # looping in retry_wait until reconciliation replaced it 10 minutes later.
+    golden_input, _ = golden
+    now = utc_now()
+    pipeline = settings.design_processing_pipeline_version
+    db_session.add_all([
+        DesignProcessingItem(
+            id=uuid.uuid4(), board_id=BOARD_ID, item_id=ITEM_ID, state="processing", warnings_json=[],
+            latest_desired_input_revision="revision-b", latest_desired_pipeline_version=pipeline,
+            created_at=now - timedelta(hours=1), updated_at=now,
+        ),
+        DesignProcessingJob(
+            id=uuid.uuid4(), board_id=BOARD_ID, item_id=ITEM_ID, trigger_type="test",
+            execution_kind="analysis", execution_input_revision="revision-a",
+            execution_pipeline_version=pipeline, status="retry_wait", stage="extracting",
+            scheduled_for=now - timedelta(minutes=1), next_retry_at=now - timedelta(minutes=1),
+            attempt_count=2, readiness_check_count=0, max_attempts=3,
+            created_at=now - timedelta(hours=1), updated_at=now - timedelta(minutes=2),
+        ),
+    ])
+    db_session.commit()
+    gateway = FakeReadGateway(_snapshot(golden_input, revision="revision-b"), golden_input)
+
+    result = run_worker_once(
+        db_session, worker_id="superseded-retry-worker", access_token="test-token", gateway=gateway,
+        analysis_client=FakeLegacyClient(golden_input), artifact_storage=MemoryArtifactStorage(),
+        downloader=FixtureDownloader(WORKSPACE_ROOT / golden_input["sourceEmail"]["path"]),
+        mode="shadow", claim_limit=1, recover_leases=False, heartbeat_interval_seconds=0,
+    )
+
+    jobs = db_session.query(DesignProcessingJob).order_by(DesignProcessingJob.created_at).all()
+    assert result.cancelled == 1 and result.retry_wait == 0
+    assert [job.status for job in jobs] == ["cancelled", "scheduled"]
+    assert jobs[0].superseded_by_revision == "revision-b" and jobs[0].attempt_count == 2
+    assert "failed runtime=" not in caplog.text
+
+
 def test_policy_revoked_during_analysis_cancels_before_persisting_outputs(
     db_session,
     golden,

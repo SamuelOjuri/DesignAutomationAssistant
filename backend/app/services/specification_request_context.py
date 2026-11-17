@@ -175,6 +175,22 @@ def select_client_request(manifest):
     return min(current, key=lambda message: (message["messageIndex"], message["sourceId"]))
 
 
+def internal_only_correspondence(manifest):
+    """Every outer email is staff-sent and no external client request exists.
+
+    A client named inside internal correspondence is not a verified requester,
+    so client identity and chronology stay unset for reviewer confirmation.
+    """
+    outer = [source for source in manifest if source.get("sourceType") == "email_body"
+             and not source.get("parentSourceId") and not source.get("attachedEmail")]
+    # Outer email text starts with its own headers; messageIndex 0 is that header.
+    return bool(outer) and all(
+        (messages := email_messages(str(source.get("text") or "")))
+        and messages[0]["messageIndex"] == 0 and internal_address(messages[0]["sender"])
+        for source in outer
+    ) and select_client_request(manifest) is None
+
+
 def request_context_summary(context):
     return {key: value for key, value in context.items() if key != "text"} if context else None
 

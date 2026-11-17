@@ -212,7 +212,8 @@ latest external sender addressing a configured TaperedPlus domain. A later inter
 follow-up does not replace that client or enquiry date. When only an internal forward
 is supplied, a verified client header within it may establish the context. Simultaneous
 different client senders or unreadable candidate dates require review. Internal-only
-correspondence supplies no client date. Unknown legacy headers retain existing checks.
+correspondence supplies no client date or identity; a client named only inside it
+requires reviewer confirmation. Unknown legacy headers retain existing checks.
 Reviewed CRM snapshots remain audit evidence under the email-first source policy.
 
 The reader supports plain text and HTML-only email bodies, PDF/image attachments,
@@ -839,6 +840,16 @@ current request`. For item `3305468770` (job `246c1170`), both responses filled
 Drawing Reference `FA18910_26.01 - A` and Revision `26.01 - A` from two baseline
 citations of an attachment's `PROJECT DETAILS` block, so recovery could never clear
 them. Both scalars are now withdrawn and the reference remains baseline identity.
+
+When every outer email was sent from a configured internal domain and no external
+client request exists (for example, a salesperson asking sales for a design "for" a
+named client), extraction now clears Company, Contact, Date Received and Hour Received
+and their citations before verification, as it already did for file-only inputs.
+Previously only the later analysis step cleared them, so the verifier first excluded
+those citations as outside any selected client request and the populated scalars then
+failed every attempt. Items `3359486811` (job `d73a99ee`) and `3362399426` (jobs
+`d1c91622`, `fa5c9ec3`) failed this way on 16–17 November. This changes extraction
+handling only; the pipeline identity is unchanged.
 
 The following prefix-only policy describes the earlier `output-v17` release; it
 is superseded by the generalized Phase 3 parser described above.
