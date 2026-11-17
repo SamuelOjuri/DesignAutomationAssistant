@@ -538,6 +538,94 @@ def test_evidence_failure_retains_private_replay_payload_on_job(db_session, gold
     assert job.last_error == "Evidence recovery unresolved"
 
 
+def _running_failure_log_job(db, *, attempts=3, execution_kind="analysis"):
+    now = utc_now()
+    identity = ProcessingIdentity("failure-log-revision", settings.design_processing_pipeline_version)
+    item = DesignProcessingItem(board_id=BOARD_ID, item_id=ITEM_ID, state="processing",
+        latest_desired_input_revision=identity.input_revision,
+        latest_desired_pipeline_version=identity.pipeline_version, warnings_json=[])
+    job = DesignProcessingJob(id=uuid.uuid4(), board_id=BOARD_ID, item_id=ITEM_ID,
+        trigger_type="test", execution_kind=execution_kind,
+        execution_input_revision=identity.input_revision,
+        execution_pipeline_version=identity.pipeline_version, status="running", stage="extracting",
+        attempt_count=attempts, readiness_check_count=0, max_attempts=3, locked_by="log-test",
+        locked_at=now - timedelta(hours=2), heartbeat_at=now - timedelta(hours=2),
+        scheduled_for=now - timedelta(hours=2))
+    db.add_all([item, job])
+    db.commit()
+    return job
+
+
+def _terminal_failure_events(caplog):
+    return [json.loads(record.getMessage().split("design_processing_event=", 1)[1])
+        for record in caplog.records if "design_processing_event=" in record.getMessage()
+        and '"event":"analysis_failed"' in record.getMessage()]
+
+
+@pytest.mark.parametrize("attempts,permanent,outcome", [
+    (3, False, "failed"), (1, False, "retry_wait"), (1, True, "failed"),
+])
+def test_analysis_failure_logs_exhaustion_only_after_final_attempt(
+    db_session, caplog, attempts, permanent, outcome,
+):
+    job = _running_failure_log_job(db_session, attempts=attempts)
+    manifest = [{"status": "failed:SourceDocumentError", "filename": "private-source.pdf",
+        "error": {"stage": "source_document", "code": "unreadable_pdf"}}] if permanent else None
+    assert design_processing_worker._record_execution_failure(db_session, job.id,
+        worker_id="log-test", error="private source text and token", now=utc_now(),
+        source_manifest=manifest) == outcome
+    events = _terminal_failure_events(caplog)
+    assert job.status == outcome
+    if outcome == "retry_wait":
+        assert events == []
+    else:
+        assert len(events) == 1
+        event = events[0]
+        assert event["board_id"] == BOARD_ID and event["item_id"] == ITEM_ID
+        assert event["job_id"] == str(job.id) and event["stage"] == "extracting"
+        assert event["attempt_count"] == attempts and event["max_attempts"] == 3
+        assert event["automatic_retries_exhausted"] == (attempts == 3)
+        assert event["message"] == ("Analysis failed & automatic retries exhausted" if attempts == 3
+            else "Analysis failed & source rejection is permanent")
+    assert "private source" not in caplog.text and "private-source.pdf" not in caplog.text
+
+
+def test_terminal_analysis_failure_is_not_logged_when_commit_fails(db_session, monkeypatch, caplog):
+    job = _running_failure_log_job(db_session)
+    def fail_commit():
+        raise RuntimeError("commit failed")
+    monkeypatch.setattr(db_session, "commit", fail_commit)
+    with pytest.raises(RuntimeError, match="commit failed"):
+        design_processing_worker._record_execution_failure(db_session, job.id,
+            worker_id="log-test", error="failure", now=utc_now())
+    assert _terminal_failure_events(caplog) == []
+
+
+@pytest.mark.parametrize("recover", [
+    design_processing_worker.recover_expired_analysis_leases,
+    design_processing_worker.recover_expired_design_processing_leases,
+])
+def test_exhausted_analysis_lease_logs_terminal_failure(db_session, caplog, recover):
+    job = _running_failure_log_job(db_session)
+    assert recover(db_session, lease_timeout_seconds=60, now=utc_now()) == 1
+    assert job.status == "failed"
+    events = _terminal_failure_events(caplog)
+    assert len(events) == 1
+    assert events[0]["message"] == "Analysis failed & automatic retries exhausted"
+    assert events[0]["job_id"] == str(job.id)
+    caplog.clear()
+    assert recover(db_session, lease_timeout_seconds=60, now=utc_now()) == 0
+    assert _terminal_failure_events(caplog) == []
+
+
+def test_failed_publication_lease_does_not_log_analysis_failure(db_session, caplog):
+    job = _running_failure_log_job(db_session, execution_kind="publication")
+    assert design_processing_worker.recover_expired_design_processing_leases(
+        db_session, lease_timeout_seconds=60, now=utc_now()) == 1
+    assert job.status == "failed"
+    assert _terminal_failure_events(caplog) == []
+
+
 def test_allowlist_removal_during_extraction_holds_execution_without_rendering(db_session, golden, monkeypatch):
     golden_input, _ = golden
     snapshot = _snapshot(golden_input)

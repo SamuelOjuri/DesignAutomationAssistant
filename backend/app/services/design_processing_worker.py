@@ -70,6 +70,29 @@ from .monday_item_availability import (
 logger = logging.getLogger(__name__)
 
 
+def _terminal_analysis_failure(job):
+    """Snapshot safe terminal diagnostics before committing/expiring the row."""
+    if job.status != "failed" or job.execution_kind == "publication":
+        return None
+    exhausted = job.attempt_count >= job.max_attempts
+    return {
+        "message": "Analysis failed & automatic retries exhausted" if exhausted
+            else "Analysis failed & source rejection is permanent",
+        "board_id": job.board_id,
+        "item_id": job.item_id,
+        "job_id": str(job.id),
+        "stage": job.stage,
+        "attempt_count": job.attempt_count,
+        "max_attempts": job.max_attempts,
+        "automatic_retries_exhausted": exhausted,
+    }
+
+
+def _log_terminal_analysis_failure(fields):
+    if fields is not None:
+        log_design_processing_event(logger, "analysis_failed", level=logging.ERROR, **fields)
+
+
 @dataclass(frozen=True, slots=True)
 class DesignProcessingWorkerResult:
     recovered: int = 0
@@ -626,6 +649,7 @@ def recover_expired_analysis_leases(
     )
     job_ids = [job_id for (job_id,) in query.with_entities(DesignProcessingJob.id)]
     recovered = 0
+    terminal_failures = []
     for job_id in job_ids:
         item, job = lock_design_processing_item_and_job(db, job_id)
         if item is None or job is None:
@@ -644,9 +668,12 @@ def recover_expired_analysis_leases(
             allowlist_item_ids=allowlist_item_ids,
             now=recovered_at,
         )
+        terminal_failures.append(_terminal_analysis_failure(job))
         recovered += 1
     if job_ids:
         db.commit()
+        for fields in terminal_failures:
+            _log_terminal_analysis_failure(fields)
     return recovered
 
 
@@ -681,6 +708,7 @@ def recover_expired_design_processing_leases(
     )
     job_ids = [job_id for (job_id,) in query.with_entities(DesignProcessingJob.id)]
     recovered = 0
+    terminal_failures = []
     for job_id in job_ids:
         item, job = lock_design_processing_item_and_job(db, job_id)
         if item is None or job is None or not _lease_is_expired(
@@ -697,9 +725,12 @@ def recover_expired_design_processing_leases(
             allowlist_item_ids=allowlist_item_ids,
             now=recovered_at,
         )
+        terminal_failures.append(_terminal_analysis_failure(job))
         recovered += 1
     if job_ids:
         db.commit()
+        for fields in terminal_failures:
+            _log_terminal_analysis_failure(fields)
     return recovered
 
 
@@ -862,7 +893,9 @@ def _cancel_or_replace_mismatched_job(
                 error="execution target changed during validation",
                 now=now,
             )
+            terminal_failure = _terminal_analysis_failure(job)
             db.commit()
+            _log_terminal_analysis_failure(terminal_failure)
             return "failed"
         schedule_execution_retry(
             item,
@@ -944,7 +977,9 @@ def _record_execution_failure(
             now=now,
         )
         outcome = "retry_wait"
+    terminal_failure = _terminal_analysis_failure(job)
     db.commit()
+    _log_terminal_analysis_failure(terminal_failure)
     return outcome
 
 

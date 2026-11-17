@@ -1,14 +1,17 @@
 """Bounded, audited repair of extraction evidence against the immutable inventory.
 
 The model may correct a citation, never make an unsupported claim publishable.
-Changes to facts, roof, role or request chronology remain separate claims. An
-unsupported TP issuer can be corrected only to literal source branding.
+Changes to facts, roof or request chronology remain separate claims. A mistaken
+requested external drawing identity may become context only with verified source
+authorship. Unquoted issuers may be removed only from structurally valid drawing
+identities; replacement branding must be literal source text.
 """
 
 import re
 
 from .performance_specification_evidence import (
-    _comparable_value, _contains_excerpt, _excerpt_normal, _normal, _parse_message_date, _value_supported,
+    _comparable_value, _contains_excerpt, _contains_reference, _excerpt_normal, _normal,
+    _parse_message_date, _value_supported,
     request_note_diagnostics, resolve_email_evidence, resolve_request_notes, _source_contains_excerpt,
 )
 from .specification_semantics import (
@@ -34,9 +37,10 @@ def extraction_payload(result, manifest):
     }
 
 
-def evidence_diagnostics(result, manifest):
+def evidence_diagnostics(result, manifest, *, include_baseline_references=False):
     payload = extraction_payload(result, manifest)
-    _, provenance, issues = resolve_email_evidence(payload)
+    _, provenance, issues = resolve_email_evidence(
+        payload, _include_baseline_references=include_baseline_references)
     return provenance, issues
 
 
@@ -490,6 +494,51 @@ def _issuer_repair_allowed(old, new):
             and (new["issuer"] is None or _contains_excerpt(new["issuer"], new["snippet"])))
 
 
+def _external_reference_context_proof(old, new, sources):
+    """Demote only a literal external drawing, with separate authorship proof.
+
+    A model's new role or a client/company name in a title block cannot establish
+    authorship. Keep the original citation and chronology, and require an explicit
+    ownership or authorship statement in the same immutable attachment.
+    """
+    if (old.field != "Drawing Reference" or new.field != old.field
+            or old.role != "requested" or new.role != "baseline"
+            or old.source_id != new.source_id
+            or any(_normal(getattr(old, key)) != _normal(getattr(new, key))
+                   for key in ("scope", "request_role", "message_date", "issuer"))
+            or old.supersedes != new.supersedes
+            or not new.issuer or re.fullmatch(r"Tapered\s*Plus", new.issuer.strip(), re.IGNORECASE)
+            or not _same_value(old, new.model_dump())
+            or tp_reference_revision(old.value, confirmed_crm=True) is not None):
+        return None
+    source = sources.get(old.source_id)
+    if (not source or source["status"] != "read" or source["sourceType"] != "attachment"
+            or not _contains_reference(old.value, old.snippet) or not _contains_reference(new.value, new.snippet)):
+        return None
+    # External identifiers must occur whole; never assemble them using the
+    # reference_parts rules reserved for TP-style drawing/revision identities.
+    issuer = r"\s+".join(re.escape(word) for word in new.issuer.split())
+    authorship = re.compile(
+        r"(?P<relationship>\b(?:drawing|design|document|plan)\b[^\n]{0,200}?\b"
+        r"(?:property\s+of|(?:issued|prepared|produced|drawn|authored)\s+by))\s+"
+        + issuer + r"(?!\w)", re.IGNORECASE,
+    )
+    for text in literal_source_texts(source):
+        if not (_contains_excerpt(old.snippet, text) and _contains_excerpt(new.snippet, text)):
+            continue
+        for proof in authorship.finditer(text):
+            line_start = text.rfind("\n", 0, proof.start()) + 1
+            statement = text[max(line_start, proof.start() - 200):proof.start()] + proof["relationship"]
+            if re.search(r"\b(?:not|no|never|neither|nor|without)\b|n['\u2019]t\b", statement, re.IGNORECASE):
+                continue
+            # Keep ownership and identifier in one bounded title-block passage,
+            # rather than borrowing a different sheet's company statement.
+            passage = text[max(0, proof.start() - 2000):proof.end() + 2000]
+            if _contains_reference(new.value, passage):
+                return proof.group()
+    return None
+
+
 def _merge_request_notes(initial, recovery, manifest):
     repair_note_list_formatting(initial, manifest)
     repair_note_list_formatting(recovery, manifest)
@@ -524,8 +573,10 @@ def _merge_request_notes(initial, recovery, manifest):
 def merge_recovery(initial, recovery, manifest):
     repair_image_company_citations(initial, manifest)
     repair_image_company_citations(recovery, manifest)
-    before, _ = evidence_diagnostics(initial, manifest)
-    after, _ = evidence_diagnostics(recovery, manifest)
+    # Baseline identities need the same citation/issuer repairs as requested
+    # identities; this does not promote historical technical specifications.
+    before, _ = evidence_diagnostics(initial, manifest, include_baseline_references=True)
+    after, _ = evidence_diagnostics(recovery, manifest, include_baseline_references=True)
     sources = {s["sourceId"]: s for s in manifest}
     retained = []
     for old in initial.specification_evidence:
@@ -533,7 +584,12 @@ def merge_recovery(initial, recovery, manifest):
                      and e["source_id"] == old.source_id and e["value"] == old.value
                      for e in before[old.field].get("rejectedCandidates", []))
         replacements = []
+        external_replacements = {}
         if failed:
+            for new in recovery.specification_evidence:
+                proof = _external_reference_context_proof(old, new, sources)
+                if proof:
+                    external_replacements[new.model_dump_json()] = (new, proof)
             for new in after[old.field].get("candidates", []):
                 if any(_normal(getattr(old, k)) != _normal(new[k]) for k in
                        ("scope", "role", "request_role")):
@@ -545,7 +601,14 @@ def merge_recovery(initial, recovery, manifest):
                 if not _repair_source_allowed(old.source_id, new["source_id"], new["snippet"], manifest):
                     continue
                 replacements.append(new)
-        if len(replacements) == 1:
+        if len(external_replacements) == 1 and not replacements:
+            new, proof = next(iter(external_replacements.values()))
+            initial._evidence_repairs.append({
+                "reason": "Verified external drawing reference is context",
+                "before": old.model_dump(), "after": new.model_dump(),
+                "issuerProof": proof, "contentSha256": sources[new.source_id]["contentSha256"],
+            })
+        elif len(replacements) == 1 and not external_replacements:
             new = replacements[0]
             parent = parent_email(sources[new["source_id"]], sources)
             initial._evidence_repairs.append({"reason": "Verified citation/formatting repair",
@@ -556,6 +619,7 @@ def merge_recovery(initial, recovery, manifest):
             retained.append(old)
     unique = {e.model_dump_json(): e for e in (*retained, *recovery.specification_evidence)}
     initial.specification_evidence = list(unique.values())
+    verified, _ = evidence_diagnostics(initial, manifest)
     # A populated scalar without any requested citation can never be published.
     # Withdraw it when a literal, verified non-request candidate identifies that
     # exact fact (e.g. achieved U-value, existing drawing), even if recovery restated it.
@@ -567,7 +631,10 @@ def merge_recovery(initial, recovery, manifest):
             continue
         label = next((canonical_label(k) for k in recovery.as_canonical_parameters()
                       if k.lower().replace("-", "_").replace(" ", "_") == name), None)
-        if not label or any(e.field == label and e.role == "requested" for e in initial.specification_evidence):
+        if label not in verified or any(
+                e["role"] == "requested"
+                and _normal(_comparable_value(label, value)) == _normal(_comparable_value(label, e["value"]))
+                for e in verified[label].get("candidates", [])):
             continue
         for evidence in initial.specification_evidence:
             source = sources.get(evidence.source_id)
