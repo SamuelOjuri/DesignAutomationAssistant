@@ -45,6 +45,17 @@ class GeminiRequestLease(Base):
     __table_args__ = (Index("ix_gemini_request_leases_scope_started", "scope_key", "started_at"),)
 
 
+class CRMDirectorySnapshot(Base):
+    """Shared Monday Accounts directory; no credentials or contact email addresses."""
+    __tablename__ = "crm_directory_snapshots"
+    cache_key = Column(String(64), primary_key=True)
+    kind = Column(String(32), nullable=False)
+    board_id = Column(String, nullable=False)
+    payload_json = Column(JSON, nullable=True)
+    refreshed_at = Column(DateTime(timezone=True), nullable=True)
+    refresh_lease_until = Column(DateTime(timezone=True), nullable=True)
+
+
 class AppUser(Base):
     __tablename__ = "app_users"
     __table_args__ = (

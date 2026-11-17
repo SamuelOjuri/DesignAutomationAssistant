@@ -26,6 +26,14 @@ differing email Company for reconciliation. Date Received comes from the email
 request. Holding Accounts/date and shared project/drawing values are never written
 by a review save.
 
+The email requester's Company is also matched to the CRM Accounts board
+(`1654217230`) using SalesBoardAutomation's account-matching rules (see
+[PerformanceSpecification.md](PerformanceSpecification.md#company-account-matching)).
+A matched Account is the Company recommendation for a New Enquiry or uncertain
+request, and for an Amendment whose selected project has no readable Account. When
+both exist, the project's Account stays the recommendation and a different
+matched Account is shown as a `company_disagreement`.
+
 Candidate roofs are kept separate. Saved selections scope live reads and
 recommendations. Optional unreadable CRM recommendations remain visible for
 review; they cannot erase an authoritative field decision or bypass required live

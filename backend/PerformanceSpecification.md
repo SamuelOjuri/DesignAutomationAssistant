@@ -155,6 +155,61 @@ intentional blanks take precedence for all 18 fields. Optional unreadable CRM
 recommendations remain visible without blocking a superseding human decision.
 Required live item/extraction checks still retain the previous PDF on failure.
 
+### Company Account matching
+
+The email Company is matched to a CRM Account on the Accounts board (`1654217230`)
+with the rules ported from SalesBoardAutomation (`account-matching-v5`,
+`requester-identity-v3`) in `backend/app/services/crm_accounts.py`. The requester is
+the sender of the selected client request (see below), not an internal forwarder.
+Its registrable domain uses the bundled `tldextract` public-suffix snapshot; generic
+mailbox domains such as `gmail.com` are not business evidence.
+
+1. A unique Account whose **Email Domain** (`text_mm6bymv5`) equals the sender domain
+   wins, unless the company name exactly identifies a different Account.
+2. Several Accounts sharing that domain need a unique exact company name, or one
+   active Contact (`1654217228`, `contact_email`) linked to exactly one of them.
+3. An approved requester domain alias for an Account also needs the sender's
+   signature website (`W:`/`Web:`/`Website:`) to agree with that Account's domain.
+4. An exact normalized name (case, punctuation, `&`/`and` and trailing
+   Ltd/Limited/PLC/LLP/LLC/Inc ignored) is used only without a business domain.
+
+Archived Accounts and Accounts flagged **Duplicate** (`dropdown_mm6cxq2p` label 1) are
+never recommended; similar or ambiguous names never choose an Account. A New Enquiry
+or uncertain request recommends the matched Account (`Source: Monday CRM`) and keeps
+the email Company as evidence. An Amendment keeps the selected project's Account
+first and uses the matched Account when the project has none; a different matched
+Account is a `company_disagreement`. An unmatched requester keeps the email Company.
+A transient outage must not change the source identity, which would clear approval
+and republish: a process keeps serving its last good index (retrying after a minute),
+and a failed lookup reuses the previous outcome for the same extraction. Otherwise an
+unavailable lookup keeps the email Company with a visible
+`crm_recommendation_unavailable` issue. `crmReads` records the match reason and
+candidate Account/Contact IDs, and the matched Account becomes a source dependency.
+
+The Accounts index (three Monday pages, about 5 s) is shared through the
+backend-private `crm_directory_snapshots` table (migration
+`0023_crm_directory_snapshots`), keyed by API URL/version and a token digest. A
+process keeps it in memory for five minutes. After that, it serves the stored or
+expired copy and refreshes once in the background. A short refresh lease lets one
+process read Monday, outside any database transaction, while the others keep
+serving the copy, so reviews only wait on a cold start with no stored copy. The API
+(when reviews are enabled) and the specification worker load it in the background at
+startup. If the table is unavailable, matching falls back to per-process caching.
+Contacts are read only for a shared-domain tie-break, with a Monday `contains_text`
+filter on the sender's address (under 1 s instead of a 1,716-item scan); only exact
+addresses match, including duplicate Contacts. Contact email addresses are never
+stored. Aliases match SalesBoardAutomation's
+defaults and are configurable as JSON:
+`PERFORMANCE_SPECIFICATION_REQUESTER_DOMAIN_ALIASES` (sender host to business domain)
+and `PERFORMANCE_SPECIFICATION_ACCOUNT_DOMAIN_ALIASES` (Account ID to extra requester
+domains). For item `3363488494`, sender domain `axterltd.co.uk` is shared by
+**Axter Limited** and **Axter Limited (DAAS)**; the email Company `Axter Ltd` now
+recommends **Axter Limited** instead of "Select a project with a readable Account
+recommendation". Apply `0023_crm_directory_snapshots` before or with the API and
+specification worker; no extraction rerun is needed. A reviewer opening an
+existing review sees the recommendation; changed source fingerprints require saved
+decisions to be reconfirmed.
+
 `specification_semantics.py` supplies the same business meanings to extraction and
 CAD translation. Drawing Reference means the **TaperedPlus-issued** reference; a
 manufacturer's drawing/reference is not automatically a TP reference. Revision is

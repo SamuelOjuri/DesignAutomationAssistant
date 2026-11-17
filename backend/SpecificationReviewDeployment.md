@@ -4,6 +4,9 @@
 supersedes this runbook's Landing Zone-only lifecycle. Apply migration
 `0022_specification_publication` and deploy matching services/frontend. Active
 groups now prepare drafts and require an explicit publish action for each revision.
+17 November update: apply `0023_crm_directory_snapshots` with the API and
+specification worker for the shared Company Account directory (see
+[Company Account matching](PerformanceSpecification.md#company-account-matching)).
 
 Prepared: 10 November 2026. This runbook describes deployment and acceptance;
 it does not record a completed production rollout.
@@ -231,7 +234,12 @@ and importer checks; PDF completion alone does not establish that compatibility.
 Confirm the existing backend processing identity can read necessary source,
 project/drawing, Account and Contact records and attach specification PDFs to
 the holding board's AI Data file column. Keep the private artifact bucket
-accessible through the backend storage identity.
+accessible through the backend storage identity. Company Account matching reads
+the Accounts (`1654217230`) and Contacts (`1654217228`) boards and needs
+`tldextract` from `requirements.txt` on the API and specification worker services.
+`PERFORMANCE_SPECIFICATION_REQUESTER_DOMAIN_ALIASES` and
+`PERFORMANCE_SPECIFICATION_ACCOUNT_DOMAIN_ALIASES` default to SalesBoardAutomation's
+aliases; see [Company Account matching](PerformanceSpecification.md#company-account-matching).
 
 ## 7. Verify Monday OAuth, the Item View and embedding
 

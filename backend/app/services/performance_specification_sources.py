@@ -8,6 +8,7 @@ from typing import Any
 
 from ..config import settings
 from .. import monday_client
+from . import crm_accounts
 from .design_processing_inputs import parse_design_processing_target
 from .monday_metadata_fields import PROJECT_NAME_COLUMN_ID
 from .performance_specification_contract import missing
@@ -122,6 +123,12 @@ class MondaySpecificationGateway:
 
     def fetch_project(self, item_id):
         return self._read(PROJECT_QUERY, item_id)
+
+    def fetch_crm_accounts(self):
+        return crm_accounts.cached_accounts_index(self.access_token)
+
+    def fetch_crm_contacts(self, email_address):
+        return crm_accounts.load_contacts_for_email(self.access_token, email_address)
 
     def resolve_person(self, kind, entity_id):
         root = {"person": "users", "team": "teams"}.get(kind)

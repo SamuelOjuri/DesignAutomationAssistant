@@ -10,6 +10,10 @@ from __future__ import annotations
 from copy import deepcopy
 
 from ..config import settings
+from .crm_accounts import (
+    ACCOUNT_NAME_COLUMN_ID, MATCH_RATIONALES, normalize_account_name, requester_identity, resolve_requester_account,
+)
+from .monday_metadata_fields import ACCOUNTS_BOARD_ID
 from .performance_specification_contract import SOURCE_REVIEW_DETAILS, missing, reviewer_cad_mapping
 from .performance_specification_evidence import (
     PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
@@ -40,6 +44,66 @@ def _email_facts(provenance):
     return [EmailFact(value=entry["value"], evidence=[EmailCitation(
         source_id=entry["source_id"], excerpt=entry["snippet"], location=entry["location"],
         scope=entry.get("scope"))]) for entry in provenance.get("candidates", [])]
+
+
+def _requester_account(gateway, extraction, company, crm_reads, dependencies):
+    """Recommend the CRM Account matched to the selected client request's sender.
+
+    Uses SalesBoardAutomation's matching rules: the sender's email domain first,
+    the email Company only as tie-breaking/conflicting name evidence or when the
+    sender has no business domain. Ambiguity never chooses an Account.
+    """
+    from .specification_request_context import select_client_request
+    try:
+        request = select_client_request(extraction["sourceManifest"])
+    except ValueError:
+        return None  # The unreadable request chronology is reported with the request context.
+    requester = requester_identity(request, None if missing(company) else company,
+        domain_aliases=settings.performance_specification_requester_domain_aliases)
+    result = resolve_requester_account(gateway.fetch_crm_accounts, getattr(gateway, "fetch_crm_contacts", None),
+        requester, account_domain_aliases=settings.performance_specification_account_domain_aliases)
+    if result is None:
+        return None
+    account = result.account
+    crm_reads.append({"source": "Monday CRM", "boardId": ACCOUNTS_BOARD_ID,
+        "itemId": account.item_id if account else None, "columnId": ACCOUNT_NAME_COLUMN_ID, "field": "Company",
+        "value": account.name if account else None, "status": "provided" if account else "unmatched",
+        "accountMatch": result.summary()})
+    if account is None:
+        return None
+    dependencies.add((ACCOUNTS_BOARD_ID, account.item_id))
+    return _account_recommendation(account.item_id, account.name, result.reason)
+
+
+def _account_recommendation(item_id, name, reason):
+    return CRMRecommendation(value=name, rationale=MATCH_RATIONALES[reason],
+        evidence=[CRMFieldRead(record={"board_id": ACCOUNTS_BOARD_ID, "item_id": item_id},
+            column_id=ACCOUNT_NAME_COLUMN_ID)])
+
+
+def _previous_requester_account(previous, extraction_identity, crm_reads, dependencies):
+    """The last Account outcome for this same extraction while the directory is unavailable.
+
+    Returns ``(recommendation_or_None,)``, or None when no outcome is known. A
+    transient lookup failure must not change the source identity, which would
+    invalidate approval and republish with a different Company.
+    """
+    source = previous if isinstance(previous, dict) else {}
+    if ((source.get("reviewSource") or {}).get("identity") or {}).get("extraction_identity") != extraction_identity:
+        return None
+    read = next((entry for entry in source.get("crmReads") or []
+                 if isinstance(entry, dict) and entry.get("field") == "Company" and entry.get("accountMatch")), None)
+    if read is None:
+        return None
+    try:
+        recommendation = (_account_recommendation(str(read["itemId"]), read["value"], read["accountMatch"]["reason"])
+                          if read.get("status") == "provided" else None)
+    except (KeyError, TypeError, ValueError):
+        return None
+    crm_reads.append(deepcopy(read))
+    if recommendation is not None:
+        dependencies.add((ACCOUNTS_BOARD_ID, recommendation.evidence[0].record.item_id))
+    return (recommendation,)
 
 
 def resolve_review_sources(gateway, item, previous=None, *, review_state=None, preview=False):
@@ -293,6 +357,32 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None, p
                     "rationale": "Existing drawing identity; confirm the appropriate active drawing"}
         read_crm(project, "project", "Company")
 
+    def same_company(left, right):
+        normalized = normalize_account_name(left)
+        return _normal(left) == _normal(right) or (normalized is not None and normalized == normalize_account_name(right))
+
+    # Optional CRM context, like the project reads. A failed directory lookup
+    # reuses this extraction's previous outcome; otherwise it stays visible and
+    # never blocks the email recommendation or a decision.
+    extraction_identity = review_digest({"input_revision": target.input_revision,
+        "pipeline": extraction["pipelineVersion"], "evidence_version": extraction["specificationEvidenceVersion"],
+        "reference_parser_version": extraction.get("referenceParserVersion")})
+    account_recommendation = None
+    if getattr(gateway, "fetch_crm_accounts", None) is not None:
+        try:
+            account_recommendation = _requester_account(gateway, extraction,
+                None if "Company" in email_issues else email_raw.get("Company"), crm_reads, dependencies)
+        except Exception:
+            reused = _previous_requester_account(previous, extraction_identity, crm_reads, dependencies)
+            if reused is not None:
+                account_recommendation = reused[0]
+            else:
+                detail = "CRM Account lookup is unavailable; retry the lookup"
+                crm_reads.append({"source": "Monday CRM", "boardId": ACCOUNTS_BOARD_ID, "field": "Company",
+                    "status": "unavailable", "reason": detail})
+                if "Company" not in crm_values:
+                    crm_errors.setdefault("Company", detail)
+
     fields = {}
     automatic_sources = {}
     for label in FIELD_NAMES:
@@ -325,12 +415,20 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None, p
             evidence = {"crm_evidence": recommendation.evidence}
             issues.append(FieldIssue(code="drawing_reference_disagreement",
                 detail="Selected existing drawing differs from the email reference; confirm the drawing recommendation"))
-        elif request_type == "amendment" and label == "Company":
-            recommendation = crm_values.get(label)
+        elif label == "Company" and (request_type == "amendment" or account_recommendation):
+            # A selected amendment project's Account comes first, then the
+            # Account matched to the email requester.
+            project_account = crm_values.get(label) if request_type == "amendment" else None
+            recommendation = project_account or account_recommendation
             if recommendation:
                 proposal_source, value, rationale = "monday_crm", recommendation.value, recommendation.rationale
                 evidence = {"crm_evidence": recommendation.evidence}
-                if not missing(raw) and _normal(raw) != _normal(value):
+                if project_account and account_recommendation:
+                    if not same_company(account_recommendation.value, value):
+                        issues.append(FieldIssue(code="company_disagreement",
+                            detail=f"Email requester's CRM Account '{account_recommendation.value}' differs from "
+                                f"the selected project's Account '{value}'; reconcile the recommendation"))
+                elif project_account and not missing(raw) and not same_company(raw, value):
                     issues.append(FieldIssue(code="company_disagreement",
                         detail=f"Email company '{raw}' differs from the selected project's Account '{value}'; reconcile the recommendation"))
             elif not issues:
@@ -350,8 +448,12 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None, p
         proposal = AutomaticProposal(proposal_id=review_digest({"label": label, "source": proposal_source,
             "value": value, "evidence": {key: [entry.model_dump(mode="json") for entry in entries] for key, entries in evidence.items()}}),
             display_value=value, source=proposal_source, rationale=rationale, cad_mapping=mapping, **evidence)
+        crm_recommendations = [crm_values[label]] if label in crm_values else []
+        if (label == "Company" and account_recommendation
+                and not any(same_company(entry.value, account_recommendation.value) for entry in crm_recommendations)):
+            crm_recommendations.append(account_recommendation)
         fields[label] = ReviewFieldSources(email_facts=_email_facts(provenance),
-            crm_recommendations=[crm_values[label]] if label in crm_values else [], proposal=proposal,
+            crm_recommendations=crm_recommendations, proposal=proposal,
             applicability="unassigned" if proposal_source == "unassigned" else "not_applicable" if proposal_source == "default_blank"
                 else "unresolved" if proposal_source == "unavailable" or issues else "applicable", issues=issues)
         automatic_sources[label] = provenance
@@ -381,9 +483,6 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None, p
 
     # Source identities contain policy-relevant facts, never actor/polling times,
     # holding business columns, approval events or arbitrary CRM columns.
-    extraction_identity = review_digest({"input_revision": target.input_revision,
-        "pipeline": extraction["pipelineVersion"], "evidence_version": extraction["specificationEvidenceVersion"],
-        "reference_parser_version": extraction.get("referenceParserVersion")})
     source_payload = {"extraction_identity": extraction_identity, "request_type": request_type,
         "intent": intent.model_dump(mode="json"), "selected_project": selected_project.model_dump(mode="json") if selected_project else None,
         "selected_drawing": selected_drawing_record.model_dump(mode="json") if selected_drawing_record else None,

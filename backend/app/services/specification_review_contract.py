@@ -100,8 +100,9 @@ FIELD_POLICY = MappingProxyType({
         "Full suffix of the selected existing reference; never a future revision.", True),
     "Date Received": FieldPolicy(_EMAIL_ONLY, _EMAIL_ONLY,
         "Selected client request date; ignore holding-item and old-project dates."),
-    "Company": FieldPolicy(_EMAIL_ONLY, ("monday_crm",),
-        "New enquiry uses email requester with optional canonical directory identity. Amendment recommends the project's Account and exposes differing email company."),
+    "Company": FieldPolicy(("monday_crm", "email_context"), ("monday_crm",),
+        "New enquiry recommends the CRM Account matched to the email requester, else the email company. "
+        "Amendment recommends the project's Account, else the requester's matched Account, and exposes a differing email company."),
     "Contact": FieldPolicy(_EMAIL_ONLY, _EMAIL_THEN_CRM,
         "Current email requester first; appropriate selected drawing/request Contact fallback, not an aggregate mirror."),
     "Surveyor": FieldPolicy(_EMAIL_ONLY, _EMAIL_THEN_CRM, "Email then selected project/drawing recommendation."),

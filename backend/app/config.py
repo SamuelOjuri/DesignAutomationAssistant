@@ -126,6 +126,12 @@ class Settings(BaseSettings):
     performance_specification_review_monday_account_id: Optional[str] = Field(default=None, pattern=r"^[1-9][0-9]*$")
     performance_specification_recheck_seconds: int = Field(default=3600, ge=30)
     performance_specification_column_map: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # SalesBoardAutomation's Company-to-Account matching aliases: a sender host
+    # mapped to its business domain, and extra requester domains per Account ID.
+    performance_specification_requester_domain_aliases: dict[str, str] = Field(
+        default_factory=lambda: {"tremcocpgsupport.zendesk.com": "tremcocpg.com"})
+    performance_specification_account_domain_aliases: dict[str, list[str]] = Field(
+        default_factory=lambda: {"1661824807": ["sigplc.com"]})
     # Optional holding-board source files in addition to embedded email attachments.
     design_processing_source_file_column_ids: list[str] = Field(default_factory=list)
 

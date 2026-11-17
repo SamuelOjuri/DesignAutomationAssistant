@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from backend.app.config import settings
+from backend.app.services.crm_accounts import AccountRecord, AccountsContractError, AccountsIndex
 from backend.app.services.performance_specification_sources import (
     SpecificationReviewRequired, SpecificationSourceError, resolve_specification_sources,
 )
@@ -90,6 +92,115 @@ def test_company_account_disagreement_retains_both_values_for_reconciliation(cas
     assert field["email_facts"][0]["value"] == "Email company"
     assert field["crm_recommendations"][0]["value"] == "Acme, Limited"
     assert field["issues"][0]["code"] == "company_disagreement"
+
+
+def client_request(case, company="Axter Ltd", sender="Jo Client <jo@axter.co.uk>", request_type=None):
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    extraction["performanceParameters"]["Company"] = company
+    if request_type:
+        extraction["specificationRequestIntent"]["recommended_type"] = request_type
+    extraction = with_evidence(extraction)
+    internal = settings.design_processing_internal_email_domains.split(",")[0]
+    body = extraction["sourceManifest"][0]
+    body["text"] = (f"From: {sender}\nSent: 29 October 2026 10:00\nTo: Design <design@{internal}>\n"
+                    f"Subject: Drawing request\n\n{body['text']}")
+    case.item.extracted_parameters_json = extraction
+
+
+def crm_accounts(*accounts):
+    return lambda: AccountsIndex(tuple(AccountRecord(item_id, name, True, domain) for item_id, name, domain in accounts))
+
+
+def test_new_enquiry_recommends_the_crm_account_matched_to_the_email_requester(case):
+    client_request(case, request_type="new_enquiry")
+    case.gateway.fetch_crm_accounts = crm_accounts(
+        ("701", "Axter Limited", "axter.co.uk"), ("702", "Axter Roofing", "axterroofing.co.uk"))
+
+    result = source(case)
+
+    field = result["reviewSource"]["fields"]["Company"]
+    assert result["raw"]["Company"] == "Axter Limited"
+    assert field["proposal"]["source"] == "monday_crm"
+    assert field["proposal"]["crm_evidence"] == [
+        {"record": {"board_id": "1654217230", "item_id": "701"}, "column_id": "name", "scope": None}]
+    assert field["email_facts"][0]["value"] == "Axter Ltd"
+    assert [entry["value"] for entry in field["crm_recommendations"]] == ["Axter Limited"]
+    assert (field["applicability"], field["issues"]) == ("applicable", [])
+    assert ["1654217230", "701"] in result["dependencies"]
+    assert next(read for read in result["crmReads"] if read.get("accountMatch"))["accountMatch"]["reason"] == "unique_domain"
+
+
+def test_amendment_without_a_readable_project_account_recommends_the_requester_account(case):
+    client_request(case)
+    case.gateway.project["column_values"] = [entry for entry in case.gateway.project["column_values"]
+                                             if entry["id"] != "account"]
+    assert source(case)["reviewSource"]["fields"]["Company"]["issues"][0]["code"] == "project_account_required"
+    case.gateway.fetch_crm_accounts = crm_accounts(("701", "Axter Limited", "axter.co.uk"))
+
+    field = source(case)["reviewSource"]["fields"]["Company"]
+
+    assert (field["proposal"]["source"], field["proposal"]["display_value"]) == ("monday_crm", "Axter Limited")
+    assert field["issues"] == []
+
+
+@pytest.mark.parametrize("company,sender,account,disagreement", [
+    ("Acme Ltd", "jo@acme.co.uk", ("801", "Acme, Limited", "acme.co.uk"), False),
+    ("Axter Ltd", "jo@axter.co.uk", ("701", "Axter Limited", "axter.co.uk"), True),
+])
+def test_amendment_project_account_is_reconciled_with_the_requester_account(case, company, sender, account, disagreement):
+    client_request(case, company=company, sender=sender)
+    case.gateway.fetch_crm_accounts = crm_accounts(account)
+
+    field = source(case)["reviewSource"]["fields"]["Company"]
+
+    assert field["proposal"]["display_value"] == "Acme, Limited"
+    assert [entry["value"] for entry in field["crm_recommendations"]] == (
+        ["Acme, Limited", "Axter Limited"] if disagreement else ["Acme, Limited"])
+    assert [issue["code"] for issue in field["issues"]] == (["company_disagreement"] if disagreement else [])
+
+
+def test_unavailable_or_ambiguous_account_lookup_keeps_the_email_company(case):
+    client_request(case, request_type="new_enquiry")
+    case.gateway.fetch_crm_accounts = crm_accounts(
+        ("701", "Axter North", "axter.co.uk"), ("702", "Axter South", "axter.co.uk"))
+    ambiguous = source(case)
+    assert ambiguous["reviewSource"]["fields"]["Company"]["proposal"]["source"] == "email_context"
+    assert ambiguous["reviewSource"]["fields"]["Company"]["issues"] == []
+
+    def unavailable():
+        raise AccountsContractError("Monday Accounts page is unavailable")
+
+    case.gateway.fetch_crm_accounts = unavailable
+    result = source(case)
+
+    field = result["reviewSource"]["fields"]["Company"]
+    assert (field["proposal"]["source"], field["proposal"]["display_value"]) == ("email_context", "Axter Ltd")
+    assert field["issues"][0]["code"] == "crm_recommendation_unavailable"
+    assert any(read["field"] == "Company" and read["status"] == "unavailable" for read in result["crmReads"])
+
+
+@pytest.mark.parametrize("accounts", [
+    (("701", "Axter Limited", "axter.co.uk"),),
+    (("701", "Axter North", "axter.co.uk"), ("702", "Axter South", "axter.co.uk")),
+])
+def test_transient_account_lookup_failure_keeps_the_previous_outcome_and_source_identity(case, accounts):
+    client_request(case, request_type="new_enquiry")
+    case.gateway.fetch_crm_accounts = crm_accounts(*accounts)
+    previous = source(case)
+
+    def unavailable():
+        raise AccountsContractError("Monday Accounts page is unavailable")
+
+    case.gateway.fetch_crm_accounts = unavailable
+    reused = resolve_specification_sources(case.gateway, case.item, previous)
+
+    assert reused["reviewSource"] == previous["reviewSource"]
+    assert reused["dependencies"] == previous["dependencies"]
+    case.gateway.target.input_revision = case.item.latest_desired_input_revision = "email-v2"
+    case.item.latest_analyzed_input_revision = "email-v2"
+    case.item.extracted_parameters_json = {**case.item.extracted_parameters_json, "inputRevision": "email-v2"}
+    changed = resolve_specification_sources(case.gateway, case.item, previous)
+    assert changed["reviewSource"]["fields"]["Company"]["issues"][0]["code"] == "crm_recommendation_unavailable"
 
 
 def test_uncertain_intent_is_not_classified_from_project_matches_or_holding_relation(case):

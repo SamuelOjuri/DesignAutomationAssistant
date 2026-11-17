@@ -87,6 +87,10 @@ def test_policy_preserves_all_pdf_labels_and_new_enquiry_identity_defaults():
     assert [label for label in FIELD_NAMES if FIELD_POLICY[label].unassigned_permitted] == ["Drawing Reference", "Revision"]
     for label in FIELD_NAMES:
         sources = FIELD_POLICY[label].sources_for("new_enquiry")
+        if label == "Company":
+            # The requester's matched CRM Account is directory identity, not a historical project value.
+            assert sources == ("monday_crm", "email_context")
+            continue
         assert "monday_crm" not in sources  # A historical project never supplies a new scheme's technical values.
         if label in {"Drawing Reference", "Revision"}:
             assert sources == ("unassigned",)

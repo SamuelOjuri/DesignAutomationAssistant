@@ -42,6 +42,7 @@ from .specification_policy import (
     specification_publication_allowed,
 )
 from .auto_sync_policy import RETIRED_SOURCE_OUTCOME
+from .crm_accounts import start_directory_warmup
 from ..monday_client import MondayItemUnavailable
 from .monday_item_availability import (
     availability_decision, availability_read_predicate, observe_item, observe_unavailable,
@@ -910,6 +911,9 @@ def main():
     if not specification_processing_enabled():
         logger.info("Performance specification processing is disabled")
         return 0
+    if settings.monday_ingestion_access_token:
+        # Load the Company Account directory alongside the first claims.
+        start_directory_warmup(settings.monday_ingestion_access_token)
     while True:
         with SessionLocal() as db:
             if args.item_id:
