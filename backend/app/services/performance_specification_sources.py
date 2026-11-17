@@ -369,7 +369,10 @@ def prepare_specification_candidates(gateway, match_contract, intent, *, project
                 ranked["status"] = "ambiguous"
                 ranked["issues"].append("Several email drawing references need reviewer selection")
             selections.append({"projectItemId": item_id, **ranked})
-            lookup.issues.extend(ranked["issues"])
+            # A generic drawing warning may apply to several project matches.
+            # Keep it once in the summary; each project's full warning list
+            # remains available in drawingSelections.
+            lookup.issues.extend(issue for issue in ranked["issues"] if issue not in lookup.issues)
             recommended_ids = {entry["itemId"] for entry in ranked["recommendations"]}
             for drawing in ranked["candidates"]:
                 if not drawing["boardId"] or not drawing["itemId"]:

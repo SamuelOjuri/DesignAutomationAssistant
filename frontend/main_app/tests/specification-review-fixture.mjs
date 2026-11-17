@@ -2,6 +2,23 @@
 export const FIELD_NAMES = ["Scale", "Page Size", "Drawing Reference", "Drawing Title", "Bauder Contract Number", "Bauder Roof Num", "Incoming Information", "Revision", "Date Received", "Company", "Contact", "Surveyor", "Target U Value", "Target Min U Value", "Membrane", "Tapered Insulation", "VCL", "Decking"];
 
 export function createFixture(scenario = "new_enquiry", itemId = "101") {
+  if (scenario === "many_projects" || scenario === "ten_projects") {
+    const result = createFixture("new_enquiry", itemId);
+    const drawingWarning = "Select the relevant roof/drawing; several series may be plausible";
+    const requestWarning = "Confirm the intended request type with the client.";
+    result.candidates.projects = Array.from({ length: scenario === "many_projects" ? 13 : 10 }, (_, index) => ({
+      record: { board_id: "200", item_id: String(201 + index) },
+      project_reference: `TP${17221 + index}`,
+      project_title: `Matched project ${index + 1}`,
+      rationale: "Project title shares identifying words; confirm the intended project.", similarity_score: null,
+    }));
+    // Deliberately retain duplicate legacy warnings in the API fixture so the
+    // rendered form must handle snapshots produced before backend deduplication.
+    result.candidates.issues = ["Narrow the project candidates to read further drawing details", drawingWarning, drawingWarning, drawingWarning];
+    result.source.intent.ambiguity_reasons = [requestWarning, requestWarning, drawingWarning];
+    result.source.intent.matched_projects = result.candidates.projects;
+    return result;
+  }
   if (scenario === "source_reviews") {
     const result = createFixture("new_enquiry", itemId);
     result.source.source_issues = [

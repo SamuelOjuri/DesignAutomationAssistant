@@ -146,6 +146,27 @@ def test_selected_project_read_enriches_old_candidate_labels_without_extra_reque
     assert reads == ["901"]
 
 
+@pytest.mark.parametrize("request_type", ["uncertain", "amendment"])
+def test_cached_candidate_warnings_are_unique_when_read_and_when_selected_project_is_ranked(case, request_type):
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    extraction["specificationRequestIntent"]["recommended_type"] = request_type
+    case.item.extracted_parameters_json = extraction
+    newer = deepcopy(case.gateway.project["subitems"][0])
+    newer.update(id="9102", name="TP00901_26.01 - B")
+    case.gateway.project["subitems"].append(newer)
+    warning = "Select the relevant roof/drawing; several series may be plausible"
+    historical = "Requested drawing is historical; newer active alternatives are available"
+    case.item.match_result_json = {"result": {"specificationCandidates": {"lookup": {
+        "status": "available", "issues": [warning, historical, warning, historical],
+    }}}}
+    original = deepcopy(case.item.match_result_json)
+
+    snapshot = source(case)["reviewSource"]
+
+    assert snapshot["candidates"]["issues"] == [warning, historical]
+    assert case.item.match_result_json == original
+
+
 @pytest.mark.parametrize("label", FIELD_NAMES)
 @pytest.mark.parametrize("operation,value", [("specify_value", "Reviewer’s exact custom value"), ("specify_blank", "")])
 def test_all_18_fields_allow_authoritative_text_and_intentional_blank(case, label, operation, value):

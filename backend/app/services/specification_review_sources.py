@@ -103,6 +103,8 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None, p
         "status": "pending" if preview and not candidate_context else "available",
         "projects": [entry.model_dump(mode="json") for entry in intent.matched_projects],
     })
+    # Older cached sidecars repeated generic warnings once per matched project.
+    candidate_lookup.issues = list(dict.fromkeys(candidate_lookup.issues))
     projects = {entry.record.item_id: entry for entry in candidate_lookup.projects}
     for entry in intent.matched_projects:
         existing = projects.setdefault(entry.record.item_id, entry.model_copy())
@@ -257,7 +259,7 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None, p
                 match_kind="exact_email" if ranked["status"] == "exact" and candidate["itemId"] == ranked["selectedItemId"]
                     else "latest_in_scope" if any(entry["itemId"] == candidate["itemId"] for entry in ranked["recommendations"])
                     else "other", rationale="Existing drawing candidate; confirm project and roof scope"))
-        candidate_lookup.issues.extend(ranked["issues"])
+        candidate_lookup.issues.extend(issue for issue in ranked["issues"] if issue not in candidate_lookup.issues)
         if selected_drawing:
             # Narrow attachment evidence before choosing fallback fields. No
             # technical value is merged from another roof's candidate drawing.

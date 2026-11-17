@@ -245,6 +245,26 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     await waitFor(() => sourceChecks().every((element) => element.disabled), "excluded item source controls are read-only");
     assert(sourceChecks().every((element) => element.labels.length > 0), "Source confirmation checkboxes have associated accessible labels");
 
+    await navigate("many_projects");
+    const projectChoices = () => Array.from(fieldset("Project candidates").querySelectorAll('input[type="radio"]')).filter((element) => element.value && element.getClientRects().length > 0);
+    const warningCopies = (message) => Array.from(documentOf().querySelectorAll("li")).filter((element) => element.textContent.trim() === message).length;
+    assert(warningCopies("Select the relevant roof/drawing; several series may be plausible") === 1, "Duplicate drawing warnings from legacy candidate and intent lists appear only once");
+    assert(warningCopies("Confirm the intended request type with the client.") === 1 && text().includes("Narrow the project candidates to read further drawing details"), "Distinct candidate warnings and deduplicated request reasons remain visible");
+    assert(projectChoices().length === 10 && !documentOf().querySelector('input[type="radio"][value="200:213"]'), "More than ten project matches initially shows only the first ten choices");
+    const expandProjects = button("Show all 13 projects");
+    assert(expandProjects?.getAttribute("aria-expanded") === "false" && documentOf().getElementById(expandProjects.getAttribute("aria-controls")), "Project disclosure exposes its collapsed state and controlled list to assistive technology");
+    await click("Show all 13 projects");
+    assert(projectChoices().length === 13 && button("Show fewer projects")?.getAttribute("aria-expanded") === "true", "Expanding project matches reveals every candidate and updates disclosure state");
+    documentOf().querySelector('input[type="radio"][value="200:213"]').click(); await delay(40);
+    await click("Show fewer projects");
+    assert(projectChoices().length === 11 && documentOf().querySelector('input[type="radio"][value="200:213"]')?.checked, "Folding retains a selected project outside the first ten matches");
+    assert(!documentOf().querySelector('input[type="radio"][value="200:211"]') && button("Show all 13 projects")?.getAttribute("aria-expanded") === "false", "Folding hides other additional matches and restores the collapsed disclosure");
+    await click("Show all 13 projects");
+    assert(projectChoices().length === 13 && documentOf().querySelector('input[type="radio"][value="200:213"]')?.checked, "Expanding again preserves the selected project");
+
+    await navigate("ten_projects");
+    assert(projectChoices().length === 10 && !buttons(fieldset("Project candidates")).some((element) => /Show all|Show fewer/.test(element.textContent)), "Exactly ten matched projects stays fully visible without a fold control");
+
     await navigate("ambiguous");
     await chooseType("amendment"); documentOf().querySelector('input[type="radio"][value="200:201"]').click(); await delay(40);
     assert(text().includes("AB17221_25.01 - A") && text().includes("AB17221_25.02 - B") && text().includes("Several roofs are plausible"), "Ambiguous roof candidates remain separately reviewable");

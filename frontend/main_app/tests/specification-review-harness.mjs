@@ -12,6 +12,8 @@ if (!["localhost", "127.0.0.1", "[::1]"].includes(target.hostname)) throw new Er
 const fixtures = { new_enquiry: createFixture(), amendment: createFixture("amendment"), ambiguous: createFixture("ambiguous"), second_item: createFixture("new_enquiry", "102") };
 fixtures.active = createFixture("active");
 fixtures.source_reviews = createFixture("source_reviews");
+fixtures.many_projects = createFixture("many_projects");
+fixtures.ten_projects = createFixture("ten_projects");
 fixtures.pdf_error = createFixture();
 const mockScript = `(${installHarness.toString()})(${JSON.stringify(fixtures)});`;
 const journeyScript = `window.runSpecificationReviewJourneys = ${runBrowserJourneys.toString()};`;

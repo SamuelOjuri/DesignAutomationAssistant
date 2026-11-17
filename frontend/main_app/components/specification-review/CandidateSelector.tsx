@@ -1,10 +1,11 @@
 "use client";
 
-import { useId } from "react";
-import { ChevronRight, Sparkles, TriangleAlert } from "lucide-react";
+import { useId, useState } from "react";
+import { ChevronDown, ChevronRight, ChevronUp, Sparkles, TriangleAlert } from "lucide-react";
 import type { CandidateLookup, RequestIntent, ReviewSelections } from "@/lib/specification-review-api";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -24,14 +25,23 @@ const recordKey = (record: { board_id: string; item_id: string } | null) => reco
 const choiceCard = "flex min-w-0 cursor-pointer items-start gap-3 rounded-lg border bg-card p-3 text-sm shadow-xs transition-colors hover:bg-muted/60 has-[:checked]:border-primary has-[:checked]:ring-1 has-[:checked]:ring-primary has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 has-[:disabled]:hover:bg-card";
 const radioClass = "mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-none";
 const warningItem = "flex items-start gap-2 text-warning-foreground";
+const collapsedProjectLimit = 10;
+const uniqueMessages = (messages: string[]) => Array.from(new Set(messages.map((message) => message.trim()).filter(Boolean)));
 
 export default function CandidateSelector({ candidates, intent, selections, disabled = false, unavailableMessage, onChange }: CandidateSelectorProps) {
   const id = useId();
+  const [projectsExpanded, setProjectsExpanded] = useState(false);
   const projectKey = recordKey(selections.selected_project);
   const drawingKey = recordKey(selections.selected_drawing);
   const drawings = candidates.drawings.filter((drawing) => recordKey(drawing.project) === projectKey);
   const requestLabel = intent?.recommended_type === "new_enquiry" ? "New Enquiry" : intent?.recommended_type === "amendment" ? "Amendment" : "Uncertain";
   const references = intent ? Array.from(new Set(intent.detected_references.map((reference) => reference.literal))) : [];
+  const candidateIssues = uniqueMessages(candidates.issues);
+  const intentReasons = uniqueMessages(intent?.ambiguity_reasons ?? []).filter((reason) => !candidateIssues.includes(reason));
+  const foldProjects = candidates.projects.length > collapsedProjectLimit;
+  const visibleProjects = foldProjects && !projectsExpanded
+    ? candidates.projects.filter((project, index) => index < collapsedProjectLimit || recordKey(project.record) === projectKey)
+    : candidates.projects;
 
   return (
     <section className="min-w-0" aria-labelledby={`${id}-title`}>
@@ -51,9 +61,9 @@ export default function CandidateSelector({ candidates, intent, selections, disa
                     ? "border-warning/40 bg-warning/10 text-warning-foreground" : "border-info/30 bg-info/10 text-info-foreground"}>{requestLabel}</Badge>
                 </div>
                 <p className="mt-2 leading-relaxed [overflow-wrap:anywhere]">{intent.explanation}</p>
-                {intent.ambiguity_reasons.length > 0 && (
+                {intentReasons.length > 0 && (
                   <ul className="mt-3 space-y-1.5">
-                    {intent.ambiguity_reasons.map((reason, index) => <li key={index} className={warningItem}><TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden="true" />{reason}</li>)}
+                    {intentReasons.map((reason) => <li key={reason} className={warningItem}><TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden="true" />{reason}</li>)}
                   </ul>
                 )}
                 {intent.evidence.length > 0 && (
@@ -89,11 +99,11 @@ export default function CandidateSelector({ candidates, intent, selections, disa
           </div>
 
           <div className="min-w-0 space-y-5">
-            {candidates.issues.length > 0 && (
+            {candidateIssues.length > 0 && (
               <Alert variant="warning" role="note" className="py-3 [&>svg]:top-3.5">
                 <TriangleAlert className="size-4" aria-hidden="true" />
                 <AlertDescription>
-                  <ul className="space-y-1" aria-label="Candidate review issues">{candidates.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>
+                  <ul className="space-y-1" aria-label="Candidate review issues">{candidateIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
                 </AlertDescription>
               </Alert>
             )}
@@ -102,13 +112,14 @@ export default function CandidateSelector({ candidates, intent, selections, disa
             <fieldset className="min-w-0">
               <legend className="text-sm font-semibold">Project candidates</legend>
               <p className="mt-1 text-xs text-muted-foreground">A matching project supports the recommendation; it does not determine request type.</p>
-              <div className="mt-2 grid gap-2">
+              {foldProjects && <p className="mt-2 text-xs text-muted-foreground" role="status">Showing {visibleProjects.length} of {candidates.projects.length} projects.</p>}
+              <div id={`${id}-projects`} className="mt-2 grid gap-2">
                 <label className={choiceCard}>
                   <input type="radio" name={`${id}-project`} value="" checked={!projectKey} disabled={disabled} className={radioClass}
                     onChange={() => onChange({ selected_project: null, selected_drawing: null })} />
                   <span className="text-muted-foreground">No project selected</span>
                 </label>
-                {candidates.projects.map((project) => (
+                {visibleProjects.map((project) => (
                   <label key={recordKey(project.record)} className={choiceCard}>
                     <input type="radio" name={`${id}-project`} value={recordKey(project.record)} checked={projectKey === recordKey(project.record)} disabled={disabled} className={radioClass}
                       onChange={() => onChange({ selected_project: project.record, selected_drawing: null })} />
@@ -120,6 +131,13 @@ export default function CandidateSelector({ candidates, intent, selections, disa
                 ))}
                 {projectKey && !candidates.projects.some((project) => recordKey(project.record) === projectKey) && <p className={cn("rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm", warningItem)}>The saved project ({selections.selected_project?.item_id}) is no longer among the current candidates. Review the selection before completion.</p>}
               </div>
+              {foldProjects && (
+                <Button type="button" variant="outline" size="sm" className="mt-3" aria-expanded={projectsExpanded} aria-controls={`${id}-projects`}
+                  onClick={() => setProjectsExpanded((expanded) => !expanded)}>
+                  {projectsExpanded ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
+                  {projectsExpanded ? "Show fewer projects" : `Show all ${candidates.projects.length} projects`}
+                </Button>
+              )}
             </fieldset>
 
             <fieldset className="min-w-0">

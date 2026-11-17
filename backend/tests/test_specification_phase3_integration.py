@@ -140,6 +140,25 @@ def test_broad_search_remains_visible_with_bounded_detail_reads():
     assert snapshot["lookup"]["status"] == "pending"
 
 
+def test_repeated_drawing_warnings_are_summarized_once_across_projects():
+    class Gateway(ReadOnlyGateway):
+        def fetch_specification_project(self, identity):
+            project = super().fetch_specification_project(identity)
+            if identity == "3":
+                project["subitems"] = []
+            return project
+
+    snapshot = prepare_specification_candidates(Gateway(), match_contract(3), {}, project_board_id=BOARD)
+    warning = "Select the relevant roof/drawing; several series may be plausible"
+    assert snapshot["lookup"]["issues"] == [warning, "No drawings were found"]
+    # The summary does not discard the per-project warning or candidate context.
+    assert [selection["issues"] for selection in snapshot["drawingSelections"]] == [
+        [warning], [warning], ["No drawings were found"],
+    ]
+    assert len(snapshot["lookup"]["projects"]) == 3
+    assert len(snapshot["lookup"]["drawings"]) == 6
+
+
 def test_scope_cancellation_propagates_from_optional_candidate_read():
     class Cancelled:
         def fetch_specification_project(self, identity):
