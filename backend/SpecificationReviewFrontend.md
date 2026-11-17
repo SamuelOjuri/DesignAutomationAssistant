@@ -24,7 +24,7 @@ and explicitly allowlisted checks remain Phase 8 work.
 | `components/specification-review/PdfCanvasPreview.tsx` | PDF.js canvas rendering, page navigation, fit-width zoom, render errors and cancellation. |
 | `scripts/copy-pdfjs-assets.mjs` | Copies the pinned PDF.js worker, fonts, CMaps and decoders to versioned same-origin assets before dev/build. |
 | `components/specification-review/ReviewStatus.tsx` | Business-facing review/publication state. |
-| `components/specification-review/review.css` | Neutral theme tokens (including success/warning/info/brand) scoped to the review workspace so other pages keep the app theme. |
+| `components/specification-review/review.css` | Burgundy theme tokens (including success/warning/info/brand) scoped to the review workspace so other pages keep the app theme. Primary/brand is the Design Assistant burgundy `#9F2D27` (monday_app `--tp-red`); errors use a brighter scarlet and info a navy. |
 | `components/ui/*` | shadcn/ui primitives (Tailwind v4 registry) used by the review: button, badge, card, alert, label, textarea, native select, skeleton and spinner. Native form controls are kept for accessible labels and the browser journeys. |
 | `lib/specification-review-api.ts` | Phase 6 types, private fetches and a bearer client that cannot be rebound to another item. |
 | `lib/specification-review-state.ts` | Draft validation, exact identities, command construction, safe status merging, conflict rebasing, per-field review state and completion blockers. |

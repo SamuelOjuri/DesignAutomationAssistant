@@ -23,7 +23,7 @@ export interface CandidateSelectorProps {
 }
 
 const recordKey = (record: { board_id: string; item_id: string } | null) => record ? `${record.board_id}:${record.item_id}` : "";
-const choiceCard = "flex min-w-0 cursor-pointer items-start gap-3 rounded-lg border bg-card p-3 text-sm shadow-xs transition-colors hover:bg-muted/60 has-[:checked]:border-primary has-[:checked]:ring-1 has-[:checked]:ring-primary has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 has-[:disabled]:hover:bg-card";
+const choiceCard = "flex min-w-0 cursor-pointer items-start gap-3 rounded-lg border bg-card p-3 text-sm shadow-xs transition-colors hover:bg-muted/60 has-[:checked]:border-primary has-[:checked]:bg-accent/40 has-[:checked]:ring-1 has-[:checked]:ring-primary has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 has-[:disabled]:hover:bg-card";
 const radioClass = "mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-none";
 const warningItem = "flex items-start gap-2 text-warning-foreground";
 const collapsedProjectLimit = 10;

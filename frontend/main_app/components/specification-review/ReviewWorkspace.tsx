@@ -37,6 +37,7 @@ const apiBase = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || "";
 const contextKey = (value: ReviewContext) => `${value.accountId}/${value.boardId}/${value.itemId}`;
 const panelHeader = "border-b px-4 py-4 sm:px-5 [.border-b]:pb-4";
 const panelTitle = "flex items-center gap-2 text-lg font-semibold leading-tight";
+const panelIcon = "size-5 text-primary";
 const checkRow = "flex cursor-pointer items-start gap-3 rounded-lg border bg-muted/40 p-3 text-sm has-[:disabled]:cursor-not-allowed has-[:disabled]:text-muted-foreground";
 const checkbox = "mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 const fieldAnchor = (label: string) => `review-field-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
@@ -484,7 +485,7 @@ export default function ReviewWorkspace() {
               )}
               <section aria-labelledby="complete-title">
                 <Card className="gap-0 py-0">
-                  <CardHeader className={panelHeader}><h2 id="complete-title" className={panelTitle}><ShieldCheck className="size-5 text-muted-foreground" aria-hidden="true" />Final review</h2></CardHeader>
+                  <CardHeader className={panelHeader}><h2 id="complete-title" className={panelTitle}><ShieldCheck className={panelIcon} aria-hidden="true" />Final review</h2></CardHeader>
                   <CardContent className="space-y-4 px-4 py-4 sm:px-5">
                     {readOnly && <p className="text-sm text-muted-foreground">Completion is unavailable while this item is read-only.</p>}
                     {decisionsNeeded.length > 0 && (
@@ -506,7 +507,7 @@ export default function ReviewWorkspace() {
             </aside>
           </div>
           <section aria-label="Save review" className="sticky bottom-0 z-30 -mx-1.5 bg-linear-to-t from-background from-70% to-background/0 px-1.5 pb-3 pt-2.5">
-            <Card className="flex-row flex-wrap items-center gap-3 border-input px-4 py-3 shadow-[0_10px_30px_rgb(15_23_42/0.14),0_2px_6px_rgb(15_23_42/0.06)] sm:px-5">
+            <Card className="flex-row flex-wrap items-center gap-3 border-input px-4 py-3 shadow-[0_10px_30px_rgb(74_21_18/0.14),0_2px_6px_rgb(74_21_18/0.06)] sm:px-5">
               <p className="mr-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm" role="status">
                 <span className={`size-2 shrink-0 rounded-full ${saveSummary.dot}`} aria-hidden="true" />
                 <span className="font-semibold">{saveSummary.title}</span>
@@ -521,11 +522,11 @@ export default function ReviewWorkspace() {
           </section>
           <section aria-labelledby="history-title">
             <Card className="gap-0 py-0">
-              <CardHeader className={panelHeader}><h2 id="history-title" className={panelTitle}><Clock className="size-5 text-muted-foreground" aria-hidden="true" />Review history</h2></CardHeader>
+              <CardHeader className={panelHeader}><h2 id="history-title" className={panelTitle}><Clock className={panelIcon} aria-hidden="true" />Review history</h2></CardHeader>
               <CardContent className="px-4 py-4 sm:px-5">
                 {!workspace.history.length && <p className="text-sm text-muted-foreground">No review events yet.</p>}
-                {workspace.history.length > 0 && <ol className="ml-1.5 space-y-4 border-l pl-5 text-sm">{workspace.history.map((event) => <li key={event.event_id} className="relative">
-                  <span className="absolute -left-[1.6rem] top-1.5 size-2.5 rounded-full border-2 border-card bg-muted-foreground" aria-hidden="true" />
+                {workspace.history.length > 0 && <ol className="ml-1.5 space-y-4 border-l border-primary/25 pl-5 text-sm">{workspace.history.map((event) => <li key={event.event_id} className="relative">
+                  <span className="absolute -left-[1.6rem] top-1.5 size-2.5 rounded-full border-2 border-card bg-primary" aria-hidden="true" />
                   <p className="font-medium first-letter:uppercase">{event.command_type.replaceAll("_", " ")}</p>
                   <p className="text-muted-foreground">Version {event.review_version} · Monday user {event.actor_monday_user_id || "system"} · <time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString("en-GB", { timeZone: "Europe/London" })}</time></p>
                   {event.explanation && <p className="mt-1 text-muted-foreground">{event.explanation}</p>}

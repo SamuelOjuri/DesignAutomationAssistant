@@ -29,7 +29,7 @@ export default function PdfPreview({ pdf, publishedPdf, url, loading = false, re
       <Card className="gap-0 py-0">
         <CardHeader className="border-b px-4 py-4 sm:px-5 [.border-b]:pb-4">
           <h2 id={`${id}-title`} className="flex items-center gap-2 text-lg font-semibold leading-tight">
-            <FileText className="size-5 text-muted-foreground" aria-hidden="true" />Specification PDF
+            <FileText className="size-5 text-primary" aria-hidden="true" />Specification PDF
           </h2>
           {pdf && <p className="truncate text-sm text-muted-foreground" title={pdf.filename}>{pdf.filename}</p>}
           {pdf && <p className="truncate font-mono text-xs text-muted-foreground" title={pdf.revision}>Revision: {pdf.revision}</p>}
