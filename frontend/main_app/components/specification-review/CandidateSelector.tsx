@@ -14,6 +14,7 @@ import { evidenceSummaryClass } from "./FieldEditor";
 
 export interface CandidateSelectorProps {
   candidates: CandidateLookup;
+  extractedProjectTitle?: string | null;
   intent?: RequestIntent | null;
   selections: ReviewSelections;
   disabled?: boolean;
@@ -28,7 +29,7 @@ const warningItem = "flex items-start gap-2 text-warning-foreground";
 const collapsedProjectLimit = 10;
 const uniqueMessages = (messages: string[]) => Array.from(new Set(messages.map((message) => message.trim()).filter(Boolean)));
 
-export default function CandidateSelector({ candidates, intent, selections, disabled = false, unavailableMessage, onChange }: CandidateSelectorProps) {
+export default function CandidateSelector({ candidates, extractedProjectTitle, intent, selections, disabled = false, unavailableMessage, onChange }: CandidateSelectorProps) {
   const id = useId();
   const [projectsExpanded, setProjectsExpanded] = useState(false);
   const projectKey = recordKey(selections.selected_project);
@@ -111,6 +112,10 @@ export default function CandidateSelector({ candidates, intent, selections, disa
 
             <fieldset className="min-w-0">
               <legend className="text-sm font-semibold">Project candidates</legend>
+              <dl className="mt-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+                <dt className="text-xs text-muted-foreground">Extracted Project Title</dt>
+                <dd className="mt-1 font-medium [overflow-wrap:anywhere]">{extractedProjectTitle?.trim() || "Not available from the current extraction."}</dd>
+              </dl>
               <p className="mt-1 text-xs text-muted-foreground">A matching project supports the recommendation; it does not determine request type.</p>
               {foldProjects && <p className="mt-2 text-xs text-muted-foreground" role="status">Showing {visibleProjects.length} of {candidates.projects.length} projects.</p>}
               <div id={`${id}-projects`} className="mt-2 grid gap-2">

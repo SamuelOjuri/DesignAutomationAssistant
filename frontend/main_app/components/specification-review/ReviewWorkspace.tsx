@@ -424,7 +424,7 @@ export default function ReviewWorkspace() {
               </AlertDescription>
             </Alert>
           )}
-          <CandidateSelector candidates={workspace.candidates} intent={workspace.source?.intent} selections={{ ...workspace.review.selections, ...draft.selections }} disabled={!editable} unavailableMessage={readOnly && !workspace.source ? "Project and drawing recommendations are unavailable in this read-only view." : undefined} onChange={(patch) => { setDraft((value) => updateSelection(value, patch)); setCheckedPdf(false); }} />
+          <CandidateSelector candidates={workspace.candidates} extractedProjectTitle={workspace.extracted_project_title} intent={workspace.source?.intent} selections={{ ...workspace.review.selections, ...draft.selections }} disabled={!editable} unavailableMessage={readOnly && !workspace.source ? "Project and drawing recommendations are unavailable in this read-only view." : undefined} onChange={(patch) => { setDraft((value) => updateSelection(value, patch)); setCheckedPdf(false); }} />
           {workspace.source && (workspace.source.selected_project || workspace.source.selected_drawing) && (
             <p className="flex items-start gap-2 text-sm text-muted-foreground"><Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>Displayed recommendations use project {workspace.source.selected_project?.item_id || "unassigned"}, drawing {workspace.source.selected_drawing?.item_id || "unassigned"}. {readOnly ? "These saved recommendations are read-only." : "Save changed selections to resolve their recommendations."}</span></p>
           )}

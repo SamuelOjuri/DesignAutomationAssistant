@@ -29,7 +29,7 @@ from .performance_specification_sources import (
     preview_specification_sources,
 )
 from ..config import settings
-from .specification_review_artifacts import build_review_artifact_metadata
+from .specification_review_artifacts import build_review_artifact_metadata, review_digest
 from .specification_policy import specification_publication_allowed
 from .specification_review_contract import (
     FIELD_NAMES, NonemptyText, ReviewDecisionState, ReviewModel, ReviewSourceSnapshot,
@@ -260,6 +260,37 @@ def _status(*, spec, review, source_ready, exact, approval, editable, source_err
     return "awaiting_final_review" if exact else "needs_review"
 
 
+def _extracted_project_title(context, source):
+    """Display the matcher input only when it belongs to the displayed sources.
+
+    Keep this context outside the review snapshot so adding it cannot invalidate
+    a saved review or change the identity of an already published PDF.
+    """
+    extraction = getattr(context.get("item"), "extracted_parameters_json", None)
+    if source is None or not isinstance(extraction, dict):
+        return None
+    if not all(isinstance(extraction.get(key), str) and extraction[key].strip()
+               for key in ("inputRevision", "pipelineVersion")):
+        return None
+    extraction_identity = review_digest({
+        "input_revision": extraction["inputRevision"], "pipeline": extraction["pipelineVersion"],
+        "evidence_version": extraction.get("specificationEvidenceVersion"),
+        "reference_parser_version": extraction.get("referenceParserVersion"),
+    })
+    if extraction_identity != source.identity.extraction_identity:
+        return None  # A newer extraction must not label retained older candidates.
+    title = extraction.get("projectName")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    matching = getattr(context.get("item"), "match_result_json", None)
+    if (not isinstance(matching, dict)
+            or any(matching.get(key) != extraction[key] for key in ("inputRevision", "pipelineVersion"))):
+        return None
+    result = matching.get("result")
+    title = result.get("extractedProjectTitle") if isinstance(result, dict) else None
+    return title.strip() if isinstance(title, str) and title.strip() else None
+
+
 def _payload(context, *, board_id, item_id, editable, source=None, source_error=None, provisional=False,
              manual_publication=False):
     spec, review, state = context["spec"], context["review"], context["state"]
@@ -297,6 +328,7 @@ def _payload(context, *, board_id, item_id, editable, source=None, source_error=
         "publication_changes": _publication_changes(current, metadata) if not provisional else [],
         "review": state.model_dump(mode="json"),
         "source": source.model_dump(mode="json") if source else None,
+        "extracted_project_title": _extracted_project_title(context, source),
         "fields": {label: {**source.fields[label].model_dump(mode="json"),
                            "decision": state.field_decisions[label].model_dump(mode="json")
                            if label in state.field_decisions else None,

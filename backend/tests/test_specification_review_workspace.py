@@ -13,8 +13,8 @@ from backend.app.models import (
 )
 from backend.app.services import specification_review as persistence
 from backend.app.services import specification_review_workspace as workspace
-from backend.app.services.specification_review_artifacts import build_review_artifact_metadata
-from backend.app.services.specification_review_contract import FIELD_NAMES
+from backend.app.services.specification_review_artifacts import build_review_artifact_metadata, review_digest
+from backend.app.services.specification_review_contract import FIELD_NAMES, ReviewDecisionState
 from backend.app.services.performance_specification_sources import SpecificationSourceWaiting
 from backend.tests.test_specification_review_persistence import (
     ACCOUNT, ACTOR, BOARD, ITEM, review_db, save_command, source_snapshot,
@@ -88,6 +88,89 @@ def test_read_only_and_polling_use_retained_sources_without_remote_reads(review_
                                   account_id=ACCOUNT, editable=True)
     assert status["source_fingerprint"] == "sources-1"
     assert "fields" not in status and "source" not in status
+
+
+@pytest.fixture()
+def title_context():
+    extraction = {"inputRevision": "input-1", "pipelineVersion": "pipeline-1",
+        "specificationEvidenceVersion": "evidence-1", "referenceParserVersion": "parser-1",
+        "projectName": "The Christie Pet Hospital Project"}
+    source = source_snapshot()
+    source.identity.extraction_identity = review_digest({
+        "input_revision": "input-1", "pipeline": "pipeline-1",
+        "evidence_version": "evidence-1", "reference_parser_version": "parser-1",
+    })
+    context = {"item": SimpleNamespace(extracted_parameters_json=extraction, match_result_json=None),
+        "spec": None, "review": None, "state": ReviewDecisionState(), "retained_source": None,
+        "artifacts": [], "approval": None, "history": []}
+    return context, source
+
+
+@pytest.mark.parametrize("mode", ["editable", "provisional", "read_only"])
+def test_workspace_exposes_extracted_title_separately_from_candidate_and_pdf_titles(title_context, mode):
+    context, source = title_context
+    if mode == "read_only":
+        context["retained_source"] = source.model_dump(mode="json")
+    payload = workspace._payload(context, board_id=BOARD, item_id=ITEM,
+        editable=mode != "read_only", provisional=mode == "provisional",
+        source=source if mode != "read_only" else None)
+
+    assert payload["extracted_project_title"] == "The Christie Pet Hospital Project"
+    assert payload["fields"]["Drawing Title"]["effective"]["display_value"] == "Requested Drawing Title"
+    assert "extracted_project_title" not in payload["source"]
+
+
+@pytest.mark.parametrize("title", [None, "", "  ", 42])
+def test_workspace_uses_current_matching_title_when_extraction_title_is_absent(title_context, title):
+    context, source = title_context
+    context["item"].extracted_parameters_json["projectName"] = title
+    context["item"].match_result_json = {"inputRevision": "input-1", "pipelineVersion": "pipeline-1",
+        "result": {"extractedProjectTitle": "The Christie Pet Hospital Project"}}
+
+    payload = workspace._payload(context, board_id=BOARD, item_id=ITEM, editable=True, source=source)
+
+    assert payload["extracted_project_title"] == "The Christie Pet Hospital Project"
+
+
+@pytest.mark.parametrize("matching", [
+    None, {}, {"result": {"extractedProjectTitle": "Unbound old title"}},
+    {"inputRevision": "input-0", "pipelineVersion": "pipeline-1", "result": {"extractedProjectTitle": "Old title"}},
+    {"inputRevision": "input-1", "pipelineVersion": "pipeline-0", "result": {"extractedProjectTitle": "Old title"}},
+    {"inputRevision": "input-1", "pipelineVersion": "pipeline-1", "result": {"extractedProjectTitle": " "}},
+])
+def test_missing_title_never_falls_back_to_stale_or_unbound_matching_metadata(title_context, matching):
+    context, source = title_context
+    context["item"].extracted_parameters_json.pop("projectName")
+    context["item"].match_result_json = matching
+
+    payload = workspace._payload(context, board_id=BOARD, item_id=ITEM, editable=True, source=source)
+
+    assert payload["extracted_project_title"] is None
+
+
+def test_new_extraction_title_does_not_label_retained_older_candidates(title_context):
+    context, source = title_context
+    context["retained_source"] = source.model_dump(mode="json")
+    context["item"].extracted_parameters_json.update(inputRevision="input-2", projectName="A different project")
+
+    payload = workspace._payload(context, board_id=BOARD, item_id=ITEM, editable=False)
+
+    assert payload["extracted_project_title"] is None
+    assert payload["source"] == context["retained_source"]
+
+
+def test_extracted_title_display_preserves_review_and_publication_identities(title_context):
+    context, source = title_context
+    before = build_review_artifact_metadata(context["state"], source)
+    snapshot = source.model_dump(mode="json")
+    context["item"].match_result_json = {"inputRevision": "input-1", "pipelineVersion": "pipeline-1",
+        "result": {"extractedProjectTitle": "An older copied title"}}
+
+    payload = workspace._payload(context, board_id=BOARD, item_id=ITEM, editable=True, source=source)
+
+    assert payload["extracted_project_title"] == "The Christie Pet Hospital Project"
+    assert payload["source"] == snapshot
+    assert build_review_artifact_metadata(context["state"], source) == before
 
 
 def test_save_refreshes_changed_sources_and_rejects_old_command(review_db, source_reader):

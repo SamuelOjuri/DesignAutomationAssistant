@@ -59,7 +59,7 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     if (expectPreview) await waitFor(() => renderedCanvas(), "PDF painted on canvas");
     await delay(200);
   };
-  const save = async (expectedStatus = "Regenerating PDF") => { await click("Save corrections and regenerate PDF"); await waitFor(() => text().includes(expectedStatus) && !text().includes("Working"), expectedStatus); };
+  const save = async (expectedStatus = "Regenerating PDF") => { await waitFor(() => { const action = button("Save corrections and regenerate PDF"); return action && !action.disabled; }, "save corrections available"); await click("Save corrections and regenerate PDF"); await waitFor(() => text().includes(expectedStatus) && !text().includes("Working"), expectedStatus); };
   const publish = async () => {
     const previousHref = previewHref();
     await command("publish");
@@ -246,6 +246,9 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     assert(sourceChecks().every((element) => element.labels.length > 0), "Source confirmation checkboxes have associated accessible labels");
 
     await navigate("many_projects");
+    const extractedTitle = () => fieldset("Project candidates").querySelector("dl");
+    assert(extractedTitle()?.querySelector("dt")?.textContent === "Extracted Project Title"
+      && extractedTitle().querySelector("dd")?.textContent === "Riverside School", "Project candidates show the extracted title separately from matched project titles");
     const projectChoices = () => Array.from(fieldset("Project candidates").querySelectorAll('input[type="radio"]')).filter((element) => element.value && element.getClientRects().length > 0);
     const warningCopies = (message) => Array.from(documentOf().querySelectorAll("li")).filter((element) => element.textContent.trim() === message).length;
     assert(warningCopies("Select the relevant roof/drawing; several series may be plausible") === 1, "Duplicate drawing warnings from legacy candidate and intent lists appear only once");
@@ -258,11 +261,13 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     documentOf().querySelector('input[type="radio"][value="200:213"]').click(); await delay(40);
     await click("Show fewer projects");
     assert(projectChoices().length === 11 && documentOf().querySelector('input[type="radio"][value="200:213"]')?.checked, "Folding retains a selected project outside the first ten matches");
+    assert(extractedTitle()?.querySelector("dd")?.textContent === "Riverside School", "Choosing and folding a matched project preserves the original extracted title");
     assert(!documentOf().querySelector('input[type="radio"][value="200:211"]') && button("Show all 13 projects")?.getAttribute("aria-expanded") === "false", "Folding hides other additional matches and restores the collapsed disclosure");
     await click("Show all 13 projects");
     assert(projectChoices().length === 13 && documentOf().querySelector('input[type="radio"][value="200:213"]')?.checked, "Expanding again preserves the selected project");
 
     await navigate("ten_projects");
+    assert(extractedTitle()?.querySelector("dd")?.textContent === "Not available from the current extraction.", "Missing extracted titles have an explicit fallback without substituting a matched project or Drawing Title");
     assert(projectChoices().length === 10 && !buttons(fieldset("Project candidates")).some((element) => /Show all|Show fewer/.test(element.textContent)), "Exactly ten matched projects stays fully visible without a fold control");
 
     await navigate("ambiguous");

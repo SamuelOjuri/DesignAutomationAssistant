@@ -115,6 +115,7 @@ export type ReviewStatusSnapshot = {
   requested_publication_revision?: string | null;
 };
 export type ReviewWorkspace = ReviewStatusSnapshot & {
+  extracted_project_title?: string | null;
   publication_changes?: { field: string; published_value: string | null; proposed_value: string | null;
     published_source: string | null; proposed_source: string | null }[];
   review: ReviewDecisionState; source: ReviewSource | null; fields: Partial<Record<FieldName, ReviewField>>;

@@ -17,6 +17,7 @@ export function createFixture(scenario = "new_enquiry", itemId = "101") {
     result.candidates.issues = ["Narrow the project candidates to read further drawing details", drawingWarning, drawingWarning, drawingWarning];
     result.source.intent.ambiguity_reasons = [requestWarning, requestWarning, drawingWarning];
     result.source.intent.matched_projects = result.candidates.projects;
+    if (scenario === "ten_projects") delete result.extracted_project_title;
     return result;
   }
   if (scenario === "source_reviews") {
@@ -71,7 +72,7 @@ export function createFixture(scenario = "new_enquiry", itemId = "101") {
   }
   const revision = `pdf-${itemId}-1`;
   const pdf = { revision, filename: `Performance Specification ${itemId}.pdf`, status: "published", published: true, size_bytes: 640, url: `/api/specification-review/items/100/${itemId}/pdf/${revision}` };
-  return { board_id: "100", item_id: itemId, status: "awaiting_final_review", review_version: 0, source_fingerprint: identity.source_fingerprint, decision_digest: `decisions-${itemId}-0`, desired_publication_identity: `publication-${itemId}-0`, review: { schema_version: 1, review_version: 0, selections: { selected_request_type: null, selected_project: null, selected_drawing: null }, field_decisions: {}, source_dispositions: [] }, source: { schema_version: 1, identity, intent, request_type: amendment ? "amendment" : "new_enquiry", selected_project: null, selected_drawing: null, candidates, fields: sourceFields, source_issues: [] }, fields, candidates, queue: { requested_generation: 1, completed_generation: 1, running: false, failed: false }, pdf, published_pdf: structuredClone(pdf), approval: null, history: [{ event_id: `init-${itemId}`, command_type: "source_initialized", review_version: 0, actor_monday_user_id: null, created_at: now, explanation: null }], capabilities: { read: true, edit: true, approve: true }, scope_reason: null };
+  return { board_id: "100", item_id: itemId, extracted_project_title: itemId === "102" ? "Northgate Library" : "Riverside School", status: "awaiting_final_review", review_version: 0, source_fingerprint: identity.source_fingerprint, decision_digest: `decisions-${itemId}-0`, desired_publication_identity: `publication-${itemId}-0`, review: { schema_version: 1, review_version: 0, selections: { selected_request_type: null, selected_project: null, selected_drawing: null }, field_decisions: {}, source_dispositions: [] }, source: { schema_version: 1, identity, intent, request_type: amendment ? "amendment" : "new_enquiry", selected_project: null, selected_drawing: null, candidates, fields: sourceFields, source_issues: [] }, fields, candidates, queue: { requested_generation: 1, completed_generation: 1, running: false, failed: false }, pdf, published_pdf: structuredClone(pdf), approval: null, history: [{ event_id: `init-${itemId}`, command_type: "source_initialized", review_version: 0, actor_monday_user_id: null, created_at: now, explanation: null }], capabilities: { read: true, edit: true, approve: true }, scope_reason: null };
 }
 
 /** Injected by the localhost-only harness proxy before the real application boots. */
