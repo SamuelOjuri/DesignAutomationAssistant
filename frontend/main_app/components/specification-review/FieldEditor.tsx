@@ -94,7 +94,7 @@ export default function FieldEditor({ label, field, operation, reviewState, anch
       className={cn("relative min-w-0 overflow-hidden rounded-xl border bg-card text-card-foreground shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
         needsAttention && "border-warning/50", operation && "border-primary/50 ring-1 ring-primary/10")}>
       {/* A floated legend renders inside the card while still naming the fieldset. */}
-      <legend className="float-left w-full border-b bg-muted/40 px-4 py-2.5 text-base font-semibold leading-6 sm:pr-80">{label}</legend>
+      <legend className="float-left w-full border-b bg-muted/40 px-4 py-2.5 text-base font-semibold leading-6 text-primary sm:pr-80">{label}</legend>
       {(badge || operation) && (
         <div className="clear-both flex flex-wrap gap-1.5 px-4 pt-3 sm:absolute sm:right-4 sm:top-3 sm:justify-end sm:p-0">
           {badge && <Badge variant="outline" className={badge.className}><span className="size-1.5 rounded-full bg-current" aria-hidden="true" />{badge.text}</Badge>}
