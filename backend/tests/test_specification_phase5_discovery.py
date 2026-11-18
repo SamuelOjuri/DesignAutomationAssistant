@@ -1,10 +1,13 @@
 """Task-independent discovery, fair recovery and live publication boundaries."""
 
+from contextlib import nullcontext
 from copy import deepcopy
 from datetime import timedelta
+import sys
 import uuid
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from backend.app.config import settings
 from backend.app.models import (
@@ -17,6 +20,66 @@ from backend.app.services.auto_sync_policy import RETIRED_SOURCE_OUTCOME
 from backend.app.services.specification_review_contract import FIELD_NAMES, ReviewSourceSnapshot
 from backend.tests.test_performance_specification import BOARD, ITEM, case, current, run
 from backend.tests.test_specification_phase4_worker import ACTOR, review_case, _save, _publish
+
+
+def _mock_worker_cli(monkeypatch, *options):
+    monkeypatch.setattr(sys, "argv", ["performance_specification", *options])
+    monkeypatch.setattr(worker, "configure_worker_logging", lambda: None)
+    monkeypatch.setattr(worker, "specification_processing_enabled", lambda: True)
+    monkeypatch.setattr(settings, "monday_ingestion_access_token", None)
+    monkeypatch.setattr(worker, "SessionLocal", lambda: nullcontext(object()))
+
+
+def test_polling_recovers_from_session_pool_exhaustion(monkeypatch, caplog):
+    _mock_worker_cli(monkeypatch)
+    limit = OperationalError("PRIVATE_SQL", {}, RuntimeError(
+        "FATAL: (EMAXCONNSESSION) max clients reached in session mode",
+    ))
+    cycles = iter([limit, limit, None, limit])
+    discover_sessions, run_sessions, waits = [], [], []
+
+    def discover(db):
+        error = next(cycles)
+        discover_sessions.append(db)
+        if error is not None:
+            raise error
+
+    monkeypatch.setattr(worker, "discover_specifications", discover)
+    monkeypatch.setattr(worker, "run_specifications_once", run_sessions.append)
+    monkeypatch.setattr(worker.time, "sleep", waits.append)
+
+    with pytest.raises(StopIteration):
+        worker.main()
+
+    assert waits == [5, 10, 5, 5]
+    assert len(set(discover_sessions)) == 4
+    assert run_sessions == [discover_sessions[2]]
+    assert caplog.text.count("database_error=connection_limit") == 3
+    assert "PRIVATE_SQL" not in caplog.text
+
+
+def test_once_reports_transient_database_failure_without_sleeping(monkeypatch, caplog):
+    _mock_worker_cli(monkeypatch, "--once")
+
+    def unavailable(db):
+        raise OperationalError(None, None, RuntimeError("connection refused"))
+
+    monkeypatch.setattr(worker, "discover_specifications", unavailable)
+    monkeypatch.setattr(worker.time, "sleep", lambda _: pytest.fail("one-shot worker slept"))
+    assert worker.main() == 1
+    assert "database_error=connection_refused" in caplog.text
+
+
+def test_polling_surfaces_permanent_database_errors(monkeypatch):
+    _mock_worker_cli(monkeypatch)
+
+    def denied(db):
+        raise OperationalError(None, None, RuntimeError("permission denied"))
+
+    monkeypatch.setattr(worker, "discover_specifications", denied)
+    monkeypatch.setattr(worker.time, "sleep", lambda _: pytest.fail("worker retried a permanent error"))
+    with pytest.raises(OperationalError):
+        worker.main()
 
 
 def _observation(case, *, group=None, outcome="ignored", when=None):

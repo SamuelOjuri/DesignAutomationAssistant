@@ -79,6 +79,12 @@ OPTIONS = {
         "OSB", "Screeded Concrete", "CLT",
     ),
 }
+
+_SCALE_RATIO_PATTERN = r"(\d+)\s*(?:[:/]|\bto\b)\s*(\d+)"
+_SCALE_PAPER_SIZE_PATTERN = r"(?:ISO\s+)?([ABC][0-9])"
+_SCALE_AT_PAPER_SIZE = re.compile(
+    rf"{_SCALE_RATIO_PATTERN}\s*(?:@|\bat\b)\s*{_SCALE_PAPER_SIZE_PATTERN}", re.IGNORECASE,
+)
 NUMERIC_FIELDS = frozenset({"Target U Value", "Target Min U Value"})
 
 
@@ -191,6 +197,35 @@ def reviewer_cad_mapping(label: str, display_value: str):
     except ValueError:
         return CADMapping()
     return CADMapping(status="mapped", value=value, catalogue_version=SPECIFICATION_VERSION)
+
+
+def iso_cad_paper_size(value: str | None) -> str | None:
+    size = re.fullmatch(_SCALE_PAPER_SIZE_PATTERN, (value or "").strip(), re.IGNORECASE)
+    cad_size = f"ISO {size[1].upper()}" if size else None
+    return cad_size if cad_size in OPTIONS["Page Size"] else None
+
+
+def scale_mapping_for_paper_size(value: str, paper_size: str | None):
+    """Map a complete set of explicit scale and paper-size pairs.
+
+    None leaves ordinary single ratios on the existing path. An unmapped result
+    needs review. The caller supplies a paper size verified from the same drawing.
+    """
+    from .specification_review_contract import CADMapping
+
+    value = value.strip()
+    if (not _SCALE_AT_PAPER_SIZE.search(value)
+            and len(re.findall(_SCALE_RATIO_PATTERN, value, re.IGNORECASE)) < 2):
+        return None
+    selected_size = iso_cad_paper_size(paper_size)
+    pair = _SCALE_AT_PAPER_SIZE.pattern
+    if not selected_size or not re.fullmatch(rf"{pair}(?:[\s,;|]+{pair})*", value, re.IGNORECASE):
+        return CADMapping()
+    matching = [f"{match[1]}:{match[2]}" for match in _SCALE_AT_PAPER_SIZE.finditer(value)
+                if f"ISO {match[3].upper()}" == selected_size]
+    if len(matching) != 1:
+        return CADMapping()
+    return reviewer_cad_mapping("Scale", matching[0])
 
 
 def _cad_values_with(changes):

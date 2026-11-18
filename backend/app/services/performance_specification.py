@@ -16,6 +16,7 @@ import uuid
 from sqlalchemy import and_, func, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import SQLAlchemyError
 
 from ..config import settings
 from ..db import SessionLocal
@@ -25,6 +26,7 @@ from ..models import (
     PerformanceSpecificationReview,
 )
 from .design_processing_artifacts import SupabaseDesignArtifactStorage
+from .database_diagnostics import database_error_details
 from .legacy_enquiry.llm import LegacyGeminiClient
 from .performance_specification_contract import (
     SPECIFICATION_VERSION, CADTranslation, SpecificationPublication, digest,
@@ -668,6 +670,7 @@ def _finish(db, claim, source, publication, *, revision=None, draft_revision=Non
 def execute_specification(db, claim, *, gateway, client, storage):
     board_id, item_id, token, generation = claim
     source = None
+    stage = "resolve_sources"
     gateway = _ObservedGateway(db, gateway, board_id)
     try:
         record, source = _source(db, claim, gateway)
@@ -679,19 +682,23 @@ def execute_specification(db, claim, *, gateway, client, storage):
             db.commit()
         artifact = db.get(PerformanceSpecificationArtifact, (board_id, item_id, revision))
         if artifact is None:
+            stage = "translate_cad"
             cached = _cached_translation(db, board_id, item_id, source, model_version)
             db.commit()
             translation = prepare_specification_publication(source, client, cached_translation=cached)
             _check_claim(db, claim)
             # Re-read source and group after translation; a late model response
             # cannot publish facts that were superseded during its request.
+            stage = "recheck_sources"
             _, current = _source(db, claim, gateway)
             if current != source:
                 raise SupersededSpecification("Specification sources changed during translation")
+            stage = "render_pdf"
             content = render_performance_specification_pdf(translation, item_id=item_id, revision=revision)
             filename = f"Project_Performance_Specification_Details_{item_id}_{revision}.pdf"
             object_key = f"performance-specifications/{board_id}/{item_id}/{revision}/{filename}"
             _check_claim(db, claim)
+            stage = "store_pdf"
             storage.write_private(settings.design_processing_artifact_bucket, object_key, content, "application/pdf")
             _check_claim(db, claim)
             artifact = PerformanceSpecificationArtifact(
@@ -705,12 +712,14 @@ def execute_specification(db, claim, *, gateway, client, storage):
             db.add(artifact)
             db.commit()
         else:
+            stage = "read_retained_pdf"
             translation = SpecificationPublication.model_validate(artifact.translation_json)
             db.commit()
             content = storage.read_private(artifact.storage_bucket, artifact.storage_object_key)
             if hashlib.sha256(content).hexdigest() != artifact.content_sha256 or len(content) != artifact.size_bytes:
                 raise SpecificationSourceError("Stored specification PDF failed its integrity check")
 
+        stage = "publication"
         if not _publication_permitted(db, claim, gateway, revision):
             if artifact.status in {"uploading", "deleted"}:
                 artifact.status = "rendered"
@@ -810,12 +819,16 @@ def execute_specification(db, claim, *, gateway, client, storage):
                 logger.info("Specification needs review item=%s", item_id)
         else:
             record.attempt_count += 1
-            record.scheduled_for = utc_now() + timedelta(seconds=min(3600, 30 * 2 ** min(record.attempt_count, 7)))
+            retry_seconds = min(3600, 30 * 2 ** min(record.attempt_count, 7))
+            record.scheduled_for = utc_now() + timedelta(seconds=retry_seconds)
             record.last_error = f"{type(exc).__name__}: {str(exc)[:400]}"
             if isinstance(exc, SpecificationSourceError):
                 record.review_json = {"status": "source_failure", "reason": str(exc)[:2000], "source": source}
             outcome = "failed"
-            logger.warning("Specification refresh failed item=%s error_type=%s", item_id, type(exc).__name__)
+            logger.warning(
+                "Specification refresh failed item=%s stage=%s error_type=%s attempt_count=%d retry_seconds=%d",
+                item_id, stage, type(exc).__name__, record.attempt_count, retry_seconds,
+            )
         db.commit()
         return outcome
 
@@ -914,19 +927,39 @@ def main():
     if settings.monday_ingestion_access_token:
         # Load the Company Account directory alongside the first claims.
         start_directory_warmup(settings.monday_ingestion_access_token)
+    poll_seconds = max(args.poll_interval_seconds, 0.1)
+    database_failures = 0
     while True:
-        with SessionLocal() as db:
-            if args.item_id:
-                enqueue_specification(db, settings.design_processing_board_id, args.item_id, immediate=True)
-                db.commit()
-                args.item_id = None
-            discover_specifications(db)
-            outcomes = run_specifications_once(db)
-            if outcomes:
-                logger.info("Specification outcomes: %s", outcomes)
+        try:
+            with SessionLocal() as db:
+                if args.item_id:
+                    enqueue_specification(db, settings.design_processing_board_id, args.item_id, immediate=True)
+                    db.commit()
+                    args.item_id = None
+                discover_specifications(db)
+                outcomes = run_specifications_once(db)
+                if outcomes:
+                    logger.info("Specification outcomes: %s", outcomes)
+        except SQLAlchemyError as exc:
+            details = database_error_details(exc)
+            if details is None or not details["transient"]:
+                raise
+            if args.once:
+                logger.error("Specification run deferred database_error=%s error_type=%s",
+                             details["database_error"], details["error_type"])
+                return 1
+            retry_seconds = max(poll_seconds, min(60, 5 * 2 ** min(database_failures, 4)))
+            database_failures += 1
+            logger.warning(
+                "Specification polling deferred database_error=%s error_type=%s retry_seconds=%g",
+                details["database_error"], details["error_type"], retry_seconds,
+            )
+            time.sleep(retry_seconds)
+            continue
+        database_failures = 0
         if args.once:
             return 0
-        time.sleep(max(args.poll_interval_seconds, 0.1))
+        time.sleep(poll_seconds)
 
 
 if __name__ == "__main__":

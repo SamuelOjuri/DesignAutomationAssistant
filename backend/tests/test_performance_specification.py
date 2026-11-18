@@ -25,7 +25,8 @@ from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.legacy_enquiry.parameter_extraction import DesignParameterExtraction
 from backend.app.services.design_processing_inputs import DesignEmailAsset, DesignProcessingTargetSnapshot
 from backend.app.services.performance_specification_contract import (
-    CADTranslation, FIELD_NAMES, OPTIONS, SpecificationPublication, pdf_values, translate_specification,
+    CADTranslation, FIELD_NAMES, OPTIONS, SpecificationPublication, pdf_values,
+    prepare_specification_publication, translate_specification,
 )
 from backend.app.services.performance_specification_pdf import render_performance_specification_pdf
 from backend.app.services.performance_specification_sources import (
@@ -210,6 +211,60 @@ def run(case):
 
 def current(case):
     return case.db.get(PerformanceSpecification, (BOARD, ITEM), populate_existing=True)
+
+
+@pytest.mark.parametrize(("scale", "same_drawing", "expected"), [
+    ("1:50@A1 1:100@A3", True, "1:50"),
+    ("1:50@A1 1:100@A3", False, None),
+    ("1:50@A1, 1:100@A1", True, None),
+    ("1:50@A2 1:100@A3", True, None),
+])
+def test_publisher_matches_scale_to_verified_paper_size_or_renders_review(case, scale, same_drawing, expected):
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    extraction["performanceParameters"]["Scale"] = scale
+    extraction = with_evidence(extraction)
+    drawing_id = "asset:298139344:attachment:0"
+    size_id = drawing_id if same_drawing else "asset:298139345:attachment:0"
+    text_by_source = {}
+    for evidence in extraction["specificationEvidence"]:
+        if evidence["field"] in {"Scale", "Page Size"}:
+            evidence.update(location="Drawing title block", request_role="document",
+                            source_id=drawing_id if evidence["field"] == "Scale" else size_id)
+            text_by_source.setdefault(evidence["source_id"], []).append(evidence["snippet"])
+    extraction["sourceManifest"].extend(
+        {"sourceId": source_id, "filename": f"drawing-{index}.pdf", "sourceType": "attachment",
+         "contentSha256": f"hash-{index}", "status": "read", "text": "\n".join(lines), "pdfPageSizes": ["A1"]}
+        for index, (source_id, lines) in enumerate(text_by_source.items())
+    )
+    case.item.extracted_parameters_json = extraction
+    case.db.commit()
+
+    assert run(case) == ["published"]
+    record = current(case)
+    artifact = case.db.get(PerformanceSpecificationArtifact, (BOARD, ITEM, record.current_revision))
+    publication = SpecificationPublication.model_validate(artifact.translation_json)
+    assert record.attempt_count == 0
+    assert artifact.source_json["raw"]["Scale"] == scale
+    assert artifact.source_json["sources"]["Scale"]["selected"]["source_id"] == drawing_id
+    assert artifact.source_json["reviewSource"]["fields"]["Scale"]["proposal"]["display_value"] == scale
+    assert publication.values.model_dump(by_alias=True)["Scale"] == expected
+    assert publication.values.model_dump(by_alias=True)["Page Size"] == "ISO A1"
+    assert ("Scale" in publication.field_reviews) == (expected is None)
+    raw_inputs = json.loads(case.calls[0][1].split("\nResolved values: ", 1)[1])
+    assert raw_inputs["Scale"] is None
+    if expected:
+        assert raw_inputs["Page Size"] is None
+
+    # Existing CAD work cannot override the drawing-specific resolution,
+    # including a formerly populated scale that now needs review.
+    cached = CADTranslation.model_validate({
+        "values": {**publication.values.model_dump(by_alias=True), "Scale": "1:100"}, "warnings": [],
+    })
+    republished = prepare_specification_publication(
+        artifact.source_json, None, cached_translation=cached,
+    )
+    assert republished.values.model_dump(by_alias=True)["Scale"] == expected
+    assert republished.field_reviews == publication.field_reviews
 
 
 def without_email(case, *labels):

@@ -10,8 +10,9 @@ import hashlib
 import json
 
 from .specification_review_contract import (
-    FIELD_NAMES, ReviewDecisionState, ReviewSourceSnapshot, effective_field_value,
+    CADMapping, FIELD_NAMES, ReviewDecisionState, ReviewSourceSnapshot, effective_field_value,
 )
+from .performance_specification_contract import scale_mapping_for_paper_size
 
 
 REVIEW_ARTIFACT_VERSION = "specification-review-artifact-v1"
@@ -87,6 +88,15 @@ def build_review_artifact_metadata(
             "crm_evidence": evidence.model_dump(mode="json")["crm_evidence"] if effective.source != "reviewer_specified" else [],
             "derived_from": evidence.derived_from if effective.source != "reviewer_specified" else None,
         }
+    scale = provenance["Scale"]
+    if ("Page Size" in state.field_decisions and scale["source"] != "reviewer_specified"
+            and scale["cad_mapping"]["status"] == "mapped"):
+        mapping = scale_mapping_for_paper_size(scale["display_value"], provenance["Page Size"]["display_value"])
+        if mapping is not None and mapping.value != scale["cad_mapping"]["value"]:
+            # Keep the saved display, but require a fresh scale decision for
+            # the changed paper size before authorizing the CAD value.
+            scale["cad_mapping"] = CADMapping().model_dump(mode="json")
+            scale["requires_reconfirmation"] = True
     metadata = {
         "schema_version": 1,
         "publication_version": publication_version,

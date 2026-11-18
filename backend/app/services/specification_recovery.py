@@ -189,6 +189,45 @@ def repair_template_markers(result, manifest):
         })
 
 
+_TITLE_BLOCK_SCALE = re.compile(
+    r"\s*(?:drawing[ \t]+)?scale(?:[ \t]*@[ \t]*(?P<label_size>A[0-6]))?"
+    r"(?:[ \t]*:[ \t]*|[ \t]+)(?P<ratio>[0-9]+[ \t]*(?:[:/]|[ \t]to[ \t])[ \t]*[0-9]+)"
+    r"(?:[ \t]*@[ \t]*(?P<ratio_size>A[0-6]))?\.?\s*",
+    re.IGNORECASE,
+)
+
+
+def repair_literal_scale_citations(result, manifest):
+    """Restore the notation of a single labelled drawing scale in its verified citation."""
+    sources = {source["sourceId"]: source for source in manifest}
+    for index, old in enumerate(result.specification_evidence):
+        if old.field != "Scale" or old.role != "requested":
+            continue
+        before = old.model_dump()
+        ratio = scale_ratio(old.value)
+        source = sources.get(old.source_id)
+        if (ratio is None or not source or source["status"] != "read"
+                or _value_supported(before) or not _source_contains_excerpt(source, old.snippet)):
+            continue
+        # Only a complete scale label can establish this fact. Excerpts with other
+        # ratios, fall annotations or explanatory text are left to evidence recovery.
+        snippet = re.sub(r"(?<!\*)\*\*([^*\n]+)\*\*(?!\*)|`([^`\n]+)`", lambda m: m[1] or m[2], old.snippet)
+        match = _TITLE_BLOCK_SCALE.fullmatch(snippet)
+        if (not match or (match["label_size"] and match["ratio_size"])
+                or scale_ratio(match["ratio"]) != ratio):
+            continue
+        new = old.model_copy(update={"value": match["ratio"]})
+        after = new.model_dump()
+        if not _value_supported(after):
+            continue
+        result.specification_evidence[index] = new
+        result._evidence_repairs.append({
+            "reason": "Verified literal scale notation repair",
+            "before": before, "after": after,
+            "contentSha256": source["contentSha256"],
+        })
+
+
 def _list_text_positions(text):
     """Normalize only list presentation, retaining offsets into the literal source."""
     omitted = set()

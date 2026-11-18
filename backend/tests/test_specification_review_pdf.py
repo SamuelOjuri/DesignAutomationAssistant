@@ -168,6 +168,24 @@ def test_cached_translation_rebuilds_current_display_and_notes_without_model_wor
     assert updated.review_version == 2
 
 
+def test_size_change_cannot_publish_an_accepted_scales_old_cad_mapping():
+    accepted = source_with()["reviewSource"]["fields"]["Scale"]["proposal"]
+    accepted["display_value"] = "1:50@A1 1:100@A3"
+    accepted["cad_mapping"] = reviewer_cad_mapping("Scale", "1:50").model_dump()
+    source = source_with({
+        "Scale": {"operation": "accept_recommendation", "snapshot": accepted},
+        "Page Size": {"operation": "specify_value", "display_value": "ISO A3",
+                      "cad_mapping": reviewer_cad_mapping("Page Size", "ISO A3").model_dump()},
+    })
+
+    publication = prepare_specification_publication(source, client()[0])
+
+    assert source["review"]["field_provenance"]["Scale"]["requires_reconfirmation"]
+    assert publication.values.model_dump(by_alias=True)["Scale"] is None
+    assert pdf_values(publication)["Scale"] == "1:50@A1 1:100@A3"
+    assert "Scale" in publication.mapping_issues
+
+
 def test_source_level_issues_survive_unrelated_authoritative_edit():
     source = source_with({"Decking": {"operation": "specify_blank"}})
     source["reviewSource"]["source_issues"] = [{"source_id": "file:missing", "code": "unread", "detail": "Roof drawing could not be read"}]

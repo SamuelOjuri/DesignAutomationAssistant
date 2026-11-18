@@ -10,7 +10,7 @@ from backend.app.services.performance_specification_evidence import (
     resolve_email_evidence, resolve_request_notes,
 )
 from backend.app.services.specification_recovery import (
-    extraction_payload, repair_note_list_formatting, repair_template_markers,
+    extraction_payload, repair_literal_scale_citations, repair_note_list_formatting, repair_template_markers,
 )
 from backend.app.services.specification_semantics import (
     SpecificationEvidence, drawing_reference_key, scale_ratio, tp_reference_revision,
@@ -429,6 +429,45 @@ def test_scale_recovery_replaces_a_reformatted_ratio_with_its_literal_and_is_aud
     assert (repair["before"]["value"], repair["after"]["value"]) == ("1:50", "1/50")
 
 
+@pytest.mark.parametrize("snippet", ["scale: 1/50 @A1", "**Scale @ A1:** `1/50`"])
+def test_extraction_restores_literal_drawing_scale_without_model_recovery(snippet):
+    manifest = [source("asset:1:attachment:0", snippet)]
+    evidence = candidate("Scale", "1:50", snippet, scope="Roof 1")
+    initial = parameters(scale="1:50", specification_evidence=[evidence])
+    calls = []
+
+    def generate(model, prompt, config):
+        calls.append(prompt)
+        return SimpleNamespace(parsed=initial.model_dump())
+
+    result = LegacyGeminiClient("offline", generate_content=generate).extract_design_parameters_with_manifest(
+        "Synthetic roof plan", manifest,
+    )
+    assert len(calls) == 1
+    raw, _, issues = resolve_email_evidence(extraction_payload(result, manifest))
+    assert raw["Scale"] == "1/50" and not issues
+    repair, = result._evidence_repairs
+    assert repair["after"] == {**repair["before"], "value": "1/50"}
+    assert repair["contentSha256"] == manifest[0]["contentSha256"]
+
+
+@pytest.mark.parametrize("snippet,source_text", [
+    ("Fall: 1/50", "Fall: 1/50"),
+    ("Scale: 1/50 @A1 and 1/100 @A3", "Scale: 1/50 @A1 and 1/100 @A3"),
+    ("Scale @ A1: 1/50 @A3", "Scale @ A1: 1/50 @A3"),
+    ("Scale: 50/1", "Scale: 50/1"),
+    ("Scale: 1/500", "Scale: 1/500"),
+    ("Scale: 1/50 @A1", "Scale: 1/100 @A1"),
+])
+def test_literal_scale_repair_leaves_unsupported_claims_for_evidence_recovery(snippet, source_text):
+    initial = parameters(scale="1:50", specification_evidence=[candidate("Scale", "1:50", snippet)])
+    manifest = [source("asset:1:attachment:0", source_text)]
+    repair_literal_scale_citations(initial, manifest)
+    assert initial.specification_evidence[0].value == "1:50"
+    assert not initial._evidence_repairs
+    assert "Scale" in resolve_email_evidence(extraction_payload(initial, manifest))[2]
+
+
 @pytest.mark.parametrize("recovered", ["50/1", "1/500"])
 def test_scale_recovery_cannot_change_the_ratio(recovered):
     text = f"scale: {recovered} @ A1"
@@ -636,6 +675,49 @@ def test_spacing_variants_of_one_u_value_are_not_a_conflict():
     ])
     raw, _, issues = resolve_email_evidence(data)
     assert raw["Target U Value"] == "0.15 W/m\u00b2K" and "Target U Value" not in issues
+
+
+@pytest.mark.parametrize("scopes", [(), ("Plot 10",)])
+def test_verified_target_u_value_matches_same_number_with_units_without_merging_other_fields(scopes):
+    email = "Target U-value is 0.15 W/m\u00b2K for heated areas."
+    plan = "Main roof: 0.14 W/m\u00b2K achieved (0.15 target)."
+    plot_one = "Drawing: TP18245_26.01 - C\nMembrane: three-layer felt"
+    plot_ten = "Drawing: TP18245_26.10 - C\nMembrane: bitumen"
+    ids = [f"asset:1:attachment:{i}" for i in range(4)]
+    manifest = [source(source_id, text) for source_id, text in zip(ids, (email, plan, plot_one, plot_ten))]
+    data = extraction(manifest, [
+        candidate("Target U Value", "0.15 W/m\u00b2K", email, source_id=ids[0]),
+        candidate("Target U Value", "0.15", plan, source_id=ids[1], scope="Plot 10"),
+        candidate("Target U Value", "0.14 W/m\u00b2K", plan, source_id=ids[1], scope="Plot 10", role="achieved"),
+        candidate("Membrane", "three-layer felt", plot_one, source_id=ids[2], scope="Plot 1"),
+        candidate("Membrane", "bitumen", plot_ten, source_id=ids[3], scope="Plot 10"),
+        candidate("Drawing Reference", "TP18245_26.01 - C", plot_one, source_id=ids[2], scope="Plot 1"),
+        candidate("Drawing Reference", "TP18245_26.10 - C", plot_ten, source_id=ids[3], scope="Plot 10"),
+    ])
+
+    raw, provenance, issues = resolve_email_evidence(data, scopes)
+
+    assert "Target U Value" not in issues
+    assert raw["Target U Value"] == ("0.15" if scopes else "0.15 W/m\u00b2K")
+    assert [(e["value"], e["scope"], e["snippet"]) for e in provenance["Target U Value"]["candidates"]] == [
+        ("0.15 W/m\u00b2K", None, email), ("0.15", "Plot 10", plan),
+    ]
+    if not scopes:
+        assert issues["Membrane"] == VALUE_CONFLICT
+        assert issues["Drawing Reference"] == VALUE_CONFLICT
+
+
+@pytest.mark.parametrize("other", ["0.14 W/m\u00b2K", "0.15 W/mK", "0.15 W/m\u00b2K at 30 mm"])
+def test_distinct_or_qualified_u_value_claims_remain_in_conflict(other):
+    text = "Design targets: 0.15 or " + other
+    data = extraction([source("asset:1:attachment:0", text)], [
+        candidate("Target U Value", "0.15", text), candidate("Target U Value", other, text),
+    ])
+
+    raw, provenance, issues = resolve_email_evidence(data)
+
+    assert raw["Target U Value"] is None and issues["Target U Value"] == VALUE_CONFLICT
+    assert [e["value"] for e in provenance["Target U Value"]["candidates"]] == ["0.15", other]
 
 
 def test_u_value_recovery_may_restate_unit_spacing_and_is_audited():

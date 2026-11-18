@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import json
+import logging
 from typing import Any, Callable, Sequence
 
 from google.genai import types
@@ -13,7 +14,7 @@ from pydantic import ValidationError
 from ...gemini_models import ThinkingLevel, validate_thinking_level
 from ..llm_interface import gemini_api_with_retry
 from ..gemini_schema import gemini_response_schema
-from ..gemini_requests import GeminiJSONRequester, request_gemini
+from ..gemini_requests import GeminiJSONRequester, GeminiRequestFailure, request_gemini
 from .parameter_extraction import (
     DesignParameterExtraction,
     PARAMETER_EXTRACTION_PROMPT,
@@ -33,6 +34,7 @@ from ..source_transcription_cache import cached_transcription
 
 
 GenerateContent = Callable[[str, Any, types.GenerateContentConfig], Any]
+logger = logging.getLogger(__name__)
 
 
 def _default_generate_content(
@@ -85,7 +87,7 @@ class LegacyGeminiClient:
             drop_blank_evidence, evidence_diagnostics, extraction_payload, merge_recovery,
             repair_note_list_formatting, repair_note_prose_dashes, repair_image_company_citations,
             repair_message_dates, bound_verified_request_notes,
-            repair_template_markers,
+            repair_literal_scale_citations, repair_template_markers,
         )
         from ..performance_specification_evidence import (
             PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNCONFIRMED_REFERENCE,
@@ -194,6 +196,7 @@ class LegacyGeminiClient:
             repair_message_dates(result, source_manifest)
             repair_image_company_citations(result, source_manifest)
             repair_template_markers(result, source_manifest)
+            repair_literal_scale_citations(result, source_manifest)
             repair_note_list_formatting(result, source_manifest)
             repair_note_prose_dashes(result, source_manifest)
             _, diagnostics = evidence_diagnostics(result, source_manifest)
@@ -239,6 +242,7 @@ class LegacyGeminiClient:
                 repair_message_dates(recovery, source_manifest)
                 repair_image_company_citations(recovery, source_manifest)
                 repair_template_markers(recovery, source_manifest)
+                repair_literal_scale_citations(recovery, source_manifest)
                 try:
                     merge_recovery(result, recovery, source_manifest)
                 except ValidationError as exc:
@@ -328,11 +332,32 @@ class LegacyGeminiClient:
         total_size = sum(len(pdf["content"]) for pdf in pdf_files)
         return total_size <= 100 * 1024 * 1024 and 1 < len(pdf_files) <= 3
 
-    @cached_transcription("pdf")
     def process_pdf(self, pdf_content: bytes, filename: str) -> str:
+        try:
+            return self._process_pdf_with_detail_views(pdf_content, filename)
+        except GeminiRequestFailure as exc:
+            details = exc.details
+            attempted_bytes = details.get("input_bytes")
+            if (details.get("stage") != "pdf_text" or details.get("error_type") != "ReadTimeout"
+                    or exc.http_status is not None or details.get("origin") is not None
+                    or not isinstance(attempted_bytes, int) or attempted_bytes <= len(pdf_content)):
+                raise
+            logger.warning("PDF detail transcription timed out. Retrying full original stage=pdf_text model=%s "
+                           "original_bytes=%d detail_bytes=%d",
+                           self.model, len(pdf_content), attempted_bytes - len(pdf_content))
+            # Keep this text out of the detail-enhanced cache. Future reads can
+            # still benefit from the optional magnified views when they are available.
+            return self._transcribe_pdf(pdf_content)
+
+    @cached_transcription("pdf")
+    def _process_pdf_with_detail_views(self, pdf_content: bytes, filename: str) -> str:
         from .pdf_detail_views import pdf_detail_views
 
         detail_content, labels = pdf_detail_views(pdf_content)
+        return self._transcribe_pdf(pdf_content, detail_content=detail_content, labels=labels)
+
+    def _transcribe_pdf(self, pdf_content: bytes, *, detail_content: bytes = b"",
+                        labels: Sequence[str] = ()) -> str:
         parts = [types.Part.from_bytes(data=pdf_content, mime_type="application/pdf")]
         if detail_content:
             parts.extend([

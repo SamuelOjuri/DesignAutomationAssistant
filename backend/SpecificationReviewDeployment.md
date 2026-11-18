@@ -393,12 +393,13 @@ preview PDF, matched-project report and active chat/ingestion still work.
 
 ## 12. Inspect diagnostics and decide whether to expand
 
-Run the read-only [diagnostic SQL](scripts/diagnose_performance_specifications.sql)
-with `scope_settings` set to the deployed board/group IDs and full expected
-pipeline version. Check requested/completed generations, leases, last errors,
-review/source/decision identities, current artifact status/asset and exact
-approval matching. SQL observations do not replace a live Monday eligibility
-or final-PDF check.
+Generate the read-only [diagnostic SQL](scripts/diagnose_performance_specifications.sql)
+with `python -m backend.scripts.export_specification_live_items --sql` in the
+worker environment. Run the result with `scope_settings` set to the deployed
+board/group IDs and full expected pipeline version. The Monday snapshot determines
+the rows and group totals. Check requested/completed generations, leases, last
+errors, review identities, current artifacts and approval matching. Confirm live
+Monday eligibility and the final PDF before approving.
 
 Record the two successful end-to-end journeys, provenance and lifecycle results,
 source waiting/failures, regeneration latency and any unresolved mapping issues.

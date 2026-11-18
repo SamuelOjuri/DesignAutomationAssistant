@@ -87,6 +87,17 @@ def _comparable_value(field, value):
     return value
 
 
+def _resolved_u_value_number(field, value):
+    """Compare a verified, unqualified target with its optional standard unit."""
+    if field not in U_VALUE_FIELDS:
+        return None
+    match = re.fullmatch(
+        r"([0-9]+(?:[.,][0-9]+)?)\s*w\s*/\s*m\s*(?:\u00b2|\^?2)\s*(?:[.\u00b7]\s*)?k",
+        _normal(value),
+    )
+    return match[1] if match else None
+
+
 def _contains_reference(value, snippet):
     # The snippet itself is verified literally against its source first; only
     # the drawing-reference value may read a typographic dash as '-'.
@@ -489,7 +500,9 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
             cutoff = max(e["observedAt"] for e in matched) if all(e["observedAt"] for e in matched) else None
             later_general = [e for e in general if cutoff and e["observedAt"] and e["observedAt"] > cutoff]
             options = later_general or matched
-            if any(e["observedAt"] is None and _normal(e["value"]) not in {_normal(m["value"]) for m in matched} for e in general):
+            matched_values = {_resolved_u_value_number(label, e["value"]) or _normal(e["value"]) for e in matched}
+            if any(e["observedAt"] is None and (_resolved_u_value_number(label, e["value"]) or _normal(e["value"]))
+                   not in matched_values for e in general):
                 issues[label] = UNDATED_SCOPE_CONFLICT
         by_scope = defaultdict(list)
         for evidence in options:
@@ -517,7 +530,10 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         current = [e for e in current if not any(
             _normal(e["value"]) != _normal(other["value"]) and _equivalent_description(e, other)
             for other in current)]
-        distinct = {_excerpt_normal(_comparable_value(label, e["value"])) for e in current}
+        distinct = {
+            _resolved_u_value_number(label, e["value"]) or _excerpt_normal(_comparable_value(label, e["value"]))
+            for e in current
+        }
         if len(distinct) > 1:
             issues[label] = VALUE_CONFLICT
         selected = current[0] if len(distinct) == 1 else None

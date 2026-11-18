@@ -1005,6 +1005,88 @@ def list_item_ids_in_groups(
     }
 
 
+BOARD_GROUP_ITEM_PAGE_FIELDS = """
+    cursor
+    items {
+        id
+        state
+        board { id }
+        group { id title }
+    }
+"""
+
+BOARD_GROUP_ITEM_PAGE_QUERY = f"""
+query ($boardIds: [ID!]!, $limit: Int!) {{
+    boards(ids: $boardIds) {{
+        id
+        items_page(limit: $limit) {{ {BOARD_GROUP_ITEM_PAGE_FIELDS} }}
+    }}
+}}
+"""
+
+NEXT_BOARD_GROUP_ITEM_PAGE_QUERY = f"""
+query ($cursor: String!, $limit: Int!) {{
+    next_items_page(cursor: $cursor, limit: $limit) {{ {BOARD_GROUP_ITEM_PAGE_FIELDS} }}
+}}
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class MondayBoardGroupItem:
+    item_id: str
+    group_id: str
+    group_title: str
+
+
+def fetch_live_board_group_items(access_token: str, board_id: str) -> list[MondayBoardGroupItem]:
+    """Read every page of active board items with group membership, or fail."""
+    board_id = _normalize_positive_decimal_id(board_id, "board ID")
+    limit = 500
+    payload = monday_graphql_request(access_token, BOARD_GROUP_ITEM_PAGE_QUERY,
+        {"boardIds": [board_id], "limit": limit}, timeout=20)
+    data = _require_mapping(payload, "data", context="board inventory")
+    boards = data.get("boards")
+    if not isinstance(boards, list) or len(boards) != 1 or not isinstance(boards[0], Mapping):
+        raise MondayReadContractError(detail="monday board inventory board is missing or ambiguous")
+    if _normalize_positive_decimal_id(boards[0].get("id"), "board ID") != board_id:
+        raise MondayReadContractError(detail="monday board inventory returned another board")
+    page = boards[0].get("items_page")
+
+    active_items: list[MondayBoardGroupItem] = []
+    seen_items: set[str] = set()
+    seen_cursors: set[str] = set()
+    while True:
+        if not isinstance(page, Mapping) or not isinstance(page.get("items"), list) or "cursor" not in page:
+            raise MondayReadContractError(detail="monday board inventory page is incomplete")
+        for item in page["items"]:
+            if not isinstance(item, Mapping) or item.get("state") not in ("active", "archived", "deleted"):
+                raise MondayReadContractError(detail="monday board inventory item is malformed")
+            item_id = _normalize_positive_decimal_id(item.get("id"), "inventory item ID")
+            if item_id in seen_items:
+                raise MondayReadContractError(detail="monday board inventory returned a repeated item")
+            seen_items.add(item_id)
+            if item["state"] != "active":
+                continue
+            board = _require_mapping(item, "board", context="board inventory item")
+            group = _require_mapping(item, "group", context="board inventory item")
+            group_id, group_title = group.get("id"), group.get("title")
+            if (_normalize_positive_decimal_id(board.get("id"), "item board ID") != board_id
+                    or not isinstance(group_id, str) or not group_id.strip()
+                    or not isinstance(group_title, str)):
+                raise MondayReadContractError(detail="monday board inventory item membership is malformed")
+            active_items.append(MondayBoardGroupItem(item_id, group_id, group_title))
+
+        cursor = page["cursor"]
+        if cursor is None:
+            return active_items
+        if not isinstance(cursor, str) or not cursor.strip() or cursor in seen_cursors:
+            raise MondayReadContractError(detail="monday board inventory page cursor is malformed or repeated")
+        seen_cursors.add(cursor)
+        payload = monday_graphql_request(access_token, NEXT_BOARD_GROUP_ITEM_PAGE_QUERY,
+            {"cursor": cursor, "limit": limit}, timeout=20)
+        page = _require_mapping(payload, "data", context="board inventory").get("next_items_page")
+
+
 SOURCE_REVISION_INPUTS_QUERY = """
 query ($itemIds: [ID!]) {
     items(ids: $itemIds) {

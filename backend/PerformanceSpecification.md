@@ -692,12 +692,25 @@ venv/Scripts/python.exe -m backend.app.services.performance_specification --once
 ```
 
 Use [the read-only diagnostic query](scripts/diagnose_performance_specifications.sql)
-for Landing Zone items, missing Task rows and retained out-of-scope specifications.
-Set its `scope_settings` CTE from the deployed board/group settings and supply the
-full expected pipeline identity when checking upgrades. It reports extraction and
-artifact freshness, queue state, durable review identity and approval history.
-Stored identity matches are diagnostics; live scope/source authorization and exact
-approval checks remain required before a specification can be complete.
+to inspect items currently visible in the Monday board's groups. From the
+repository root, generate a fresh query with the Monday ingestion credential.
+
+```powershell
+venv/Scripts/python.exe -m backend.scripts.export_specification_live_items --sql | Set-Clipboard
+```
+
+Paste the generated query into your SQL editor. The snapshot determines membership
+and group totals, including for items with no Task or design registration. The
+query excludes the Completed Folder. PostgreSQL supplies the stored extraction,
+review and artifact data for the remaining items.
+Set `scope_settings` from the deployed board/group settings and supply the
+full expected pipeline identity when checking upgrades. Set `processing_identity`
+to the fingerprint returned by `monday_item_availability.processing_identity()` in
+the deployed worker environment for worker-specific Monday observations. A blank
+selector (`NULL`) uses the latest stored observation across identities. The query
+reports extraction and artifact freshness, queue state, prepared drafts, published
+artifacts and approval history. Approval still requires live scope, authorization
+and exact artifact checks.
 
 ## Recovery and CAD discovery
 

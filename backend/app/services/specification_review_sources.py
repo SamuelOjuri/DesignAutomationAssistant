@@ -14,7 +14,9 @@ from .crm_accounts import (
     ACCOUNT_NAME_COLUMN_ID, MATCH_RATIONALES, normalize_account_name, requester_identity, resolve_requester_account,
 )
 from .monday_metadata_fields import ACCOUNTS_BOARD_ID
-from .performance_specification_contract import SOURCE_REVIEW_DETAILS, missing, reviewer_cad_mapping
+from .performance_specification_contract import (
+    SOURCE_REVIEW_DETAILS, iso_cad_paper_size, missing, reviewer_cad_mapping, scale_mapping_for_paper_size,
+)
 from .performance_specification_evidence import (
     PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
     UNCONFIRMED_REFERENCE, resolve_baseline_drawing_identity, resolve_email_evidence, resolve_request_notes,
@@ -38,6 +40,21 @@ def _citations(provenance):
     candidates = provenance.get("candidates", [])
     return [EmailCitation(source_id=entry["source_id"], excerpt=entry["snippet"],
         location=entry["location"], scope=entry.get("scope")) for entry in candidates]
+
+
+def _verified_scale_paper_size(sources, issues, manifest):
+    if "Page Size" in issues:
+        return None
+    scale = sources["Scale"].get("selected")
+    size = sources["Page Size"].get("selected")
+    if not scale or not size or not scale["source_id"] or not scale.get("contentSha256"):
+        return None
+    if any(scale.get(key) != size.get(key) for key in ("source_id", "contentSha256", "scope")):
+        return None
+    if not any(document["sourceId"] == scale["source_id"] and document["sourceType"] == "attachment"
+               for document in manifest):
+        return None
+    return size["value"]
 
 
 def _email_facts(provenance):
@@ -385,6 +402,8 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None, p
 
     fields = {}
     automatic_sources = {}
+    automatic_scale_mapping = None
+    paired_paper_size = None
     for label in FIELD_NAMES:
         raw = email_raw.get(label)
         provenance = deepcopy(email_sources[label])
@@ -445,6 +464,18 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None, p
         mapping = (CADMapping(status="not_applicable")
             if proposal_source in {"unassigned", "default_blank", "unavailable"}
             else reviewer_cad_mapping(label, value))
+        if label == "Scale" and value and not issues:
+            verified_size = (_verified_scale_paper_size(email_sources, email_issues, extraction["sourceManifest"])
+                             if proposal_source == "email_context" else None)
+            automatic_scale_mapping = scale_mapping_for_paper_size(value, verified_size)
+            if automatic_scale_mapping is not None:
+                mapping = automatic_scale_mapping
+                if mapping.status == "mapped":
+                    rationale = f"CAD scale matched to verified paper size {verified_size}"
+                    paired_paper_size = iso_cad_paper_size(verified_size)
+                else:
+                    issues.append(FieldIssue(code="scale_paper_size_review",
+                        detail="Confirm the intended scale and paper size on the same drawing"))
         proposal = AutomaticProposal(proposal_id=review_digest({"label": label, "source": proposal_source,
             "value": value, "evidence": {key: [entry.model_dump(mode="json") for entry in entries] for key, entries in evidence.items()}}),
             display_value=value, source=proposal_source, rationale=rationale, cad_mapping=mapping, **evidence)
@@ -457,6 +488,11 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None, p
             applicability="unassigned" if proposal_source == "unassigned" else "not_applicable" if proposal_source == "default_blank"
                 else "unresolved" if proposal_source == "unavailable" or issues else "applicable", issues=issues)
         automatic_sources[label] = provenance
+
+    if paired_paper_size is not None:
+        # Keep the verified paper size and scale together in CAD output.
+        page_size = fields["Page Size"].proposal
+        page_size.cad_mapping = reviewer_cad_mapping("Page Size", paired_paper_size)
 
     if request_type == "amendment":
         reference = fields["Drawing Reference"].proposal
@@ -523,6 +559,11 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None, p
                 observedRevision=crm_values["Revision"].value if "Revision" in crm_values else email_raw.get("Revision"))
         if sources.issues and saved is None:
             effective_issues[label] = "; ".join(issue.detail for issue in sources.issues)
+    if (automatic_scale_mapping is not None and automatic_scale_mapping.status == "mapped"
+            and "Page Size" in state.field_decisions and "Scale" not in state.field_decisions):
+        effective_scale = scale_mapping_for_paper_size(effective_raw["Scale"], effective_raw["Page Size"])
+        if effective_scale is None or effective_scale.value != automatic_scale_mapping.value:
+            effective_issues["Scale"] = "Confirm the drawing scale for the reviewer-selected paper size"
     result = {"raw": effective_raw, "sources": effective_sources, "issues": effective_issues,
         "crmReads": crm_reads, "sourceManifest": extraction["sourceManifest"],
         "requestContext": request_context_summary(select_client_request(extraction["sourceManifest"])),

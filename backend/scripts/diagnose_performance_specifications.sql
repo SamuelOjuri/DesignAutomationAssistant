@@ -1,15 +1,24 @@
 -- Read-only specification/review diagnostics, requiring migration 0022 or later.
+-- From the repository root, run:
+--   venv/Scripts/python.exe -m backend.scripts.export_specification_live_items --sql
+-- Run the generated SQL. For JSON input, run the exporter without --sql and
+-- paste the JSON in place of {} between the $monday_snapshot$ delimiters below.
+-- The supplied snapshot determines membership. {} returns no rows.
+-- Refresh the snapshot before each run. It covers active items visible to the
+-- Monday credential across the board. The query excludes the Completed Folder.
 -- Set scope_settings from the deployed DESIGN_PROCESSING_BOARD_ID,
 -- DESIGN_PROCESSING_LANDING_GROUP_ID, AUTO_SYNC_ACTIVE_GROUP_IDS and
 -- AUTO_SYNC_COMPLETED_GROUP_ID. Supply the
 -- full deployed settings.design_processing_pipeline_version when checking upgrades;
 -- NULL deliberately reports that the target pipeline has not been verified.
+-- For worker-specific availability, set processing_identity to the fingerprint
+-- returned by backend.app.services.monday_item_availability.processing_identity()
+-- in that worker's environment. NULL shows the latest stored observation across
+-- processing identities. Do not put the Monday access token in this query.
 -- Version settings below match the source/parser/evidence constants in this release.
--- Base identities include registered design items and reconciliation observations,
--- even with an excluded Task or no Task. Retained specification records outside
--- eligible groups are included to diagnose cancelled work/history. Unknown scope is
--- shown explicitly. This query never establishes live Monday eligibility/completion.
--- No mode/allowlist filter: inspect operational configuration before enqueueing work.
+-- Task, worker availability and reconciliation data are stored diagnostics for
+-- the live membership. Publication mode labels describe the group policy.
+-- Operational settings and permissions also govern publication and completion.
 -- Some legacy extraction JSON contains escaped U+0000, which PostgreSQL cannot
 -- decode. Flag these payloads and skip their JSON reads; retain the item/status.
 -- Pipeline identities must match in full, not only their output-vN suffix.
@@ -19,11 +28,6 @@
 -- Generations count refresh notifications, not separate queued jobs or PDFs.
 -- The design-job lease expiry below assumes its default 3600-second timeout;
 -- specification_lease_until is the persisted specification worker lease deadline.
--- Monday lookups come from the lifecycle and design reconciliation checks. If the
--- latest lookup returned no item (deleted and purged, or hidden from the worker),
--- extraction_diagnostic is monday_item_unavailable. Confirm the deletion in the
--- board activity log, then run backend.app.services.monday_item_retirement; retired
--- items retain history here, but normal discovery must not revive retired work.
 WITH scope_settings AS (
     SELECT
         '1882196103'::text AS board_id,
@@ -31,62 +35,105 @@ WITH scope_settings AS (
         ARRAY['topics','group_mkpbs35c','group_mkqbx92r']::text[] AS active_group_ids,
         'group_mkpbb3tx'::text AS completed_group_id,
         NULL::text AS expected_pipeline_version,
+        NULL::text AS processing_identity,
         '3'::text AS expected_evidence_version,
         'specification-active-review-v2'::text AS expected_scope_policy_version,
         'performance-specification-v5'::text AS expected_publication_version,
         'specification-review-source-v1'::text AS expected_source_policy_version,
         'specification-reference-v1'::text AS expected_reference_parser_version
 ),
+monday_snapshot AS (
+    SELECT $monday_snapshot${}$monday_snapshot$::jsonb AS payload
+),
+live_items AS (
+    SELECT DISTINCT cfg.board_id, snapshot.observed_at, item.item_id, item.group_id, item.group_title
+    FROM scope_settings AS cfg
+    CROSS JOIN monday_snapshot AS input
+    CROSS JOIN LATERAL jsonb_to_record(input.payload)
+        AS snapshot(board_id text, observed_at timestamptz, items jsonb)
+    CROSS JOIN LATERAL jsonb_to_recordset(snapshot.items)
+        AS item(item_id text, group_id text, group_title text)
+    WHERE snapshot.board_id = cfg.board_id
+      AND snapshot.observed_at IS NOT NULL
+      AND item.group_id IS DISTINCT FROM cfg.completed_group_id
+      AND item.item_id ~ '^[1-9][0-9]*$'
+      AND NULLIF(btrim(item.group_id), '') IS NOT NULL
+),
 latest_tasks AS (
-    -- Keep one current observation per board/item even if account keys differ.
+    -- Keep one Task per live item even if account keys differ.
     SELECT DISTINCT ON (task.board_id, task.item_id)
         task.board_id,
         task.item_id,
         task.source_group_id,
         task.source_group_title,
-        task.auto_sync_state,
-        task.updated_at
+        task.auto_sync_state
     FROM tasks AS task
-    JOIN scope_settings AS cfg ON cfg.board_id = task.board_id
+    JOIN live_items AS live ON live.board_id = task.board_id AND live.item_id = task.item_id
     ORDER BY task.board_id, task.item_id, task.updated_at DESC,
         task.external_task_key
 ),
-tracked_items AS (
-    SELECT i.board_id, i.item_id FROM design_processing_items AS i
-    JOIN scope_settings AS cfg ON cfg.board_id = i.board_id
-    UNION
-    SELECT s.board_id, s.item_id FROM performance_specifications AS s
-    JOIN scope_settings AS cfg ON cfg.board_id = s.board_id
-    UNION
-    SELECT c.board_id, c.item_id FROM design_processing_reconciliation_checks AS c
-    JOIN scope_settings AS cfg ON cfg.board_id = c.board_id
-    UNION
-    SELECT t.board_id, t.item_id FROM latest_tasks AS t
-    JOIN scope_settings AS cfg ON cfg.board_id = t.board_id
-    WHERE t.source_group_id = cfg.landing_group_id OR t.source_group_id = ANY(cfg.active_group_ids)
+latest_availability AS (
+    SELECT DISTINCT ON (observation.board_id, observation.item_id)
+        observation.board_id,
+        observation.item_id,
+        observation.state,
+        observation.reason,
+        observation.actual_board_id,
+        observation.actual_group_id,
+        observation.actual_item_state,
+        observation.last_attempted_at,
+        observation.last_observed_at,
+        observation.next_check_at,
+        observation.probe_until
+    FROM monday_item_availability AS observation
+    JOIN live_items AS live ON live.board_id = observation.board_id AND live.item_id = observation.item_id
+    JOIN scope_settings AS cfg ON cfg.board_id = observation.board_id
+    WHERE cfg.processing_identity IS NULL OR observation.processing_identity = cfg.processing_identity
+    ORDER BY observation.board_id, observation.item_id,
+        GREATEST(observation.last_attempted_at, observation.last_observed_at) DESC NULLS LAST,
+        observation.processing_identity
 )
 SELECT
     CURRENT_TIMESTAMP AS observed_at,
+    ids.observed_at AS monday_snapshot_observed_at,
     ids.board_id,
     ids.item_id,
-    observed_scope.group_id AS last_observed_group_id,
-    observed_scope.checked_at AS scope_observed_at,
+    ids.group_id AS live_group_id,
+    ids.group_title AS live_group_title,
+    COUNT(*) OVER (PARTITION BY ids.group_id) AS live_group_item_count,
     CASE
-        WHEN observed_scope.group_id = cfg.completed_group_id THEN 'completed_folder'
-        WHEN observed_scope.group_id = cfg.landing_group_id THEN 'landing_zone_check_live_lifecycle'
-        WHEN observed_scope.group_id = ANY(cfg.active_group_ids) THEN 'active_group_manual_publication'
-        WHEN observed_scope.group_id IS NULL THEN 'scope_unknown'
-        ELSE 'outside_specification_groups_retained'
-    END AS stored_scope_diagnostic,
+        WHEN ids.group_id = cfg.landing_group_id THEN 'landing_zone_automatic_publication'
+        WHEN ids.group_id = ANY(cfg.active_group_ids) THEN 'active_group_manual_publication'
+        ELSE 'outside_specification_groups'
+    END AS live_scope_diagnostic,
     s.prepared_revision,
+    draft.status AS prepared_artifact_status,
+    draft.source_json->'review'->>'publication_identity' AS prepared_publication_identity,
     s.requested_publication_revision,
     t.source_group_id,
     t.source_group_title,
     t.auto_sync_state AS task_auto_sync_state,
     i.state AS design_state,
+    availability.state AS monday_availability_state,
+    availability.actual_board_id AS monday_observed_board_id,
+    availability.actual_group_id AS monday_observed_group_id,
+    availability.actual_item_state AS monday_observed_item_state,
+    availability.next_check_at AS monday_availability_next_check_at,
+    availability.probe_until AS monday_availability_probe_until,
+    (cfg.processing_identity IS NOT NULL) AS monday_availability_identity_configured,
+    monday_lookup.source AS monday_lookup_source,
     monday_lookup.outcome AS monday_latest_lookup_outcome,
-    GREATEST(lifecycle.last_attempted_at, design_lookup.last_attempted_at) AS monday_last_lookup_at,
-    GREATEST(lifecycle.last_checked_at, design_lookup.last_checked_at) AS monday_last_seen_at,
+    monday_lookup.reason AS monday_lookup_reason,
+    monday_lookup.attempted_at AS monday_last_lookup_at,
+    CASE
+        WHEN monday_lookup.outcome IN ('source_unavailable', 'unavailable') THEN 'monday_item_unavailable'
+        WHEN monday_lookup.outcome IN ('archived', 'deleted', 'out_of_board', 'retired')
+            THEN 'monday_item_' || monday_lookup.outcome
+    END AS stored_monday_diagnostic,
+    GREATEST(
+        CASE WHEN availability.state <> 'retired' THEN availability.last_observed_at END,
+        lifecycle.last_checked_at, active_lookup.last_checked_at, design_lookup.last_checked_at
+    ) AS monday_last_seen_at,
     s.review_json->'source' AS review_source,
     i.latest_desired_input_revision,
     i.latest_analyzed_input_revision,
@@ -98,8 +145,6 @@ SELECT
     (i.extracted_parameters_json IS NOT NULL AND extraction.payload IS NULL)
         AS extraction_json_has_null_escape,
     CASE
-        WHEN monday_lookup.outcome IN ('source_unavailable', 'unavailable')
-            THEN 'monday_item_unavailable'
         WHEN i.item_id IS NULL THEN 'item_not_registered'
         WHEN i.extracted_parameters_json IS NOT NULL AND extraction.payload IS NULL
             THEN 'extraction_payload_contains_null_character'
@@ -143,19 +188,25 @@ SELECT
     s.lease_until AS specification_lease_until,
     s.attempt_count AS specification_attempt_count,
     s.review_json->>'status' AS review_status,
+    s.review_json->>'reason' AS review_reason,
     s.review_json->'issues' AS review_issues,
     s.review_json->'sourceReviews' AS review_source_reviews,
     s.last_error AS specification_last_error,
     s.current_revision,
     s.source_json->>'scopePolicy' AS last_verified_scope_policy,
     s.source_json->>'publicationVersion' AS last_verified_publication_version,
+    s.source_json->>'extractionPipeline' AS last_verified_extraction_pipeline,
     CASE
         WHEN s.item_id IS NULL THEN 'not_discovered'
         WHEN s.source_json->>'scopePolicy' IS DISTINCT FROM cfg.expected_scope_policy_version
           OR s.source_json->>'publicationVersion' IS DISTINCT FROM cfg.expected_publication_version
           OR s.source_json->>'sourcePolicyVersion' IS DISTINCT FROM cfg.expected_source_policy_version
           OR s.source_json->>'referenceParserVersion' IS DISTINCT FROM cfg.expected_reference_parser_version
+          OR NULLIF(s.source_json->>'extractionPipeline', '') IS NULL
+          OR (cfg.expected_pipeline_version IS NOT NULL
+              AND s.source_json->>'extractionPipeline' IS DISTINCT FROM cfg.expected_pipeline_version)
             THEN 'refresh_policy_obsolete'
+        WHEN cfg.expected_pipeline_version IS NULL THEN 'target_pipeline_not_supplied_check_live_sources'
         ELSE 'stored_refresh_policy_current_check_live_sources'
     END AS refresh_policy_diagnostic,
     a.status AS current_artifact_status,
@@ -167,13 +218,25 @@ SELECT
     CASE
         WHEN s.item_id IS NULL THEN 'not_discovered'
         WHEN a.revision IS NULL THEN 'no_current_published_artifact'
-        WHEN a.source_json->>'sourcePolicyVersion'
+        WHEN NULLIF(a.source_json->>'emailRevision', '') IS NULL
+          OR NULLIF(a.source_json->>'extractionPipeline', '') IS NULL THEN 'artifact_source_identity_missing'
+        WHEN a.source_json->>'publicationVersion' IS DISTINCT FROM cfg.expected_publication_version
+          OR a.source_json->>'sourcePolicyVersion'
                 IS DISTINCT FROM cfg.expected_source_policy_version
           OR a.source_json->>'referenceParserVersion'
                 IS DISTINCT FROM cfg.expected_reference_parser_version THEN 'artifact_policy_obsolete'
+        WHEN (cfg.expected_pipeline_version IS NOT NULL
+              AND a.source_json->>'extractionPipeline' IS DISTINCT FROM cfg.expected_pipeline_version)
+          OR (i.latest_desired_input_revision IS NOT NULL AND (
+                  a.source_json->>'emailRevision' IS DISTINCT FROM i.latest_desired_input_revision
+               OR a.source_json->>'extractionPipeline' IS DISTINCT FROM i.latest_desired_pipeline_version))
+            THEN 'artifact_extraction_obsolete'
+        WHEN i.latest_desired_input_revision IS NULL OR i.latest_analyzed_input_revision IS NULL
+            THEN 'artifact_extraction_identity_unknown'
         WHEN a.source_json->>'emailRevision' IS DISTINCT FROM i.latest_analyzed_input_revision
           OR a.source_json->>'extractionPipeline' IS DISTINCT FROM i.latest_analyzed_pipeline_version
             THEN 'artifact_extraction_obsolete'
+        WHEN cfg.expected_pipeline_version IS NULL THEN 'target_pipeline_not_supplied_check_live_sources'
         ELSE 'stored_artifact_identity_current_check_live_sources'
     END AS artifact_freshness_diagnostic,
     a.filename,
@@ -199,6 +262,7 @@ SELECT
     approval.approved_at,
     COALESCE(
         approval.artifact_revision = s.current_revision
+        AND (s.prepared_revision IS NULL OR s.prepared_revision = s.current_revision)
         AND approval.review_version = r.review_version
         AND approval.source_fingerprint = r.source_fingerprint
         AND approval.decision_digest = r.decision_digest
@@ -206,8 +270,10 @@ SELECT
         AND a.source_json->'review'->>'decision_digest' = r.decision_digest
         AND a.source_json->'review'->'source_identity'->>'source_fingerprint' = r.source_fingerprint
         AND a.source_json->'review'->'source_identity'->>'extraction_identity' = approval.extraction_identity
+        AND r.source_identity_json->>'extraction_identity' = approval.extraction_identity
         AND a.source_json->'review'->>'publication_identity' = r.desired_publication_identity
-        AND a.status = 'published' AND a.monday_asset_id IS NOT NULL
+        AND a.status = 'published' AND NULLIF(a.monday_asset_id, '') IS NOT NULL
+        AND NULLIF(a.content_sha256, '') IS NOT NULL AND a.size_bytes > 0
         AND s.requested_generation = s.completed_generation AND s.lease_token IS NULL,
         FALSE
     ) AS approval_matches_stored_identity,
@@ -216,36 +282,44 @@ SELECT
     artifacts.artifact_count,
     artifacts.rendered_count,
     artifacts.published_count
-FROM tracked_items AS ids
+FROM live_items AS ids
 JOIN scope_settings AS cfg ON cfg.board_id = ids.board_id
 LEFT JOIN latest_tasks AS t ON t.board_id = ids.board_id AND t.item_id = ids.item_id
 LEFT JOIN design_processing_items AS i
     ON i.board_id = ids.board_id AND i.item_id = ids.item_id
+LEFT JOIN latest_availability AS availability
+    ON availability.board_id = ids.board_id AND availability.item_id = ids.item_id
 LEFT JOIN auto_sync_reconciliation_checks AS lifecycle
     ON lifecycle.board_id = ids.board_id
    AND lifecycle.item_id = ids.item_id
    AND lifecycle.scope = 'completed_transition'
+LEFT JOIN auto_sync_reconciliation_checks AS active_lookup
+    ON active_lookup.board_id = ids.board_id
+   AND active_lookup.item_id = ids.item_id
+   AND active_lookup.scope = 'active'
 LEFT JOIN design_processing_reconciliation_checks AS design_lookup
     ON design_lookup.board_id = ids.board_id AND design_lookup.item_id = ids.item_id
 LEFT JOIN LATERAL (
-    SELECT observation.group_id, observation.checked_at
+    -- Shared availability is authoritative for its processing identity. Its
+    -- observation can predate the bookkeeping timestamp on a legacy check.
+    SELECT observation.source, observation.outcome, observation.reason, observation.attempted_at
     FROM (VALUES
-        (design_lookup.last_group_id, design_lookup.last_checked_at),
-        (t.source_group_id, t.updated_at)
-    ) AS observation(group_id, checked_at)
-    WHERE observation.group_id IS NOT NULL AND observation.checked_at IS NOT NULL
-    ORDER BY observation.checked_at DESC
-    LIMIT 1
-) AS observed_scope ON TRUE
-LEFT JOIN LATERAL (
-    -- The most recent lookup by either checker reflects current Monday visibility.
-    SELECT observation.outcome
-    FROM (VALUES
-        (lifecycle.last_outcome, lifecycle.last_attempted_at),
-        (design_lookup.last_outcome, design_lookup.last_attempted_at)
-    ) AS observation(outcome, attempted_at)
+        ('availability', NULLIF(availability.state, 'unknown'), availability.reason, availability.last_attempted_at),
+        ('completed_transition', lifecycle.last_outcome, lifecycle.last_reason, lifecycle.last_attempted_at),
+        ('active_reconciliation', active_lookup.last_outcome, active_lookup.last_reason, active_lookup.last_attempted_at),
+        ('design_reconciliation', design_lookup.last_outcome, design_lookup.last_reason, design_lookup.last_attempted_at)
+    ) AS observation(source, outcome, reason, attempted_at)
     WHERE observation.attempted_at IS NOT NULL
-    ORDER BY observation.attempted_at DESC
+      AND observation.outcome IS NOT NULL
+      AND NOT COALESCE(
+          observation.source <> 'availability' AND observation.outcome = 'retired'
+          AND availability.state IN ('available', 'archived', 'deleted', 'out_of_board')
+          AND availability.last_observed_at >= observation.attempted_at,
+          FALSE
+      )
+    ORDER BY CASE WHEN observation.outcome = 'retired' THEN 0
+                  WHEN observation.source = 'availability' THEN 1 ELSE 2 END,
+        observation.attempted_at DESC, observation.source
     LIMIT 1
 ) AS monday_lookup ON TRUE
 LEFT JOIN LATERAL (
@@ -269,6 +343,10 @@ LEFT JOIN performance_specification_artifacts AS a
     ON a.board_id = s.board_id
    AND a.item_id = s.item_id
    AND a.revision = s.current_revision
+LEFT JOIN performance_specification_artifacts AS draft
+    ON draft.board_id = s.board_id
+   AND draft.item_id = s.item_id
+   AND draft.revision = s.prepared_revision
 LEFT JOIN LATERAL (
     SELECT job.*
     FROM design_processing_jobs AS job
@@ -289,8 +367,4 @@ LEFT JOIN LATERAL (
     FROM performance_specification_approvals AS prior
     WHERE prior.board_id = ids.board_id AND prior.item_id = ids.item_id
 ) AS history ON TRUE
-WHERE observed_scope.group_id = cfg.landing_group_id
-   OR observed_scope.group_id = ANY(cfg.active_group_ids)
-   OR observed_scope.group_id IS NULL
-   OR s.item_id IS NOT NULL
-ORDER BY observed_scope.group_id NULLS LAST, ids.item_id;
+ORDER BY ids.group_id, ids.item_id;

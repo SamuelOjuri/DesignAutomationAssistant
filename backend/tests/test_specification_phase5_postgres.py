@@ -6,6 +6,7 @@ model, storage or configured application database connection is used.
 """
 
 from datetime import timedelta
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
@@ -19,13 +20,36 @@ from backend.app.models import (
     PerformanceSpecificationArtifact, Task,
 )
 from backend.app.services import performance_specification as worker
+from backend.app.services.monday_item_availability import (
+    observe_item, observe_unavailable, processing_identity,
+)
 from backend.app.services.performance_specification_contract import SPECIFICATION_VERSION
 from backend.app.services.specification_policy import SPECIFICATION_SCOPE_POLICY_VERSION
 from backend.app.services.specification_references import REFERENCE_PARSER_VERSION
+from backend.app.services.specification_review_contract import SOURCE_POLICY_VERSION
 from backend.tests.test_specification_review_postgres_concurrency import postgres_review_database, race
 
 
 BOARD = "1882196103"
+DIAGNOSTIC_SQL = (Path(__file__).resolve().parents[1] / "scripts" /
+    "diagnose_performance_specifications.sql").read_text(encoding="utf-8")
+
+
+def _live_query(observed_at, items, *, board_id=BOARD, query=DIAGNOSTIC_SQL):
+    snapshot = json.dumps({
+        "board_id": board_id,
+        "observed_at": observed_at.isoformat(),
+        "items": [{"item_id": item_id, "group_id": group_id, "group_title": title}
+                  for item_id, group_id, title in items],
+    })
+    return query.replace("$monday_snapshot${}$monday_snapshot$", f"$monday_snapshot${snapshot}$monday_snapshot$")
+
+
+def _diagnostic_rows(db, query=DIAGNOSTIC_SQL):
+    db.execute(text("SET TRANSACTION READ ONLY"))
+    rows = db.execute(text(query)).mappings().all()
+    db.rollback()
+    return {row["item_id"]: row for row in rows}
 
 
 @pytest.fixture()
@@ -126,6 +150,7 @@ def test_postgres_discovery_recovers_null_policy_identity(postgres_specification
 def test_diagnostic_sql_explains_and_includes_registered_item_without_task(postgres_specification):
     _, Session, item_id = postgres_specification
     now = worker.utc_now()
+    query = _live_query(now, [(item_id, settings.design_processing_landing_group_id, "Landing Zone")])
     with Session() as db:
         db.add(DesignProcessingReconciliationCheck(board_id=BOARD, item_id=item_id,
             last_attempted_at=now, last_checked_at=now, last_outcome="ignored", last_reason="ready",
@@ -134,11 +159,104 @@ def test_diagnostic_sql_explains_and_includes_registered_item_without_task(postg
         assert db.query(Task).filter_by(board_id=BOARD, item_id=item_id).count() == 0
         db.rollback()
         db.execute(text("SET TRANSACTION READ ONLY"))
-        query = (Path(__file__).resolve().parents[1] / "scripts" /
-            "diagnose_performance_specifications.sql").read_text(encoding="utf-8")
         assert db.execute(text("EXPLAIN " + query)).all()
-        rows = db.execute(text(query)).mappings().all()
-        row = next(row for row in rows if row["board_id"] == BOARD and row["item_id"] == item_id)
+        db.rollback()
+        row = _diagnostic_rows(db, query)[item_id]
         assert row["task_auto_sync_state"] is None
         assert row["design_state"] == "ready_for_review"
-        assert row["stored_scope_diagnostic"] == "landing_zone_check_live_lifecycle"
+        assert row["live_scope_diagnostic"] == "landing_zone_automatic_publication"
+
+
+def test_diagnostic_sql_uses_only_live_membership_for_scope(postgres_specification):
+    _, Session, item_id = postgres_specification
+    now = worker.utc_now()
+    landing = settings.design_processing_landing_group_id
+    completed = settings.auto_sync_completed_group_id
+    active = "group_mkpbs35c"
+    live_items = [(item_id, active, "Hub B - Outstanding"), ("101", active, "Hub B - Outstanding"),
+                  ("102", completed, "Completed Folder"), ("104", "other", "Other")]
+    with Session() as db:
+        db.add(Task(external_task_key=f"1:{BOARD}:{item_id}", account_id="1", board_id=BOARD,
+            item_id=item_id, source_group_id=landing, updated_at=now, auto_sync_state="excluded"))
+        db.add(Task(external_task_key=f"1:{BOARD}:105", account_id="1", board_id=BOARD,
+            item_id="105", source_group_id=landing, updated_at=now, auto_sync_state="excluded"))
+        db.add(DesignProcessingItem(board_id=BOARD, item_id="103", state="ready_for_review"))
+        db.flush()
+        db.add(PerformanceSpecification(board_id=BOARD, item_id="103"))
+        for observed_id, group in ((item_id, "topics"), ("102", "topics"), ("103", landing)):
+            observe_item(db, BOARD, {"id": observed_id, "board": {"id": BOARD},
+                "group": {"id": group}, "state": "active"},
+                access_token="worker", observed_at=now - timedelta(minutes=5))
+        observe_unavailable(db, BOARD, item_id, access_token="other-worker", observed_at=now)
+        db.commit()
+
+        assert not _diagnostic_rows(db)
+        assert not _diagnostic_rows(db, _live_query(now, live_items, board_id="999"))
+        live_query = _live_query(now, live_items)
+        unscoped = _diagnostic_rows(db, live_query)
+        assert unscoped[item_id]["stored_monday_diagnostic"] == "monday_item_unavailable"
+        assert unscoped[item_id]["extraction_diagnostic"] == "waiting_for_inputs"
+        assert unscoped[item_id]["monday_availability_identity_configured"] is False
+
+        fingerprint = processing_identity("worker")
+        query = live_query.replace("NULL::text AS processing_identity", f"'{fingerprint}'::text AS processing_identity")
+        query = query.replace("'group_mkqbx92r']", f"'group_mkqbx92r','{completed}']")
+        rows = _diagnostic_rows(db, query)
+        assert set(rows) == {item_id, "101", "104"}
+        assert rows[item_id]["live_group_id"] == active
+        assert rows[item_id]["live_group_title"] == "Hub B - Outstanding"
+        assert rows[item_id]["live_group_item_count"] == 2
+        assert rows[item_id]["source_group_id"] == landing
+        assert rows[item_id]["monday_observed_group_id"] == "topics"
+        assert rows[item_id]["live_scope_diagnostic"] == "active_group_manual_publication"
+        assert rows[item_id]["monday_snapshot_observed_at"] == now
+        assert rows[item_id]["monday_availability_identity_configured"] is True
+        assert rows["101"]["extraction_diagnostic"] == "item_not_registered"
+        assert rows["104"]["live_scope_diagnostic"] == "outside_specification_groups"
+
+
+def test_diagnostic_sql_exposes_draft_and_checks_full_pipeline(postgres_specification):
+    _, Session, item_id = postgres_specification
+    live_query = _live_query(worker.utc_now(), [(item_id, "topics", "Hub A - Outstanding")])
+    query = live_query.replace(
+        "NULL::text AS expected_pipeline_version", "'pipeline-current'::text AS expected_pipeline_version",
+    )
+    with Session() as db:
+        _enqueue(db, item_id)
+        item = db.query(DesignProcessingItem).filter_by(board_id=BOARD, item_id=item_id).one()
+        item.latest_desired_input_revision, item.latest_analyzed_input_revision = "new-email", "old-email"
+        item.latest_desired_pipeline_version, item.latest_analyzed_pipeline_version = "pipeline-current", "pipeline-old"
+        spec = db.get(PerformanceSpecification, (BOARD, item_id))
+        spec.prepared_revision, spec.current_revision = "draft", "published"
+        source = {
+            "scopePolicy": SPECIFICATION_SCOPE_POLICY_VERSION,
+            "publicationVersion": SPECIFICATION_VERSION,
+            "sourcePolicyVersion": SOURCE_POLICY_VERSION,
+            "referenceParserVersion": REFERENCE_PARSER_VERSION,
+            "extractionPipeline": "pipeline-old",
+            "emailRevision": "old-email",
+        }
+        spec.source_json = source
+        for revision, status, artifact_source in (
+            ("published", "published", source),
+            ("draft", "rendered", {"review": {"publication_identity": "draft-identity"}}),
+        ):
+            db.add(PerformanceSpecificationArtifact(board_id=BOARD, item_id=item_id, revision=revision,
+                translation_json={}, source_json=artifact_source, model_version="test", filename=f"{revision}.pdf",
+                storage_bucket="private", storage_object_key=revision, content_sha256="a" * 64,
+                size_bytes=1, status=status))
+        db.commit()
+
+        row = _diagnostic_rows(db, query)[item_id]
+        assert row["prepared_artifact_status"] == "rendered"
+        assert row["prepared_publication_identity"] == "draft-identity"
+        assert row["current_artifact_status"] == "published"
+        assert row["refresh_policy_diagnostic"] == "refresh_policy_obsolete"
+        assert row["artifact_freshness_diagnostic"] == "artifact_extraction_obsolete"
+
+        item.latest_desired_input_revision = item.latest_analyzed_input_revision = None
+        item.latest_desired_pipeline_version = item.latest_analyzed_pipeline_version = None
+        artifact = db.get(PerformanceSpecificationArtifact, (BOARD, item_id, "published"))
+        artifact.source_json = {**source, "emailRevision": None, "extractionPipeline": None}
+        db.commit()
+        assert _diagnostic_rows(db, live_query)[item_id]["artifact_freshness_diagnostic"] == "artifact_source_identity_missing"

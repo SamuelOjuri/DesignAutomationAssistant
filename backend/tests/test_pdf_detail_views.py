@@ -1,15 +1,21 @@
 """Synthetic PDF inputs verify view coverage and bounds without provider calls."""
 
+import hashlib
 import io
 from types import SimpleNamespace
 
 from google.genai import types
+from httpx import ReadTimeout
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import RectangleObject
 import pytest
 
+from backend.app.config import settings
+from backend.app.services import source_transcription_cache as cache
+from backend.app.services.gemini_requests import GeminiRequestFailure
 from backend.app.services.legacy_enquiry import pdf_detail_views as details
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
+from backend.app.services.legacy_enquiry.source_documents import extract_source_records
 
 
 def pdf(width=1684, height=2384, pages=1, rotation=0, protected=False):
@@ -63,6 +69,71 @@ def test_pdf_request_keeps_original_and_labels_detail_pages():
     assert len(PdfReader(io.BytesIO(parts[2].inline_data.data)).pages) == 4
     assert "original page 1, bottom right" in parts[1]
     assert config.media_resolution == types.MediaResolution.MEDIA_RESOLUTION_HIGH
+
+
+def test_detail_read_timeout_retries_the_full_original_outside_the_detail_cache(monkeypatch):
+    saved = {}
+    monkeypatch.setattr(settings, "design_processing_transcription_cache_enabled", True)
+    monkeypatch.setattr(cache, "read_text", lambda scope, key: saved.get((scope, key)))
+    monkeypatch.setattr(cache, "save_text", lambda scope, key, digest, text: saved.update({(scope, key): text}))
+    calls = []
+
+    def generate(model, parts, config):
+        calls.append((parts, config))
+        if len(calls) == 1:
+            raise ReadTimeout("private provider detail")
+        return SimpleNamespace(text="Recovered original" if len(calls) == 2 else "Detail transcription")
+
+    content = pdf(pages=2)
+    client = LegacyGeminiClient("offline", generate_content=generate, pdf_native_text_enabled=False,
+                                transcription_cache_scope="test-pdf")
+
+    record, = extract_source_records(content, "drawing.pdf", client, source_id="asset:test")
+    assert record["status"] == "read"
+    assert record["text"] == "Recovered original"
+    assert record["contentSha256"] == hashlib.sha256(content).hexdigest()
+    assert not saved
+    original_only, config = calls[1]
+    assert len(original_only) == 2  # Full PDF, then its transcription prompt.
+    assert original_only[0].inline_data.data == content
+    assert config.media_resolution == types.MediaResolution.MEDIA_RESOLUTION_HIGH
+    assert client.process_pdf(content, "drawing.pdf") == "Detail transcription"
+    assert client.process_pdf(content, "drawing.pdf") == "Detail transcription"
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("error", [ReadTimeout, ValueError])
+def test_no_detail_retry_for_single_original_timeout_or_unrelated_failure(error):
+    calls = []
+
+    def fail(model, parts, config):
+        calls.append(parts)
+        raise error("private provider detail")
+
+    content = pdf(595, 842) if error is ReadTimeout else pdf()
+    with pytest.raises(GeminiRequestFailure) as failure:
+        LegacyGeminiClient("offline", generate_content=fail).process_pdf(content, "drawing.pdf")
+
+    assert len(calls) == 1
+    assert failure.value.details["error_type"] == error.__name__
+
+
+def test_detail_timeout_fallback_rejects_truncated_source_text():
+    calls = []
+
+    def generate(model, parts, config):
+        calls.append(parts)
+        if len(calls) == 1:
+            raise ReadTimeout("private provider detail")
+        return SimpleNamespace(text="Partial text", candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")])
+
+    client = LegacyGeminiClient("offline", generate_content=generate, pdf_native_text_enabled=False)
+    records = extract_source_records(pdf(), "drawing.pdf", client, source_id="asset:test")
+
+    assert len(calls) == 2
+    assert records[0]["status"] == "failed:GeminiRequestFailure"
+    assert records[0]["error"]["code"] == "incomplete_response"
+    assert not records[0]["text"]
 
 
 def test_encrypted_pdf_never_reaches_provider_even_when_called_directly():
