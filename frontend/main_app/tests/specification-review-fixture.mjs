@@ -6,11 +6,13 @@ export function createFixture(scenario = "new_enquiry", itemId = "101") {
     const result = createFixture("new_enquiry", itemId);
     const drawingWarning = "Select the relevant roof/drawing; several series may be plausible";
     const requestWarning = "Confirm the intended request type with the client.";
+    const similarityScores = [0.885, 0.432, 0.427, null, 0, 0.5625];
     result.candidates.projects = Array.from({ length: scenario === "many_projects" ? 13 : 10 }, (_, index) => ({
       record: { board_id: "200", item_id: String(201 + index) },
       project_reference: `TP${17221 + index}`,
       project_title: `Matched project ${index + 1}`,
-      rationale: "Project title shares identifying words; confirm the intended project.", similarity_score: null,
+      rationale: "Project title shares identifying words; confirm the intended project.",
+      similarity_score: similarityScores[index] ?? null,
     }));
     // Deliberately retain duplicate legacy warnings in the API fixture so the
     // rendered form must handle snapshots produced before backend deduplication.

@@ -254,6 +254,10 @@ export async function runBrowserJourneys(frame, send, latestRequests, showResult
     assert(warningCopies("Select the relevant roof/drawing; several series may be plausible") === 1, "Duplicate drawing warnings from legacy candidate and intent lists appear only once");
     assert(warningCopies("Confirm the intended request type with the client.") === 1 && text().includes("Narrow the project candidates to read further drawing details"), "Distinct candidate warnings and deduplicated request reasons remain visible");
     assert(projectChoices().length === 10 && !documentOf().querySelector('input[type="radio"][value="200:213"]'), "More than ten project matches initially shows only the first ten choices");
+    const candidateLabel = (index) => projectChoices()[index].labels[0].textContent;
+    assert(["88.5%", "43.2%", "42.7%"].every((score, index) => candidateLabel(index).includes(`Title similarity: ${score}`)), "Each scored project shows its own title similarity percentage");
+    assert(!candidateLabel(3).includes("Title similarity") && candidateLabel(4).includes("Title similarity: 0.0%"), "Unavailable similarity scores are omitted and zero remains visible");
+    assert(candidateLabel(5).includes("Title similarity: 56.2%"), "Title similarity rounds halfway scores the same way as the matched-projects PDF");
     const expandProjects = button("Show all 13 projects");
     assert(expandProjects?.getAttribute("aria-expanded") === "false" && documentOf().getElementById(expandProjects.getAttribute("aria-controls")), "Project disclosure exposes its collapsed state and controlled list to assistive technology");
     await click("Show all 13 projects");

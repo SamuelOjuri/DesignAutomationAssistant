@@ -29,6 +29,13 @@ const warningItem = "flex items-start gap-2 text-warning-foreground";
 const collapsedProjectLimit = 10;
 const uniqueMessages = (messages: string[]) => Array.from(new Set(messages.map((message) => message.trim()).filter(Boolean)));
 
+function formatTitleSimilarity(score: number) {
+  const percentage = score * 100;
+  // Match the PDF's ties-to-even rounding. At .25, toFixed would round up.
+  const rounded = percentage % 1 === 0.25 ? Math.floor(percentage * 10) / 10 : percentage;
+  return `${rounded.toFixed(1)}%`;
+}
+
 export default function CandidateSelector({ candidates, extractedProjectTitle, intent, selections, disabled = false, unavailableMessage, onChange }: CandidateSelectorProps) {
   const id = useId();
   const [projectsExpanded, setProjectsExpanded] = useState(false);
@@ -130,6 +137,9 @@ export default function CandidateSelector({ candidates, extractedProjectTitle, i
                       onChange={() => onChange({ selected_project: project.record, selected_drawing: null })} />
                     <span className="min-w-0 [overflow-wrap:anywhere]">
                       <span className="block font-semibold">{project.project_reference?.trim() || "TP Ref unavailable"} — {project.project_title?.trim() || "Project title unavailable"}</span>
+                      {typeof project.similarity_score === "number" && (
+                        <span className="mt-1 block text-xs font-medium tabular-nums">Title similarity: {formatTitleSimilarity(project.similarity_score)}</span>
+                      )}
                       <span className="mt-1 block text-muted-foreground">{project.rationale}</span>
                     </span>
                   </label>
