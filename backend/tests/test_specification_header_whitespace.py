@@ -4,9 +4,13 @@ from copy import deepcopy
 
 import pytest
 
-from backend.app.services.performance_specification_evidence import resolve_baseline_drawing_identity
+from backend.app.services.performance_specification_evidence import (
+    UNVERIFIED_TIMESTAMP, resolve_baseline_drawing_identity, resolve_email_evidence,
+)
+from backend.app.services.specification_recovery import extraction_payload, repair_message_dates
 from backend.app.services.specification_request_context import email_messages, source_email_messages
 from backend.tests.test_specification_evidence import candidate, extraction, source
+from backend.tests.test_specification_publication_hardening import parameters
 
 
 OUTER_DATE = "Wed, 11 Nov 2026 16:57:31 +0000"
@@ -87,3 +91,29 @@ def test_nbsp_header_support_does_not_accept_unverified_request_dates(case):
             f"Sent:\u00a0{FORWARDED_DATE}\n", f"Sent:\u00a0{FORWARDED_DATE}\nDate:\u00a0{FORWARDED_DATE}\n")
     facts, reason = resolve_baseline_drawing_identity(payload)
     assert not facts and reason == "Candidate request timestamp could not be verified"
+
+
+@pytest.mark.parametrize("repeated_excerpt", [False, True])
+def test_exact_outer_request_date_can_correct_a_reversed_forwarding_role(repeated_excerpt):
+    excerpt = "Use 18 mm plywood on Roof 2."
+    forwarded = forwarded_headers(" ") + "\nOriginal request.\n"
+    text = OUTER + excerpt + "\n" + forwarded
+    if repeated_excerpt:
+        text += excerpt
+    manifest = [source("asset:1:body", text, "email_body")]
+    evidence = candidate("Decking", "18 mm plywood", excerpt, source_id=manifest[0]["sourceId"],
+                         scope="Roof 2", request_role="forwarded_request", message_date=OUTER_DATE)
+    result = parameters(specification_evidence=[evidence])
+
+    assert resolve_email_evidence(extraction_payload(result, manifest))[2]["Decking"] == UNVERIFIED_TIMESTAMP
+    repair_message_dates(result, manifest)
+    raw, _, issues = resolve_email_evidence(extraction_payload(result, manifest))
+
+    if repeated_excerpt:
+        assert issues["Decking"] == UNVERIFIED_TIMESTAMP
+        assert not result._evidence_repairs
+    else:
+        assert raw["Decking"] == "18 mm plywood" and not issues
+        repair, = result._evidence_repairs
+        assert repair["before"]["request_role"] == "forwarded_request"
+        assert repair["after"] == {**repair["before"], "request_role": "direct_request"}

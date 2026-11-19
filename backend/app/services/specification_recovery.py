@@ -228,6 +228,41 @@ def repair_literal_scale_citations(result, manifest):
         })
 
 
+_PARENTHETICAL_U_VALUE_TARGET = re.compile(
+    r"u[- ]value\*?\s*:\s*[0-9]+(?:[.,][0-9]+)?\s+"
+    r"(?P<unit>w\s*/\s*m\s*(?:\u00b2|\^?2)\s*(?:[.\u00b7]\s*)?k)\s*"
+    r"\(\s*(?P<target>[0-9]+(?:[.,][0-9]+)?)\s+target\s*\)(?:\s*\(effective\))?"
+)
+
+
+def repair_literal_u_value_citations(result, manifest):
+    """Restore a bare labelled target when the model copied the achieved value's unit."""
+    sources = {source["sourceId"]: source for source in manifest}
+    for index, old in enumerate(result.specification_evidence):
+        if old.field != "Target U Value" or old.role != "requested":
+            continue
+        before = old.model_dump()
+        source = sources.get(old.source_id)
+        if (not source or source["status"] != "read" or _value_supported(before)
+                or not _source_contains_excerpt(source, old.snippet)):
+            continue
+        match = _PARENTHETICAL_U_VALUE_TARGET.fullmatch(
+            _excerpt_normal(normalize_unit_spacing(old.snippet)),
+        )
+        if not match or _excerpt_normal(normalize_unit_spacing(old.value)) != f"{match['target']} {match['unit']}":
+            continue
+        new = old.model_copy(update={"value": match["target"]})
+        after = new.model_dump()
+        if not _value_supported(after):
+            continue
+        result.specification_evidence[index] = new
+        result._evidence_repairs.append({
+            "reason": "Verified literal parenthetical U-value target repair",
+            "before": before, "after": after,
+            "contentSha256": source["contentSha256"],
+        })
+
+
 def _list_text_positions(text):
     """Normalize only list presentation, retaining offsets into the literal source."""
     omitted = set()
@@ -485,8 +520,8 @@ def repair_message_dates(result, manifest):
             continue
         if source["sourceType"] == "email_body":
             # A model can attach a quoted passage to the outer reply's literal
-            # date or label a forwarded passage as a direct request. Only a
-            # unique message containing the quote can correct that attribution.
+            # date or mislabel which message it came from. Only a unique
+            # message containing the quote can correct that attribution.
             messages = source_email_messages(source, include_plain=True)
             old_messages = [m for m in messages if _normal(m["sentDate"]) == _normal(old.message_date)]
             matching = {(m["sender"], m["sentAt"], m["messageIndex"], m["requestRole"]): m
@@ -494,7 +529,8 @@ def repair_message_dates(result, manifest):
             if old.field not in {"Company", "Contact", "Date Received"} and old_messages and len(matching) == 1:
                 message = next(iter(matching.values()))
                 wrong_date = not any(_contains_excerpt(old.snippet, m["text"]) for m in old_messages)
-                wrong_role = (old.request_role == "direct_request" and message["requestRole"] == "forwarded_request"
+                wrong_role = (old.request_role in {"direct_request", "forwarded_request"}
+                              and old.request_role != message["requestRole"]
                               and _normal(old.message_date) == _normal(message["sentDate"]))
                 if message["sender"] and message["sentAt"] and (wrong_date or wrong_role):
                     new = old.model_copy(update={"message_date": message["sentDate"],

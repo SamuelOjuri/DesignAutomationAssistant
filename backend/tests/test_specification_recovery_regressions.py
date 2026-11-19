@@ -10,7 +10,8 @@ from backend.app.services.performance_specification_evidence import (
     resolve_email_evidence, resolve_request_notes,
 )
 from backend.app.services.specification_recovery import (
-    extraction_payload, repair_literal_scale_citations, repair_note_list_formatting, repair_template_markers,
+    extraction_payload, repair_literal_scale_citations, repair_literal_u_value_citations,
+    repair_note_list_formatting, repair_template_markers,
 )
 from backend.app.services.specification_semantics import (
     SpecificationEvidence, drawing_reference_key, scale_ratio, tp_reference_revision,
@@ -811,6 +812,71 @@ def test_u_value_unit_restatement_without_a_verified_bare_value_still_blocks():
     data = extraction([source("asset:1:attachment:0", TARGET_NOTE)],
                       [candidate("Target U Value", "0.18 W/m\u00b2K", TARGET_NOTE)])
     assert resolve_email_evidence(data)[2]["Target U Value"] == "Raw value is absent from the supporting excerpt"
+
+
+RENDER_U_VALUE_NOTE = "U-Value*: 0.12 W/m\u00b2K (0.16 Target) (EFFECTIVE)"
+
+
+def test_parenthetical_target_is_repaired_before_requesting_recovery():
+    old = candidate("Target U Value", "0.16 W/m\u00b2K", RENDER_U_VALUE_NOTE, scope="Roof 2")
+    achieved = candidate("Target U Value", "0.12 W/m\u00b2K", RENDER_U_VALUE_NOTE, role="achieved")
+    replies = iter([parameters(target_u_value=old["value"], specification_evidence=[old, achieved])])
+    client = LegacyGeminiClient("offline", generate_content=lambda *args, **kwargs: SimpleNamespace(parsed=next(replies)))
+    manifest = [source(old["source_id"], RENDER_U_VALUE_NOTE)]
+
+    result = client.extract_design_parameters_with_manifest("Synthetic source context", manifest)
+    raw, provenance, issues = resolve_email_evidence(extraction_payload(result, manifest))
+
+    assert raw["Target U Value"] == "0.16" and not issues
+    assert provenance["Target U Value"]["selected"]["scope"] == "Roof 2"
+    assert result.specification_evidence[1].model_dump()["value"] == achieved["value"]
+    repair, = result._evidence_repairs
+    assert repair["before"]["value"] == old["value"] and repair["after"]["value"] == "0.16"
+    assert repair["after"]["snippet"] == RENDER_U_VALUE_NOTE and repair["contentSha256"] == "abc"
+
+
+def test_parenthetical_target_repair_preserves_competing_roof_values():
+    other = RENDER_U_VALUE_NOTE.replace("0.16 Target", "0.13 Target")
+    roof_one = candidate("Target U Value", "0.16 W/m\u00b2K", RENDER_U_VALUE_NOTE, scope="Roof 1")
+    roof_two = candidate("Target U Value", "0.13 W/m\u00b2K", other, scope="Roof 2")
+    manifest = [source(roof_one["source_id"], RENDER_U_VALUE_NOTE + "\n" + other)]
+    recovered = parameters(specification_evidence=[roof_one, roof_two])
+
+    result = extract_twice(parameters(specification_evidence=[roof_one]), recovered, manifest)
+
+    payload = extraction_payload(result, manifest)
+    assert resolve_email_evidence(payload)[2]["Target U Value"] == VALUE_CONFLICT
+    assert resolve_email_evidence(payload, scopes=["Roof 2"])[0]["Target U Value"] == "0.13"
+
+
+@pytest.mark.parametrize("overrides", [
+    {"value": "0.13 W/m\u00b2K"},
+    {"value": "0.16 W/mK"},
+    {"field": "Target Min U Value"},
+    {"role": "achieved"},
+    {"snippet": "Do not use the earlier " + RENDER_U_VALUE_NOTE},
+    {"snippet": RENDER_U_VALUE_NOTE + " or " + RENDER_U_VALUE_NOTE.replace("0.16", "0.13")},
+    {"snippet": RENDER_U_VALUE_NOTE.replace("EFFECTIVE", "calculated")},
+])
+def test_parenthetical_target_repair_requires_one_matching_literal_target(overrides):
+    old = candidate("Target U Value", "0.16 W/m\u00b2K", RENDER_U_VALUE_NOTE)
+    old.update(overrides)
+    result = parameters(specification_evidence=[old])
+    manifest = [source(old["source_id"], old["snippet"])]
+
+    repair_literal_u_value_citations(result, manifest)
+
+    assert result.specification_evidence[0].value == old["value"] and not result._evidence_repairs
+
+
+def test_parenthetical_target_repair_requires_the_literal_source_excerpt():
+    old = candidate("Target U Value", "0.16 W/m\u00b2K", RENDER_U_VALUE_NOTE)
+    result = parameters(specification_evidence=[old])
+    manifest = [source(old["source_id"], RENDER_U_VALUE_NOTE.replace("0.16", "0.13"))]
+
+    repair_literal_u_value_citations(result, manifest)
+
+    assert result.specification_evidence[0].value == old["value"] and not result._evidence_repairs
 
 
 FA_REFERENCE = "FA18910_26.01 - A"
