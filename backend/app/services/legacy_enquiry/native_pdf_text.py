@@ -15,7 +15,7 @@ from pypdf import PdfReader
 from pypdf.generic import ContentStream
 
 
-MAX_NATIVE_PAGES = 100
+MAX_PDF_PAGES = 100
 MAX_NATIVE_STREAM_BYTES = 2 * 1024 * 1024
 MAX_NATIVE_DOCUMENT_STREAM_BYTES = 8 * 1024 * 1024
 MAX_NATIVE_TEXT_CHARS = 500_000
@@ -71,11 +71,7 @@ def _readable_text(text):
 
 
 def native_pdf_text(reader: PdfReader) -> NativePdfText:
-    """Return complete literal page text, or a bounded diagnostic for OCR fallback.
-
-    No partial native text is returned on a rejected page. All pages still travel
-    together through the existing per-document OCR/evidence contract.
-    """
+    """Return literal text for up to the first 100 pages, or an OCR fallback reason."""
     try:
         if reader.is_encrypted:
             return NativePdfText(None, "encrypted_pdf")
@@ -85,10 +81,10 @@ def native_pdf_text(reader: PdfReader) -> NativePdfText:
             return NativePdfText(None, "interactive_form")
         if root.get("/OCProperties"):
             return NativePdfText(None, "optional_content")
-        if not 0 < len(reader.pages) <= MAX_NATIVE_PAGES:
+        if not len(reader.pages):
             return NativePdfText(None, "page_limit")
         pages, total_stream_bytes, total_chars = [], 0, 0
-        for index, page in enumerate(reader.pages, start=1):
+        for index, page in enumerate(reader.pages[:MAX_PDF_PAGES], start=1):
             if page.get("/Annots"):
                 return NativePdfText(None, "page_annotations")
             resources = _object(page.get("/Resources", {}))

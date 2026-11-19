@@ -1,6 +1,8 @@
 """Thread-safe source progress without filenames or document contents."""
 import threading
 
+from .specification_semantics import ARCHIVE_EXPANDED_STATUS, DOCX_EXPANDED_STATUS
+
 
 class SourceProgress:
     def __init__(self, callback=None):
@@ -20,7 +22,8 @@ class SourceProgress:
     def _emit(self, phase):
         if self.callback is None:
             return
-        statuses = [value for value in self.states.values() if value != "expanded:archive"]
+        statuses = [value for value in self.states.values()
+                    if value not in {ARCHIVE_EXPANDED_STATUS, DOCX_EXPANDED_STATUS}]
         self.callback({"phase": phase, "source_counts": {
             "total": len(statuses), "read": statuses.count("read"),
             "skipped": sum(value.startswith("skipped:") for value in statuses),

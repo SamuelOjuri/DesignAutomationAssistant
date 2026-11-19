@@ -1,6 +1,7 @@
 """Native text must be complete enough to replace, rather than supplement, OCR."""
 
 import io
+from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
@@ -34,6 +35,7 @@ def text_pdf(*, pages=1, image=False, vector=False, hidden=False, blank_last=Fal
                 text.setTextRenderMode(3)
             for line in TITLE_LINES:
                 text.textLine(line)
+            text.textLine(f"Source sheet {page_number + 1:03d}")
             document.drawText(text)
         if image:
             document.drawImage(ImageReader(Image.new("RGB", (8, 8), "black")), 20, 20, width=100, height=60)
@@ -59,6 +61,45 @@ def test_text_only_pdf_preserves_literal_title_values_and_page_boundaries_withou
         assert record["text"].count(literal) == 2
     assert record["text"].index("PDF PAGE 1") < record["text"].index("PDF PAGE 2")
     assert "pdfNativeTextFallbackReason" not in record
+
+
+def test_long_native_pdf_keeps_first_100_pages_and_original_source_identity():
+    content = text_pdf(pages=101, blank_last=True)
+    extractor, calls = client()
+    record, = extract_source_records(content, "long.pdf", extractor, source_id="pdf")
+    assert record["status"] == "read" and record["pdfTextMethod"] == "native"
+    assert record["pdfPageCount"] == 101 and record["pdfPagesRead"] == 100
+    assert record["contentSha256"] == sha256(content).hexdigest()
+    assert record["sizeBytes"] == len(content)
+    assert not calls
+    assert "PDF PAGE 100\n" in record["text"]
+    assert "PDF PAGE 101\n" not in record["text"]
+    assert len(record["pdfPageDimensionsMm"]) == 100
+
+
+@pytest.mark.parametrize("native_enabled", [True, False])
+def test_gemini_only_receives_first_100_pages_of_a_long_pdf(native_enabled):
+    content = text_pdf(pages=101, image=True)
+    extractor, calls = client(enabled=native_enabled)
+    record, = extract_source_records(content, "long-drawing.pdf", extractor, source_id="pdf")
+    assert record["status"] == "read"
+    assert record["pdfPageCount"] == 101 and record["pdfPagesRead"] == 100
+    [(payload, filename)] = calls
+    assert filename == "long-drawing.pdf"
+    with PdfReader(io.BytesIO(payload)) as reader:
+        assert len(reader.pages) == 100
+        assert "Source sheet 001" in reader.pages[0].extract_text()
+        assert "Source sheet 100" in reader.pages[-1].extract_text()
+        assert reader.pages[-1]["/Resources"]["/XObject"]
+
+
+def test_pdf_at_page_limit_keeps_original_gemini_payload_without_truncation():
+    content = text_pdf(pages=100)
+    extractor, calls = client(enabled=False)
+    record, = extract_source_records(content, "at-limit.pdf", extractor, source_id="pdf")
+    assert record["status"] == "read"
+    assert "pdfPagesRead" not in record
+    assert calls == [(content, "at-limit.pdf")]
 
 
 @pytest.mark.parametrize("options,reason", [

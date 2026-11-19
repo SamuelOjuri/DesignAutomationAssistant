@@ -15,7 +15,7 @@ from .crm_accounts import (
 )
 from .monday_metadata_fields import ACCOUNTS_BOARD_ID
 from .performance_specification_contract import (
-    SOURCE_REVIEW_DETAILS, iso_cad_paper_size, missing, reviewer_cad_mapping, scale_mapping_for_paper_size,
+    iso_cad_paper_size, missing, reviewer_cad_mapping, scale_mapping_for_paper_size, source_review_detail,
 )
 from .performance_specification_evidence import (
     PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT,
@@ -234,9 +234,11 @@ def resolve_review_sources(gateway, item, previous=None, *, review_state=None, p
     project = None
     baseline_issue = None
     baseline_sources = None
-    source_issues = [SourceIssue(source_id=source["sourceId"], code=source["status"],
-        detail=f"{source['filename']}: {SOURCE_REVIEW_DETAILS[source['status']]}")
-        for source in extraction["sourceManifest"] if source.get("status") in SOURCE_REVIEW_DETAILS]
+    source_issues = []
+    for source in extraction["sourceManifest"]:
+        if (review := source_review_detail(source)) is not None:
+            code, detail = review
+            source_issues.append(SourceIssue(source_id=source["sourceId"], code=code, detail=detail))
 
     def record_error(label, detail, source_item=None, column_id=None):
         crm_errors.setdefault(label, detail)

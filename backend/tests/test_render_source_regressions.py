@@ -137,13 +137,14 @@ def test_literal_message_date_format_is_repaired_without_a_model_correction():
 
 
 @pytest.mark.parametrize('duplicate', [False, True])
-def test_unique_quote_can_repair_an_actual_wrong_header_but_repeated_quotes_cannot(duplicate):
+@pytest.mark.parametrize('claimed_date', ['30 October 2026 10:00', '29 October 2026 09:00'])
+def test_only_unique_quote_can_repair_wrong_date_or_direct_request_role(duplicate, claimed_date):
     text = ('From: Alex <alex@client.example>\nDate: 30 October 2026 10:00\n\nPlease proceed.\n'
             'From: Earlier <earlier@client.example>\nSent: 29 October 2026 09:00\n\nUse Rockdeck')
     if duplicate:
         text += '\nFrom: Other <other@client.example>\nSent: 28 October 2026 08:00\n\nUse Rockdeck'
     fact = candidate('Tapered Insulation', 'Rockdeck', 'Use Rockdeck', source_id='asset:1:body',
-                     request_role='direct_request', message_date='30 October 2026 10:00')
+                     request_role='direct_request', message_date=claimed_date)
     initial = parameters(tapered_insulation='Rockdeck', specification_evidence=[fact])
     manifest = [source('asset:1:body', text, 'email_body')]
     if duplicate:

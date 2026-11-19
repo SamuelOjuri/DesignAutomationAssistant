@@ -24,6 +24,7 @@ from .specification_semantics import (
 
 SPECIFICATION_VERSION = "performance-specification-v5"
 NOT_PROVIDED = "Not Provided"
+PDF_PAGE_LIMIT_REVIEW_CODE = "review:pdf_page_limit"
 SOURCE_REVIEW_DETAILS = {
     ARCHIVE_MEMBER_REVIEW_STATUS: (
         "Unsupported archive member was not read; its contents and any model geometry were not used. "
@@ -510,9 +511,22 @@ def prepare_specification_publication(source, client, *, cached_translation=None
     })
 
 
+def source_review_detail(source) -> tuple[str, str] | None:
+    status = source.get("status")
+    if status in SOURCE_REVIEW_DETAILS:
+        return status, f"{source['filename']}: {SOURCE_REVIEW_DETAILS[status]}"
+    pages_read = source.get("pdfPagesRead")
+    page_count = source.get("pdfPageCount")
+    if status == "read" and type(pages_read) is int and type(page_count) is int and 0 < pages_read < page_count:
+        return PDF_PAGE_LIMIT_REVIEW_CODE, (
+            f"{source['filename']}: Processed pages 1–{pages_read} of {page_count}. "
+            f"Review the original PDF from page {pages_read + 1} onward for specification information."
+        )
+    return None
+
+
 def source_review_notes(manifest) -> list[str]:
-    return [f"{source['filename']}: {SOURCE_REVIEW_DETAILS[source['status']]}"
-            for source in manifest if source.get("status") in SOURCE_REVIEW_DETAILS]
+    return [review[1] for source in manifest if (review := source_review_detail(source)) is not None]
 
 
 def pdf_values(translation: CADTranslation) -> dict[str, str]:

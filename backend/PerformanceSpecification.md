@@ -279,8 +279,12 @@ catalogues do not become selected specifications. Genuinely uncached formulas,
 other extraction limits and unreadable supported sources hold extraction for
 retry/review rather than imply absent fields. Failed per-source manifests are retained in the design
 job's `result_json.sourceExtractionFailure`. PDFs are read individually to preserve
-attachment identity. The extraction model also makes one targeted second pass for
-missing/unverified fields before accepting the extraction.
+attachment identity. Both native text and Gemini process the first 100 pages at
+most. The review workspace and specification PDF identify any omitted pages.
+Referenced raster drawings in DOCX files use the normal image reader and retain
+their parent document in the source manifest. The extraction model also makes
+one targeted second pass for missing or unverified fields before accepting the
+extraction.
 
 Design extraction retains long spreadsheet cells in full, splitting them across
 1,000-character chunks with repeated worksheet/cell references and continuation
@@ -1148,9 +1152,10 @@ from different sources still remain separate candidates for review.
 
 Large PDF drawings now include four overlapping detail views per large page in the
 same Gemini transcription request, capped at 16 detail pages and 20 MiB of derived
-PDF bytes. The original complete PDF remains present; ordinary small pages have no
-detail views. Views stay in memory, retain the original source identity, and never
-supply page-size evidence through their dimensions. PDF requests use high media
+PDF bytes. The PDF for the processed page range accompanies the detail views.
+Ordinary small pages have no detail views. Views stay in memory, retain the
+original source identity, and never supply page-size evidence through their
+dimensions. PDF requests use high media
 resolution and literal transcription instructions, including no invented labels,
 dates or requested/achieved annotations. Explicit ambiguous paper-size labels must
 remain evidence for review. Source transcription is still model-based; these changes

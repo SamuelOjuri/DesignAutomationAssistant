@@ -52,8 +52,8 @@ def render_performance_specification_pdf(
     if isinstance(translation, SpecificationPublication) and translation.review_version is not None:
         story.append(Paragraph(f"Specification review version {translation.review_version}", provenance))
     if source_reviews:
-        story.append(Paragraph("Review required: source information is missing or could not be read. Values below "
-                               "exclude their contents.", body))
+        story.append(Paragraph("Review required: source information is missing or could not be read. "
+                               "Check the source details below before relying on these values.", body))
         for note in source_reviews:
             story.append(Paragraph(escape(note), review))
         story.append(Spacer(1, 8))

@@ -485,18 +485,18 @@ def repair_message_dates(result, manifest):
             continue
         if source["sourceType"] == "email_body":
             # A model can attach a quoted passage to the outer reply's literal
-            # date. Correct that citation only when it belongs to one distinct,
-            # addressed message and the old header demonstrably lacks the quote.
-            # Invented dates and passages repeated across replies remain invalid.
+            # date or label a forwarded passage as a direct request. Only a
+            # unique message containing the quote can correct that attribution.
             messages = source_email_messages(source, include_plain=True)
             old_messages = [m for m in messages if _normal(m["sentDate"]) == _normal(old.message_date)]
             matching = {(m["sender"], m["sentAt"], m["messageIndex"], m["requestRole"]): m
                         for m in messages if _contains_excerpt(old.snippet, m["text"])}
-            if (old.field not in {"Company", "Contact", "Date Received"}
-                    and old_messages and len(matching) == 1
-                    and not any(_contains_excerpt(old.snippet, m["text"]) for m in old_messages)):
+            if old.field not in {"Company", "Contact", "Date Received"} and old_messages and len(matching) == 1:
                 message = next(iter(matching.values()))
-                if message["sender"] and message["sentAt"]:
+                wrong_date = not any(_contains_excerpt(old.snippet, m["text"]) for m in old_messages)
+                wrong_role = (old.request_role == "direct_request" and message["requestRole"] == "forwarded_request"
+                              and _normal(old.message_date) == _normal(message["sentDate"]))
+                if message["sender"] and message["sentAt"] and (wrong_date or wrong_role):
                     new = old.model_copy(update={"message_date": message["sentDate"],
                                                  "request_role": message["requestRole"]})
                     result.specification_evidence[index] = new

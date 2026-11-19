@@ -292,9 +292,9 @@ class _EmailBudget:
             if self.parsed_bytes > MAX_SOURCE_BYTES:
                 raise SourceDocumentError("email_expansion_limit", "Attached email content exceeds the shared 40 MiB processing limit; split the source.")
 
-    def attachment(self):
+    def attachment(self, count=1):
         with self.lock:
-            self.attachments += 1
+            self.attachments += count
             if self.attachments > MAX_EMAIL_ATTACHMENTS:
                 raise SourceDocumentError("email_attachment_limit", "Email contains more than 200 attachments across nested messages; split the source.")
 

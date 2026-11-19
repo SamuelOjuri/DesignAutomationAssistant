@@ -163,6 +163,22 @@ def test_forwarded_client_request_is_usable_without_its_original_outer_email():
     assert resolve_email_evidence(extraction(manifest, [evidence]))[0]["Company"] == BRAND
 
 
+@pytest.mark.parametrize("display", ["alex@client.example", "ALEX@client.example"])
+def test_forwarded_request_can_use_an_address_repeated_as_display_name(display):
+    date = "26 October 2026 14:56"
+    forwarded = CLIENT.replace("Alex Example <alex@client.example>", f"{display} <alex@client.example>")
+    forwarded = forwarded.replace(f"Date: {CLIENT_DATE}", f"Sent: {date}")
+    internal = (f"From: Engineer <engineer@taperedplus.co.uk>\nTo: Sales <sales@taperedplus.co.uk>\n"
+                f"Date: {INTERNAL_DATE}\n\nPlease action this request.\n{forwarded}")
+    record = source("asset:1:body", internal, "email_body")
+
+    context = select_client_request([record])
+
+    assert context["sender"] == "alex@client.example"
+    assert context["sentDate"] == date and context["requestRole"] == "forwarded_request"
+    assert f"From: {display} <alex@client.example>" in context["headerSnippet"]
+
+
 def test_signature_from_an_earlier_forwarded_sender_is_not_the_requester():
     earlier = CLIENT.replace("Alex Example", "Other Sender").replace("alex@client.example", "other@third.example")
     text = CLIENT + "\n" + earlier

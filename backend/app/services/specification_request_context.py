@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from dateutil.parser import isoparse, parse
 
 from ..config import settings
+from .specification_semantics import ARCHIVE_EXPANDED_STATUS, DOCX_EXPANDED_STATUS
 
 
 CLIENT_FIELDS = frozenset({"Company", "Contact", "Date Received"})
@@ -18,6 +19,11 @@ def _addresses(values):
     cleaned = [re.sub(r"<mailto:[^>]*>", "", value, flags=re.I) for value in values]
     addresses = []
     for value in cleaned:
+        # Some forwarded Outlook headers repeat the mailbox as its display
+        # name. Strict parsing rejects the unquoted address before the brackets.
+        repeated = re.fullmatch(r"([^<>\s,;@]+@[^<>\s,;@]+)\s+<\1>", value.strip(), re.I)
+        if repeated:
+            value = repeated[1]
         parsed = getaddresses([value])
         if not any("@" in address for _, address in parsed) and ";" in value:
             # Outlook separates displayed recipients with semicolons, which
@@ -196,7 +202,7 @@ def request_context_summary(context):
 
 
 def source_parent_chain(source, sources):
-    """Validate explicit MIME/archive ownership, including standalone archives."""
+    """Validate explicit MIME, archive and embedded Word drawing ownership."""
     child, visited, chain = source, {source.get("sourceId")}, []
     for _ in range(16):
         parent_id = child.get("parentSourceId")
@@ -207,10 +213,15 @@ def source_parent_chain(source, sources):
             return None
         visited.add(parent_id)
         is_body = parent.get("sourceType") == "email_body" and parent.get("status") == "read"
-        is_archive = parent.get("sourceType") == "attachment" and parent.get("status") == "expanded:archive"
+        is_attachment = parent.get("sourceType") == "attachment"
+        is_archive = is_attachment and parent.get("status") == ARCHIVE_EXPANDED_STATUS
+        is_docx_drawing = (is_attachment and parent.get("status") in {"read", DOCX_EXPANDED_STATUS}
+                           and str(parent.get("filename", "")).lower().endswith(".docx")
+                           and child.get("sourceType") == "attachment" and child.get("docxDrawingPart"))
         prefix = (parent_id.removesuffix(":body") + ":attachment:" if is_body
-                  else parent_id + ":member:" if is_archive else "")
-        # Every provenance edge follows a deterministic MIME/archive ID.
+                  else parent_id + ":member:" if is_archive
+                  else parent_id + ":drawing:" if is_docx_drawing else "")
+        # Every provenance edge follows a deterministic source ID.
         if not prefix or not child.get("sourceId", "").startswith(prefix):
             return None
         chain.append(parent)
@@ -355,7 +366,8 @@ def attachment_message(source, sources):
 def client_evidence_applies(evidence, source, sources, context, contains):
     """Company/contact/date must belong to the same selected client message."""
     parent = parent_email(source, sources)
-    if (source.get("attachedEmail") or source.get("sourceType") == "email_body" and source.get("parentSourceId")
+    if (source.get("docxDrawingPart") or source.get("attachedEmail")
+            or source.get("sourceType") == "email_body" and source.get("parentSourceId")
             or source.get("parentSourceId") is not None and source_parent_chain(source, sources) is None
             or parent and parent.get("attachedEmail")):
         return False  # Attached correspondents do not replace the outer requester.

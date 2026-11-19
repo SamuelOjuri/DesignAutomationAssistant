@@ -529,6 +529,35 @@ def test_recitation_blocked_source_publishes_with_an_item_review_until_read(case
     assert "could not be read" not in pdf_text(case.gateway.uploads[-1][1])
 
 
+def test_page_limited_pdf_publishes_with_source_review_and_usable_evidence(case):
+    extraction = deepcopy(case.item.extracted_parameters_json)
+    source_id = "email:attachment:0"
+    decking = next(e for e in extraction["specificationEvidence"] if e["field"] == "Decking")
+    decking.update(source_id=source_id, location="page 100", request_role="document")
+    extraction["sourceManifest"].append({
+        "sourceId": source_id, "filename": "Roof specification.pdf", "sourceType": "attachment",
+        "contentSha256": "def", "status": "read", "text": f"PDF PAGE 100\n{decking['snippet']}",
+        "pdfPageCount": 140, "pdfPagesRead": 100,
+    })
+    case.item.extracted_parameters_json = extraction
+    case.db.commit()
+
+    resolved = resolve_specification_sources(case.gateway, case.item)
+    [issue] = resolved["reviewSource"]["source_issues"]
+    assert issue["source_id"] == source_id and issue["code"] == "review:pdf_page_limit"
+    assert "pages 1–100 of 140" in issue["detail"]
+    assert "from page 101 onward" in issue["detail"]
+    assert resolved["sources"]["Decking"]["selected"]["source_id"] == source_id
+
+    assert run(case) == ["published"]
+    record = current(case)
+    assert record.review_json["status"] == "published_with_review"
+    assert record.review_json["sourceReviews"] == [issue["detail"]]
+    text = pdf_text(case.gateway.uploads[-1][1])
+    assert "Roof specification.pdf" in text and "pages 1–100 of 140" in text
+    assert "Decking: Concrete" in text
+
+
 def roof_evidence(case, values):
     extraction = deepcopy(case.item.extracted_parameters_json)
     extraction["performanceParameters"]["Decking"] = None

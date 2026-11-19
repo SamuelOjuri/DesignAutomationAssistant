@@ -31,6 +31,7 @@ DWG_SKIP_STATUS = "skipped:dwg"
 UNSUPPORTED_SOURCE_SKIP_STATUS = "skipped:unsupported_format"
 ENCRYPTED_PDF_SKIP_STATUS = "skipped:encrypted_pdf"
 ARCHIVE_EXPANDED_STATUS = "expanded:archive"
+DOCX_EXPANDED_STATUS = "expanded:docx"
 # Gemini withheld a transcription with finish_reason=RECITATION. The source has
 # no text and cannot supply evidence, but unlike a skip it is never silent: it is
 # published as an explicit source-review note instead of blocking extraction.
@@ -46,7 +47,7 @@ REVIEW_SOURCE_STATUSES = frozenset({
 })
 COMPLETE_SOURCE_STATUSES = frozenset({
     "read", ANIMATED_IMAGE_SKIP_STATUS, DWG_SKIP_STATUS, UNSUPPORTED_SOURCE_SKIP_STATUS,
-    ENCRYPTED_PDF_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS,
+    ENCRYPTED_PDF_SKIP_STATUS, ARCHIVE_EXPANDED_STATUS, DOCX_EXPANDED_STATUS,
 }) | REVIEW_SOURCE_STATUSES
 FIELD_DEFINITIONS = {
     "Scale": "The drawing scale, usually found in a drawing title block (for example, 1:100).",
