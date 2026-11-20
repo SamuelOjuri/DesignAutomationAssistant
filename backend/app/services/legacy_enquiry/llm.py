@@ -87,7 +87,8 @@ class LegacyGeminiClient:
             drop_blank_evidence, evidence_diagnostics, extraction_payload, merge_recovery,
             repair_note_list_formatting, repair_note_prose_dashes, repair_image_company_citations,
             repair_message_dates, bound_verified_request_notes,
-            repair_literal_scale_citations, repair_literal_u_value_citations, repair_template_markers,
+            repair_literal_scale_citations, repair_literal_u_value_citations,
+            repair_spreadsheet_cell_citations, repair_template_markers,
         )
         from ..performance_specification_evidence import (
             PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNCONFIRMED_REFERENCE,
@@ -195,6 +196,7 @@ class LegacyGeminiClient:
         if source_manifest is not None:
             repair_message_dates(result, source_manifest)
             repair_image_company_citations(result, source_manifest)
+            repair_spreadsheet_cell_citations(result, source_manifest)
             repair_template_markers(result, source_manifest)
             repair_literal_scale_citations(result, source_manifest)
             repair_literal_u_value_citations(result, source_manifest)
@@ -242,6 +244,7 @@ class LegacyGeminiClient:
             if source_manifest is not None:
                 repair_message_dates(recovery, source_manifest)
                 repair_image_company_citations(recovery, source_manifest)
+                repair_spreadsheet_cell_citations(recovery, source_manifest)
                 repair_template_markers(recovery, source_manifest)
                 repair_literal_scale_citations(recovery, source_manifest)
                 repair_literal_u_value_citations(recovery, source_manifest)

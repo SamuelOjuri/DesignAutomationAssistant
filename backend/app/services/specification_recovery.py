@@ -3,8 +3,9 @@
 The model may correct a citation, never make an unsupported claim publishable.
 Changes to facts, roof or request chronology remain separate claims. A mistaken
 requested external drawing identity may become context only with verified source
-authorship. Unquoted issuers may be removed only from structurally valid drawing
-identities; replacement branding must be literal source text.
+authorship. Unquoted issuers may be removed from structurally valid drawing
+identities or non-reference fields; replacement branding must be literal source
+text.
 """
 
 import re
@@ -22,6 +23,7 @@ from .specification_image_text import literal_image_regions, literal_source_text
 from .specification_request_context import (
     attachment_message, attachment_messages, parent_email, request_context_summary, select_client_request, source_email_messages,
 )
+from .spreadsheet_extraction import is_spreadsheet
 
 
 def extraction_payload(result, manifest):
@@ -259,6 +261,71 @@ def repair_literal_u_value_citations(result, manifest):
         result._evidence_repairs.append({
             "reason": "Verified literal parenthetical U-value target repair",
             "before": before, "after": after,
+            "contentSha256": source["contentSha256"],
+        })
+
+
+_SPREADSHEET_HEADER_PREFIXES = (
+    "Workbook: ", "Worksheet: ", "First populated row (excerpt): ",
+    "Extraction scope: ", "Extraction notice: ",
+)
+_SPREADSHEET_CELL_PREFIX = re.compile(r"^(?P<coord>[A-Z]{1,3}[1-9]\d*(?: \(continued\))?)=(?P<value>.*)$")
+_SPREADSHEET_CELL_SPLIT = re.compile(r" \| (?=[A-Z]{1,3}[1-9]\d*(?: \(continued\))?=)")
+
+
+def repair_spreadsheet_cell_citations(result, manifest):
+    """Restore synthetic spreadsheet cell prefixes omitted from a contiguous row excerpt."""
+    sources = {source["sourceId"]: source for source in manifest}
+    parsed_rows = {}
+    for index, old in enumerate(result.specification_evidence):
+        source = sources.get(old.source_id)
+        joined = old.field in REFERENCE_FIELDS
+        if (not source or source["status"] != "read" or source.get("sourceType") == "email_body"
+                or not is_spreadsheet(source.get("filename") or "")
+                or not source["text"].startswith("Workbook: ")
+                or "\n" in old.snippet or "|" not in old.snippet
+                or _source_contains_excerpt(source, old.snippet, joined_identifier=joined)):
+            continue
+        snippet_cells = [_excerpt_normal(part) for part in old.snippet.split("|")]
+        if len(snippet_cells) < 2 or any(not part for part in snippet_cells):
+            continue
+        if old.source_id not in parsed_rows:
+            rows = []
+            for line in source["text"].splitlines():
+                if not line or line.startswith(_SPREADSHEET_HEADER_PREFIXES):
+                    continue
+                raw_cells = _SPREADSHEET_CELL_SPLIT.split(line)
+                parsed = []
+                for raw in raw_cells:
+                    match = _SPREADSHEET_CELL_PREFIX.match(raw)
+                    if not match:
+                        parsed = []
+                        break
+                    parsed.append((raw, _excerpt_normal(raw), _excerpt_normal(match["value"])))
+                if len(parsed) >= 2:
+                    rows.append(parsed)
+            parsed_rows[old.source_id] = rows
+        matches = []
+        width = len(snippet_cells)
+        for row in parsed_rows[old.source_id]:
+            if len(row) < width:
+                continue
+            for start in range(len(row) - width + 1):
+                window = row[start:start + width]
+                if all(part in (raw_norm, value_norm)
+                       for part, (_, raw_norm, value_norm) in zip(snippet_cells, window)):
+                    matches.append(" | ".join(raw for raw, _, _ in window))
+        if len(matches) != 1 or len(matches[0]) > 4000:
+            continue
+        new = old.model_copy(update={"snippet": matches[0]})
+        after = new.model_dump()
+        if (not _source_contains_excerpt(source, new.snippet, joined_identifier=joined)
+                or not _value_supported(after)):
+            continue
+        result.specification_evidence[index] = new
+        result._evidence_repairs.append({
+            "reason": "Verified literal spreadsheet-cell citation repair",
+            "before": old.model_dump(), "after": after,
             "contentSha256": source["contentSha256"],
         })
 
@@ -559,6 +626,14 @@ def repair_message_dates(result, manifest):
 def _issuer_repair_allowed(old, new):
     if _normal(old.issuer) == _normal(new["issuer"]):
         return True
+    if old.field != "Drawing Reference":
+        # Issuer is verified only for Drawing Reference. Recovery may clear a
+        # non-reference issuer, or replace an absent/unquoted issuer with one
+        # quoted verbatim in the verified excerpt.
+        if new["issuer"] is None:
+            return True
+        return ((not old.issuer or not _contains_excerpt(old.issuer, new["snippet"]))
+                and _contains_excerpt(new["issuer"], new["snippet"]))
     # A structurally valid two-letter reference may retain its exact value while the
     # recovery removes an unquoted issuer or quotes the literal source branding.
     # Bare/D.S references need a verified TP issuer or Monday CRM confirmation.

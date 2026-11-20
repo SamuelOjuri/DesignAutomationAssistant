@@ -11,7 +11,7 @@ from backend.app.services.performance_specification_evidence import (
 )
 from backend.app.services.specification_recovery import (
     extraction_payload, repair_literal_scale_citations, repair_literal_u_value_citations,
-    repair_note_list_formatting, repair_template_markers,
+    repair_note_list_formatting, repair_spreadsheet_cell_citations, repair_template_markers,
 )
 from backend.app.services.specification_semantics import (
     SpecificationEvidence, drawing_reference_key, scale_ratio, tp_reference_revision,
@@ -1028,6 +1028,81 @@ def test_unverifiable_alternate_date_still_blocks_when_the_field_has_another_val
     assert raw["Membrane"] == "VM Zinc membrane"
     assert issues["Membrane"] == "Candidate request timestamp could not be verified"
     assert provenance["Membrane"]["rejectedCandidates"][0]["status"] == "unverified"
+
+
+RENDER_SPREADSHEET = (
+    "Workbook: Drawing_Request_B252582.xlsx\n"
+    "Worksheet: Sheet1\n"
+    "First populated row (excerpt): A1=Rockwool - Tapered Drawing Request\n"
+    "A1=Rockwool - Tapered Drawing Request\n"
+    "A3=Contract No.: | B3=B252582\n"
+    "A5=Deck Type | B5=Plywood | C5=Roof 1"
+)
+
+
+@pytest.mark.parametrize("snippet", ["Contract No.: | B252582", "A3=Contract No.: | B252582"])
+def test_spreadsheet_cell_citation_repair_restores_unique_literal_coordinates(snippet):
+    # Render job c71174d0 (item 3371050313): initial extraction omitted B3= from a spreadsheet row.
+    old = candidate("Bauder Contract Number", "B252582", snippet, issuer="Bauder")
+    replies = iter([parameters(bauder_contract_number="B252582", specification_evidence=[old])])
+    client = LegacyGeminiClient("offline", generate_content=lambda *args, **kwargs: SimpleNamespace(parsed=next(replies)))
+    manifest = [{**source(old["source_id"], RENDER_SPREADSHEET), "filename": "Drawing_Request_B252582.xlsx"}]
+
+    result = client.extract_design_parameters_with_manifest("Synthetic source context", manifest)
+    raw, _, issues = resolve_email_evidence(extraction_payload(result, manifest))
+
+    assert raw["Bauder Contract Number"] == "B252582" and not issues
+    repair, = result._evidence_repairs
+    assert repair["reason"] == "Verified literal spreadsheet-cell citation repair"
+    assert repair["before"]["snippet"] == snippet
+    assert repair["after"]["snippet"] == "A3=Contract No.: | B3=B252582"
+    assert repair["contentSha256"] == "abc"
+
+
+@pytest.mark.parametrize("filename,text,snippet,value", [
+    ("request.pdf", RENDER_SPREADSHEET, "Contract No.: | B252582", "B252582"),
+    ("request.xlsx", RENDER_SPREADSHEET + "\nA9=Contract No.: | B9=B252582", "Contract No.: | B252582", "B252582"),
+    ("request.xlsx", RENDER_SPREADSHEET, "Deck Type | Roof 1", "Plywood"),  # Skips intervening B5 cell.
+    ("request.xlsx", RENDER_SPREADSHEET, "Contract No.: | B252582", "B999999"),  # Value absent from restored row.
+    ("request.xlsx", RENDER_SPREADSHEET, "Contract No.: | B252582\nDeck Type | Plywood", "B252582"),
+])
+def test_spreadsheet_cell_citation_repair_rejects_non_spreadsheet_ambiguous_or_spliced_rows(
+        filename, text, snippet, value):
+    old = candidate("Bauder Contract Number", value, snippet)
+    result = parameters(specification_evidence=[old])
+    manifest = [{**source(old["source_id"], text), "filename": filename}]
+
+    repair_spreadsheet_cell_citations(result, manifest)
+
+    assert result.specification_evidence[0].snippet == snippet and not result._evidence_repairs
+
+
+@pytest.mark.parametrize("old_issuer,new_issuer,text,allowed", [
+    ("Bauder", None, "A3=Contract No.: | B3=B252582", True),
+    ("Bauder", "Rockwool", "A3=Rockwool Contract No.: | B3=B252582", True),
+    (None, "Bauder", "A3=Bauder Contract No.: | B3=B252582", True),
+    ("Bauder", "Invented Ltd", "A3=Contract No.: | B3=B252582", False),
+    ("Bauder", "Rockwool", "A3=Bauder Rockwool Contract No.: | B3=B252582", False),
+])
+def test_non_reference_recovery_can_clear_unquoted_issuer_without_inventing_branding(
+        old_issuer, new_issuer, text, allowed):
+    # Render job c71174d0 (item 3371050313): recovery repaired the excerpt and cleared the
+    # unquoted issuer 'Bauder', which previously failed merge_recovery for non-reference fields.
+    old = candidate("Bauder Contract Number", "B252582", "Unverified Contract No.: B252582", issuer=old_issuer)
+    new = candidate("Bauder Contract Number", "B252582", text, issuer=new_issuer)
+    manifest = [source(old["source_id"], text)]
+    initial = parameters(bauder_contract_number="B252582", specification_evidence=[old])
+    recovery = parameters(bauder_contract_number="B252582", specification_evidence=[new])
+
+    if allowed:
+        result = extract_twice(initial, recovery, manifest)
+        raw, _, issues = resolve_email_evidence(extraction_payload(result, manifest))
+        assert raw["Bauder Contract Number"] == "B252582" and not issues
+        repair, = result._evidence_repairs
+        assert repair["before"]["issuer"] == old_issuer and repair["after"]["issuer"] == new_issuer
+    else:
+        with pytest.raises(ValueError, match="recovery unresolved"):
+            extract_twice(initial, recovery, manifest)
 
 
 def test_dated_twin_copy_from_the_same_plan_is_redundant():

@@ -923,6 +923,23 @@ failed every attempt. Items `3359486811` (job `d73a99ee`) and `3362399426` (jobs
 `d1c91622`, `fa5c9ec3`) failed this way on 16–17 November. This changes extraction
 handling only; the pipeline identity is unchanged.
 
+Spreadsheet extraction formats populated row cells with synthetic coordinate prefixes
+(`A3=Contract No.: | B3=B252582`). During extraction, a deterministic repair now
+restores omitted cell coordinates when a single-line `|`-separated excerpt matches
+one unique contiguous span of populated cells in that same workbook, preserving all
+cell text, values and metadata and auditing `Verified literal spreadsheet-cell
+citation repair`. Non-spreadsheet sources, duplicate rows, skipped cells and changed
+values are never repaired. In addition, recovery for non-`Drawing Reference` fields
+may now replace a rejected candidate when the verified recovery citation clears a
+non-reference `issuer` to `null` (or quotes literal branding from its verified
+excerpt without replacing an already quoted issuer), while leaving all `Drawing
+Reference` issuer rules unchanged. Item `3371050313` (job `c71174d0`) failed
+recovery on `Bauder Contract Number` because initial extraction cited `Contract No.:
+| B252582` with `issuer="Bauder"` and recovery repaired it to `A3=Contract No.: |
+B3=B252582` with `issuer=null`, which `merge_recovery` refused to merge. Both
+changes affect extraction repair/recovery only, so `output-v22` and already
+published PDFs are unchanged.
+
 The following prefix-only policy describes the earlier `output-v17` release; it
 is superseded by the generalized Phase 3 parser described above.
 
