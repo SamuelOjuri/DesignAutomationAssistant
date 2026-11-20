@@ -62,6 +62,7 @@ DATABASE_EXTRACTION_MAX_OVERFLOW=0
 DATABASE_POOL_TIMEOUT_SECONDS=30
 DATABASE_POOL_RECYCLE_SECONDS=300
 DATABASE_CONNECT_TIMEOUT_SECONDS=10
+DATABASE_CONNECT_RETRY_SECONDS=20
 ```
 
 These limits apply per process. Count all API workers, background services and
@@ -70,6 +71,34 @@ service's pool does not change the others. Keep the existing independent design,
 specification and ingestion modes. Do not raise Gemini quotas, disable the
 shared admission gate or change web-service scaling to conceal a database
 failure.
+
+Operational update: 20 November 2026. `DATABASE_URL` uses Supabase's
+session-mode pooler (port 5432), which rejects new clients with
+`EMAXCONNSESSION ... max clients are limited to pool_size: 15`. Every open
+client connection holds one of those 15 slots, used or not. Each process kept
+its whole pool open while idle, so a quiet steady state measured 11 of 15 slots.
+The 09:14 deploy of commit `a9c43a6` started the replacement design worker about
+two minutes before the old instance stopped, and the limit was reached for that
+overlap. Other services redeploying from the same push would add to it; this
+log covers the design worker only. Job `343f924a-5902-4564-9687-83f7a2804bdd`
+(item 3370889595) went to `retry_wait` on `connection_limit` at Gemini
+admission, and its heartbeat logged the pooler error.
+
+Background processes now close a connection when its transaction ends and
+reconnect on demand, so workers hold no slot during poll intervals and model
+calls. The pool sizes above still bound concurrent connections per process. Only
+the API keeps its pool open between requests. Startup diagnostics report this as
+`database_idle_connections`: `released` for workers and extraction children,
+`kept` for the API. A new connection that meets the client limit waits up to
+`DATABASE_CONNECT_RETRY_SECONDS` for a slot before raising; keep that below
+`DATABASE_POOL_TIMEOUT_SECONDS`. No migration or pipeline bump is required.
+Deploy it to every backend service; instances still running the previous commit
+keep their idle connections until they stop.
+
+If the limit is still reached, raise the pooler's pool size in Supabase's
+database settings, or move the runtime `DATABASE_URL` to the transaction-mode
+pooler (port 6543). The backend holds no session state between transactions, so
+transaction mode is compatible; keep Alembic migrations on session mode.
 
 Run the new diagnostic from the repository root in **each affected deployed
 environment**, using that process's existing `DATABASE_URL` and runtime role:

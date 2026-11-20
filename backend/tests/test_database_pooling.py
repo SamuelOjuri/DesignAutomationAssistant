@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Annotated
 
 from pydantic import TypeAdapter, ValidationError
+import psycopg2
 import pytest
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.pool import QueuePool, StaticPool
@@ -34,7 +35,7 @@ def test_postgres_pools_have_bounded_parent_and_extraction_defaults(monkeypatch)
     ("database_pool_size", 0), ("database_pool_size", 51), ("database_max_overflow", -1),
     ("database_extraction_pool_size", 0), ("database_extraction_max_overflow", -1),
     ("database_pool_timeout_seconds", 0), ("database_pool_recycle_seconds", -1),
-    ("database_connect_timeout_seconds", 0),
+    ("database_connect_timeout_seconds", 0), ("database_connect_retry_seconds", -1),
 ])
 def test_pool_settings_reject_unbounded_or_nonpositive_budgets(field, value):
     definition = Settings.model_fields[field]
@@ -95,6 +96,66 @@ def test_real_queue_pool_never_exceeds_configured_parallel_connection_limit(tmp_
         assert counters == {"active": 0, "maximum": expected, "created": expected}
     finally:
         engine.dispose()
+
+
+def test_background_pools_close_idle_connections_and_the_api_keeps_them(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "database_url", "postgresql://example.invalid/app")
+    production = db._create_engine(db._engine_options(settings.database_url))
+    assert event.contains(production, "checkin", db._release_idle_connection)
+    assert event.contains(production, "do_connect", db._connect_when_slot_available)
+
+    engine = create_engine("sqlite:///" + str(tmp_path / "idle.sqlite"), poolclass=QueuePool,
+                           pool_size=1, max_overflow=0)
+    event.listen(engine, "checkin", db._release_idle_connection)
+    opened, closed = [], []
+    event.listen(engine, "connect", lambda *args: opened.append(1))
+    event.listen(engine, "close", lambda *args: closed.append(1))
+
+    def query_twice():
+        for _ in range(2):
+            with engine.connect() as connection:
+                assert connection.scalar(text("SELECT 1")) == 1
+
+    try:
+        monkeypatch.setattr(db, "_keep_idle_connections", False)
+        query_twice()
+        assert (len(opened), len(closed)) == (2, 2)
+        db.keep_idle_connections()
+        query_twice()
+        assert (len(opened), len(closed)) == (3, 2)
+    finally:
+        engine.dispose()
+
+
+LIMIT_MESSAGE = ('connection to server at "pooler.example.invalid", port 5432 failed: FATAL:  '
+                 "(EMAXCONNSESSION) max clients reached in session mode - max clients are limited to pool_size: 15")
+
+
+def _dialect_failing(messages):
+    remaining = list(messages)
+
+    def connect(*args, **kwargs):
+        if remaining:
+            raise psycopg2.OperationalError(remaining.pop(0))
+        return "connected"
+
+    return SimpleNamespace(connect=connect)
+
+
+def test_new_connections_wait_for_a_pooler_slot_only_on_the_client_limit(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(db.time, "sleep", sleeps.append)
+    monkeypatch.setattr(settings, "database_connect_retry_seconds", 20)
+    assert db._connect_when_slot_available(_dialect_failing([LIMIT_MESSAGE] * 2), None, (), {}) == "connected"
+    assert len(sleeps) == 2 and all(0 < delay <= 0.5 for delay in sleeps)
+
+    with pytest.raises(psycopg2.OperationalError, match="password authentication failed"):
+        db._connect_when_slot_available(
+            _dialect_failing(['FATAL:  password authentication failed for user "app"']), None, (), {})
+    monkeypatch.setattr(settings, "database_connect_retry_seconds", 0)
+    with pytest.raises(psycopg2.OperationalError, match="EMAXCONNSESSION"):
+        db._connect_when_slot_available(_dialect_failing([LIMIT_MESSAGE]), None, (), {})
+    assert len(sleeps) == 2
 
 
 def test_only_the_actual_extraction_child_rebinds_the_same_captured_factory(tmp_path, monkeypatch, capsys):

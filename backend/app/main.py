@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.app.config import settings
+from backend.app.db import keep_idle_connections
 from backend.app.routes.monday_handoff import router as monday_handoff_router
 from backend.app.routes.monday_auth import router as monday_auth_router
 from backend.app.routes.monday_webhooks import router as monday_webhooks_router
@@ -18,6 +19,7 @@ logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(_app):
+    keep_idle_connections()
     # Company Account matching needs the CRM Accounts directory; load it in the
     # background so startup and the first review do not wait for Monday.
     if settings.performance_specification_review_enabled and settings.monday_ingestion_access_token:

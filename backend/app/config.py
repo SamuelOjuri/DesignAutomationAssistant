@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     database_pool_timeout_seconds: float = Field(default=30, ge=1, le=300)
     database_pool_recycle_seconds: int = Field(default=300, ge=1, le=3600)
     database_connect_timeout_seconds: int = Field(default=10, ge=1, le=120)
+    # How long a new connection waits for a pooler slot when the pooler reports
+    # its client limit. Keep below the pool timeout; 0 fails immediately.
+    database_connect_retry_seconds: float = Field(default=20, ge=0, le=120)
 
     # Auto-sync foundation
     auto_sync_enabled: bool = False
