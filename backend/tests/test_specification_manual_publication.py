@@ -1,9 +1,11 @@
 """Active-group preparation never grants permission to publish a Monday file."""
 from datetime import timedelta
 from dataclasses import replace
+from types import SimpleNamespace
 import uuid
 
 import pytest
+from sqlalchemy.orm import Session
 
 from backend.app.config import settings
 from backend.app.models import (PerformanceSpecificationReviewEvent, DesignProcessingReconciliationCheck,
@@ -54,6 +56,77 @@ def publish(case, request):
 
 def change_source(case):
     case.gateway.project["column_values"][1]["linked_items"][0]["name"] += " revised"
+
+
+def draft_progress(case):
+    with Session(case.db.get_bind()) as db:
+        identity = {"board_id": BOARD, "item_id": ITEM, "account_id": ACTOR.monday_account_id,
+                    "editable": True, "manual_publication": True}
+        status = workspace.get_status(db, **identity)
+        payload = workspace.get_workspace(db, gateway=case.gateway, **identity)
+    return [(result["status"], result["queue"]["running"], result["queue"]["phase"])
+            for result in (status, payload)]
+
+
+def test_draft_rendering_phase_covers_pdf_generation_and_storage(case, monkeypatch):
+    move(case, "topics")
+    open_review(case)
+    assert draft_progress(case) == [("preparing_draft", False, None)] * 2
+    render_pdf = worker.render_performance_specification_pdf
+    write_pdf = case.storage.write_private
+    publication_permitted = worker._publication_permitted
+    during_render = []
+    after_lease_expiry = []
+    during_storage = []
+    after_storage = []
+
+    def render(*args, **kwargs):
+        during_render.extend(draft_progress(case))
+        after_expiry = worker.utc_now() + timedelta(seconds=worker.LEASE_SECONDS + 1)
+        with monkeypatch.context() as clock:
+            clock.setattr(workspace, "datetime", SimpleNamespace(now=lambda _: after_expiry))
+            after_lease_expiry.extend(draft_progress(case))
+        return render_pdf(*args, **kwargs)
+
+    def store(*args, **kwargs):
+        during_storage.extend(draft_progress(case))
+        return write_pdf(*args, **kwargs)
+
+    def check_publication(*args, **kwargs):
+        after_storage.extend(draft_progress(case))
+        return publication_permitted(*args, **kwargs)
+
+    monkeypatch.setattr(worker, "render_performance_specification_pdf", render)
+    monkeypatch.setattr(case.storage, "write_private", store)
+    monkeypatch.setattr(worker, "_publication_permitted", check_publication)
+
+    assert execute(case) == ["rendered"]
+    assert during_render == during_storage == [("preparing_draft", True, "rendering")] * 2
+    assert after_lease_expiry == [("preparing_draft", False, None)] * 2
+    assert after_storage == [("preparing_draft", True, None)] * 2
+    assert draft_progress(case) == [("ready_to_publish", False, None)] * 2
+
+
+def test_scheduled_recheck_reuses_existing_draft_without_rendering_phase(case, monkeypatch):
+    move(case, "topics")
+    revision = prepare(case)["pdf"]["revision"]
+    record = current(case)
+    assert record.requested_generation == record.completed_generation
+    record.scheduled_for = worker.utc_now()
+    case.db.commit()
+    read_pdf = case.storage.read_private
+    during_recheck = []
+
+    def read(*args, **kwargs):
+        during_recheck.extend(draft_progress(case))
+        return read_pdf(*args, **kwargs)
+
+    monkeypatch.setattr(case.storage, "read_private", read)
+
+    assert execute(case) == ["rendered"]
+    assert during_recheck == [("preparing_draft", True, None)] * 2
+    assert open_review(case)["pdf"]["revision"] == revision
+    assert draft_progress(case) == [("ready_to_publish", False, None)] * 2
 
 
 def test_active_first_publication_without_corrections_is_explicit_and_idempotent(case):

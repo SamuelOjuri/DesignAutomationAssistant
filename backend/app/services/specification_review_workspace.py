@@ -9,7 +9,7 @@ starts chat ingestion or writes Monday business fields.
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import timezone
+from datetime import datetime, timezone
 import hashlib
 from types import SimpleNamespace
 from typing import Annotated
@@ -260,6 +260,25 @@ def _status(*, spec, review, source_ready, exact, approval, editable, source_err
     return "awaiting_final_review" if exact else "needs_review"
 
 
+def _queue_snapshot(spec):
+    if spec is None:
+        return None
+    lease_until = spec.lease_until
+    if lease_until is not None and lease_until.tzinfo is None:
+        lease_until = lease_until.replace(tzinfo=timezone.utc)
+    running = bool(spec.lease_token and lease_until and lease_until > datetime.now(timezone.utc))
+    rendering = running and (spec.review_json or {}).get("renderingPdf") == {
+        "leaseToken": spec.lease_token, "generation": spec.requested_generation,
+    }
+    return {
+        "requested_generation": spec.requested_generation,
+        "completed_generation": spec.completed_generation,
+        "running": running,
+        "failed": bool(spec.last_error),
+        "phase": "rendering" if rendering else None,
+    }
+
+
 def _extracted_project_title(context, source):
     """Display the matcher input only when it belongs to the displayed sources.
 
@@ -335,9 +354,7 @@ def _payload(context, *, board_id, item_id, editable, source=None, source_error=
                            "effective": metadata["field_provenance"][label]}
                    for label in FIELD_NAMES} if source else {},
         "candidates": source.candidates.model_dump(mode="json") if source else {"status": "pending", "projects": [], "drawings": [], "issues": []},
-        "queue": {"requested_generation": spec.requested_generation,
-                  "completed_generation": spec.completed_generation,
-                  "running": spec.lease_token is not None, "failed": bool(spec.last_error)} if spec else None,
+        "queue": _queue_snapshot(spec),
         "pdf": _artifact_info(preview, board_id, item_id) if not provisional else None,
         "published_pdf": _artifact_info(current, board_id, item_id),
         "approval": {"id": str(approval.id), "artifact_revision": approval.artifact_revision,
@@ -401,15 +418,18 @@ def get_status(db, *, board_id, item_id, account_id, editable, manual_publicatio
     try:
         spec_row = db.query(PerformanceSpecification.requested_generation,
             PerformanceSpecification.completed_generation, PerformanceSpecification.lease_token,
+            PerformanceSpecification.lease_until,
             PerformanceSpecification.scheduled_for,
             PerformanceSpecification.last_error, PerformanceSpecification.current_revision,
             PerformanceSpecification.requested_publication_revision,
             PerformanceSpecification.prepared_revision,
             PerformanceSpecification.review_json["reviewApiSourceState"].as_string().label("source_state"),
-            PerformanceSpecification.review_json["status"].as_string().label("review_status")
+            PerformanceSpecification.review_json["status"].as_string().label("review_status"),
+            PerformanceSpecification.review_json["renderingPdf"].label("rendering_pdf"),
         ).filter_by(board_id=board_id, item_id=item_id).one_or_none()
         spec = SimpleNamespace(**spec_row._asdict(),
-            review_json={"reviewApiSourceState": spec_row.source_state, "status": spec_row.review_status}) if spec_row else None
+            review_json={"reviewApiSourceState": spec_row.source_state, "status": spec_row.review_status,
+                         "renderingPdf": spec_row.rendering_pdf}) if spec_row else None
         review = db.query(PerformanceSpecificationReview.review_version,
             PerformanceSpecificationReview.monday_account_id, PerformanceSpecificationReview.source_fingerprint,
             PerformanceSpecificationReview.decision_digest, PerformanceSpecificationReview.desired_publication_identity,
@@ -459,9 +479,7 @@ def get_status(db, *, board_id, item_id, account_id, editable, manual_publicatio
             "decision_digest": review.decision_digest if review else None,
             "desired_publication_identity": review.desired_publication_identity if review else None,
             "requested_publication_revision": spec.requested_publication_revision if spec else None,
-            "queue": {"requested_generation": spec.requested_generation,
-                      "completed_generation": spec.completed_generation,
-                      "running": spec.lease_token is not None, "failed": bool(spec.last_error)} if spec else None,
+            "queue": _queue_snapshot(spec),
             "pdf": _artifact_info(preview, board_id, item_id) if not provisional else None,
             "published_pdf": _artifact_info(current, board_id, item_id),
             "approval": {"id": str(approval.id), "artifact_revision": approval.artifact_revision,

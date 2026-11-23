@@ -483,7 +483,7 @@ class SupersededSpecification(RuntimeError):
     pass
 
 
-def _check_claim(db, claim):
+def _check_claim(db, claim, *, rendering_pdf=None):
     board_id, item_id, token, generation = claim
     record = _record(db, board_id, item_id).one_or_none()
     if (record is None or record.lease_token != token or record.requested_generation != generation
@@ -498,6 +498,14 @@ def _check_claim(db, claim):
         db.rollback()
         raise SpecificationReadDeferred(decision)
     record.lease_until = utc_now() + timedelta(seconds=LEASE_SECONDS)
+    if rendering_pdf is not None:
+        review = {**(record.review_json or {})}
+        if rendering_pdf:
+            # Only this claim and generation may report that a PDF is being generated.
+            review["renderingPdf"] = {"leaseToken": token, "generation": generation}
+        else:
+            review.pop("renderingPdf", None)
+        record.review_json = review or None
     db.commit()
     return record
 
@@ -694,13 +702,14 @@ def execute_specification(db, claim, *, gateway, client, storage):
             if current != source:
                 raise SupersededSpecification("Specification sources changed during translation")
             stage = "render_pdf"
+            _check_claim(db, claim, rendering_pdf=True)
             content = render_performance_specification_pdf(translation, item_id=item_id, revision=revision)
             filename = f"Project_Performance_Specification_Details_{item_id}_{revision}.pdf"
             object_key = f"performance-specifications/{board_id}/{item_id}/{revision}/{filename}"
             _check_claim(db, claim)
             stage = "store_pdf"
             storage.write_private(settings.design_processing_artifact_bucket, object_key, content, "application/pdf")
-            _check_claim(db, claim)
+            _check_claim(db, claim, rendering_pdf=False)
             artifact = PerformanceSpecificationArtifact(
                 board_id=board_id, item_id=item_id, revision=revision,
                 translation_json=translation.model_dump(by_alias=True), model_version=model_version,

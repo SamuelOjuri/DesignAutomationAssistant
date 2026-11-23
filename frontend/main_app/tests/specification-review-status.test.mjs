@@ -105,6 +105,22 @@ test("source failures only mention a previous PDF when one is available", () => 
   }
 });
 
+test("draft PDF status distinguishes queued checks, running checks and confirmed rendering", () => {
+  const status = "preparing_draft";
+  const queue = { requested_generation: 2, completed_generation: 1, failed: false };
+  const pending = getReviewStatusDescription({ status });
+  assert.equal(pending.title, "Draft PDF check pending");
+  const queued = getReviewStatusDescription({ status, queue: { ...queue, running: false } });
+  assert.equal(queued.title, "Draft PDF check queued");
+  const checking = getReviewStatusDescription({ status, hasPdf: true,
+    queue: { ...queue, completed_generation: 2, running: true } });
+  assert.equal(checking.title, "Checking specification PDF");
+  assert.match(checking.detail, /You can inspect the available PDF/);
+  const rendering = getReviewStatusDescription({ status, queue: { ...queue, running: true, phase: "rendering" } });
+  assert.equal(rendering.title, "Generating draft PDF");
+  assert.doesNotMatch(rendering.detail, /available PDF|published PDF/);
+});
+
 test("normal review states and unknown status fallback retain their existing descriptions", () => {
   for (const [status, title] of [
     ["needs_review", "Needs review"], ["regenerating_pdf", "Regenerating PDF"],

@@ -1,4 +1,4 @@
-import type { AnalysisProgress } from "./specification-review-api.ts";
+import type { AnalysisProgress, ReviewStatusSnapshot } from "./specification-review-api.ts";
 
 export interface ReviewStatusContext {
   status: string;
@@ -6,6 +6,7 @@ export interface ReviewStatusContext {
   hasSource?: boolean;
   hasPdf?: boolean;
   analysis?: AnalysisProgress | null;
+  queue?: ReviewStatusSnapshot["queue"];
 }
 
 export type ReviewStatusTone = "neutral" | "warning" | "info" | "success";
@@ -17,7 +18,7 @@ export interface ReviewStatusDescription {
 }
 
 const descriptions: Record<string, ReviewStatusDescription> = {
-  preparing_draft: { title: "Preparing draft PDF", detail: "Preparing the current recommendations and saved corrections. The published PDF remains unchanged.", tone: "neutral" },
+  preparing_draft: { title: "Draft PDF check pending", detail: "The app will check whether the current recommendations and saved corrections need a new draft.", tone: "neutral" },
   ready_to_publish: { title: "Unpublished changes ready for review", detail: "Inspect the draft and recommended changes, then publish when ready. Opening this view and saving corrections do not publish in active groups.", tone: "warning" },
   changes_recommended: { title: "Publication changes recommended", detail: "Review the latest recommendations. The published PDF remains unchanged until you publish an updated draft.", tone: "warning" },
   publishing_pdf: { title: "Publishing PDF", detail: "Publishing the draft you requested. The previous PDF is retained until the replacement succeeds.", tone: "neutral" },
@@ -45,8 +46,21 @@ const readOnlyReasons: Record<string, { title: string; reason: string }> = {
 };
 
 export function getReviewStatusDescription({
-  status, scopeReason, hasSource = false, hasPdf = false, analysis,
+  status, scopeReason, hasSource = false, hasPdf = false, analysis, queue,
 }: ReviewStatusContext): ReviewStatusDescription {
+  if (status === "preparing_draft") {
+    let description = descriptions.preparing_draft;
+    if (queue?.running === false) {
+      description = { ...description, title: "Draft PDF check queued" };
+    } else if (queue?.running && queue.phase === "rendering") {
+      description = { ...description, title: "Generating draft PDF",
+        detail: "A new draft is being generated from the current recommendations and saved corrections." };
+    } else if (queue?.running) {
+      description = { ...description, title: "Checking specification PDF",
+        detail: "The app is checking whether the current recommendations and saved corrections need a new draft." };
+    }
+    return { ...description, detail: hasPdf ? `${description.detail} You can inspect the available PDF in the preview.` : description.detail };
+  }
   if (status === "read_only") {
     const scope = scopeReason ? readOnlyReasons[scopeReason] : undefined;
     return {

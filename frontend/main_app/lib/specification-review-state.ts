@@ -198,7 +198,7 @@ export function publicationCommand(workspace: ReviewStatusSnapshot, idempotencyK
 }
 
 const STATUS_TEXT: Record<ReviewStatus, string> = {
-  preparing_draft: "Preparing draft PDF",
+  preparing_draft: "Draft PDF check pending",
   ready_to_publish: "Unpublished changes ready for review",
   changes_recommended: "Publication changes recommended",
   publishing_pdf: "Publishing PDF",

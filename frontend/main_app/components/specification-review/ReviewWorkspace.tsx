@@ -381,7 +381,7 @@ export default function ReviewWorkspace() {
             )}
             {sourceContext && <p className="text-sm text-muted-foreground">{sourceContext}</p>}
           </div>
-          {usable && <ReviewStatus className="lg:max-w-xl" status={workspace.status} scopeReason={workspace.scope_reason} hasSource={Boolean(workspace.source)} hasPdf={Boolean(workspace.pdf || workspace.published_pdf)} hasUnsavedChanges={dirty} analysis={workspace.analysis} />}
+          {usable && <ReviewStatus className="lg:max-w-xl" status={workspace.status} scopeReason={workspace.scope_reason} hasSource={Boolean(workspace.source)} hasPdf={Boolean(workspace.pdf || workspace.published_pdf)} hasUnsavedChanges={dirty} analysis={workspace.analysis} queue={workspace.queue} />}
         </header>
         {error && <Alert variant="destructive" className="bg-card"><CircleAlert className="size-4" aria-hidden="true" /><AlertDescription>{error}</AlertDescription></Alert>}
         {notice && <Alert variant="success" role="status"><CircleCheck className="size-4" aria-hidden="true" /><AlertDescription>{notice}</AlertDescription></Alert>}

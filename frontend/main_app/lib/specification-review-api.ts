@@ -107,7 +107,7 @@ export type AnalysisProgress = {
 export type ReviewStatusSnapshot = {
   board_id: string; item_id: string; status: ReviewStatus; review_version: number;
   source_fingerprint: string | null; decision_digest: string | null; desired_publication_identity: string | null;
-  queue: { requested_generation: number; completed_generation: number; running: boolean; failed: boolean } | null;
+  queue: { requested_generation: number; completed_generation: number; running: boolean; failed: boolean; phase?: "rendering" | null } | null;
   pdf: PdfArtifact | null; published_pdf: PdfArtifact | null; approval: Approval | null;
   capabilities: ReviewCapabilities; scope_reason: string | null;
   provisional?: boolean; analysis?: AnalysisProgress | null; extraction_identity?: string | null;

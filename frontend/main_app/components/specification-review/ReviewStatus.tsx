@@ -1,17 +1,11 @@
 "use client";
 
 import { CircleCheck, ClipboardCheck, Info, LoaderCircle, Lock, TriangleAlert, type LucideIcon } from "lucide-react";
-import { getReviewStatusDescription, type ReviewStatusTone } from "@/lib/specification-review-status";
-import type { AnalysisProgress } from "@/lib/specification-review-api";
+import { getReviewStatusDescription, type ReviewStatusContext, type ReviewStatusTone } from "@/lib/specification-review-status";
 import { cn } from "@/lib/utils";
 
-export interface ReviewStatusProps {
-  status: string;
-  scopeReason?: string | null;
-  hasSource?: boolean;
-  hasPdf?: boolean;
+export interface ReviewStatusProps extends ReviewStatusContext {
   hasUnsavedChanges?: boolean;
-  analysis?: AnalysisProgress | null;
   className?: string;
 }
 
@@ -23,8 +17,9 @@ const toneClasses: Record<ReviewStatusTone, { panel: string; icon: string; fallb
 };
 const inProgress = new Set(["preparing_draft", "publishing_pdf", "source_waiting", "analysis_pending", "regenerating_pdf"]);
 
-export default function ReviewStatus({ status, scopeReason, hasSource = false, hasPdf = false, hasUnsavedChanges = false, analysis, className }: ReviewStatusProps) {
-  const description = getReviewStatusDescription({ status, scopeReason, hasSource, hasPdf, analysis });
+export default function ReviewStatus({ hasUnsavedChanges = false, className, ...context }: ReviewStatusProps) {
+  const { status, analysis } = context;
+  const description = getReviewStatusDescription(context);
   const tone = toneClasses[description.tone];
   const spinning = inProgress.has(status);
   const Icon = status === "read_only" ? Lock : spinning ? LoaderCircle : tone.fallback;
