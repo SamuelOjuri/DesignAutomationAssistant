@@ -6,8 +6,9 @@ from types import SimpleNamespace
 
 from google.genai import types
 from httpx import ReadTimeout
-from pypdf import PdfReader, PdfWriter
-from pypdf.generic import RectangleObject
+from pypdf import PdfReader, PdfWriter, apply_configuration
+from pypdf.errors import LimitReachedError
+from pypdf.generic import DecodedStreamObject, RectangleObject
 import pytest
 
 from backend.app.config import settings
@@ -18,12 +19,16 @@ from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.legacy_enquiry.source_documents import extract_source_records
 
 
-def pdf(width=1684, height=2384, pages=1, rotation=0, protected=False):
+def pdf(width=1684, height=2384, pages=1, rotation=0, protected=False, line_segments=0):
     writer = PdfWriter()
     for _ in range(pages):
         page = writer.add_blank_page(width, height)
         page.mediabox = RectangleObject((10, 20, width + 10, height + 20))
         page.rotate(rotation)
+        if line_segments:
+            drawing = DecodedStreamObject()
+            drawing.set_data(b"0 0 m 10 10 l S\n" * line_segments)
+            page.replace_contents(drawing)
     if protected:
         writer.encrypt("", "owner")
     output = io.BytesIO()
@@ -31,22 +36,76 @@ def pdf(width=1684, height=2384, pages=1, rotation=0, protected=False):
     return output.getvalue()
 
 
+# User-space corners shown at the top left/right for each clockwise /Rotate.
+DISPLAYED_TOP_CORNERS = {
+    0: (("left", "top"), ("right", "top")),
+    90: (("left", "bottom"), ("left", "top")),
+    180: (("right", "bottom"), ("left", "bottom")),
+    270: (("right", "top"), ("right", "bottom")),
+}
+OPPOSITE = {"left": "right", "right": "left", "top": "bottom", "bottom": "top"}
+
+
+def touches(box, original, corner):
+    return all(getattr(box, edge) == pytest.approx(getattr(original, edge)) for edge in corner)
+
+
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
 def test_detail_views_cover_rotated_original_with_overlap(rotation):
     content = pdf(rotation=rotation)
-    original = PdfReader(io.BytesIO(content)).pages[0]
-    if rotation:
-        original.transfer_rotation_to_content()
+    original = PdfReader(io.BytesIO(content)).pages[0].cropbox
     data, labels = details.pdf_detail_views(content)
     views = PdfReader(io.BytesIO(data)).pages
-    assert len(views) == len(labels) == 4 and all(p.rotation == 0 for p in views)
-    assert min(p.cropbox.left for p in views) == pytest.approx(original.cropbox.left)
-    assert max(p.cropbox.right for p in views) == pytest.approx(original.cropbox.right)
-    assert min(p.cropbox.bottom for p in views) == pytest.approx(original.cropbox.bottom)
-    assert max(p.cropbox.top for p in views) == pytest.approx(original.cropbox.top)
-    assert views[0].cropbox.right > views[1].cropbox.left
-    assert views[0].cropbox.bottom < views[2].cropbox.top
+    # Views keep /Rotate, so crops stay in the original's user space.
+    assert len(views) == len(labels) == 4 and all(p.rotation == rotation for p in views)
+    boxes = [p.cropbox for p in views]
+    assert min(b.left for b in boxes) == pytest.approx(original.left)
+    assert max(b.right for b in boxes) == pytest.approx(original.right)
+    assert min(b.bottom for b in boxes) == pytest.approx(original.bottom)
+    assert max(b.top for b in boxes) == pytest.approx(original.top)
+    # 55% per axis gives every neighbouring pair a 10% overlap.
+    assert all(b.width == pytest.approx(.55 * original.width)
+               and b.height == pytest.approx(.55 * original.height) for b in boxes)
+    top_left, top_right = DISPLAYED_TOP_CORNERS[rotation]
+    for box, label, corner in zip(boxes, labels, (
+        top_left, top_right,
+        tuple(OPPOSITE[edge] for edge in top_right), tuple(OPPOSITE[edge] for edge in top_left),
+    )):
+        assert touches(box, original, corner), label
+    assert [label.rsplit(", ", 1)[1] for label in labels] == ["top left", "top right", "bottom left", "bottom right"]
     assert PdfReader(io.BytesIO(content)).pages[0].rotation == rotation  # Source bytes untouched.
+
+
+def test_dense_rotated_drawing_keeps_detail_views_without_parsing_its_content():
+    # Render job d3e6a8a9 (item 3377374422): two A0 drawings with /Rotate 90 and
+    # 13-18 MB content streams exceeded pypdf's per-stream token limit when the
+    # rotation was moved into their content, failing both sources on all attempts.
+    content = pdf(2384, 3370, rotation=90, line_segments=100)
+    with apply_configuration(stream_parsing_work_maximum_count=50):
+        data, labels = details.pdf_detail_views(content)
+    original = PdfReader(io.BytesIO(content)).pages[0].get_contents().get_data()
+    views = PdfReader(io.BytesIO(data)).pages
+    assert len(views) == len(labels) == 4
+    assert all(view.get_contents().get_data() == original for view in views)
+
+
+def test_detail_view_parser_failure_still_transcribes_the_original(monkeypatch, caplog):
+    class LimitedWriter(PdfWriter):
+        def write(self, stream):
+            raise LimitReachedError("Reached maximum number of tokens per stream.")
+
+    monkeypatch.setattr(details, "PdfWriter", LimitedWriter)
+    calls = []
+
+    def generate(model, parts, config):
+        calls.append(parts)
+        return SimpleNamespace(text="SCALE 1:100")
+
+    content = pdf()
+    assert LegacyGeminiClient("offline", generate_content=generate).process_pdf(content, "drawing.pdf") == "SCALE 1:100"
+    assert len(calls) == 1 and len(calls[0]) == 2  # Original, then its transcription prompt.
+    assert calls[0][0].inline_data.data == content
+    assert "PDF detail views omitted error_type=LimitReachedError" in caplog.text
 
 
 def test_ordinary_pages_have_no_detail_pdf_and_large_documents_are_bounded(monkeypatch):

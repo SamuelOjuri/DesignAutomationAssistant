@@ -1229,7 +1229,11 @@ def execute_claimed_analysis_job(
                 operation_name=f"execute design-processing job {job_id}",
                 retry_if=is_postgres_deadlock,
             )
-            _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token)
+            # Both pipelines commit a terminal job before returning. A newer event
+            # (e.g. the webhook for deleting prior assets) has its own reconciliation
+            # and must not relabel this committed outcome as "not_claimed".
+            _observe_design_read(db, gateway, board_id=registered_board_id, access_token=access_token,
+                                 reject_stale=False)
             db.commit()
             return outcome
         finally:

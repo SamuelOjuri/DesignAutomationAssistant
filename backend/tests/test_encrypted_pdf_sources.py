@@ -7,11 +7,14 @@ from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pytest
+from pypdf import apply_configuration
 
 from backend.app.services.legacy_enquiry.analysis import analyze_downloaded_email_assets
 from backend.app.services.legacy_enquiry.email_extraction import extract_text_from_email
 from backend.app.services.legacy_enquiry.parameter_extraction import DesignParameterExtraction
-from backend.app.services.legacy_enquiry.source_documents import IncompleteSourceExtraction, extract_source_records
+from backend.app.services.legacy_enquiry.source_documents import (
+    IncompleteSourceExtraction, extract_source_records, permanent_source_failure,
+)
 from backend.app.services.performance_specification_contract import FIELD_NAMES
 from backend.app.services.performance_specification_evidence import resolve_email_evidence
 from backend.app.services.specification_semantics import COMPLETE_SOURCE_STATUSES, EVIDENCE_VERSION
@@ -149,3 +152,15 @@ def test_malformed_pdf_requires_review_instead_of_being_silently_skipped():
                                     SimpleNamespace(process_pdf=unexpected), source_id="asset:1")
     assert records[0]["status"] == "failed:SourceDocumentError"
     assert records[0]["error"]["code"] == "unreadable_pdf" and records[0]["text"] == ""
+
+
+def test_pdf_beyond_parser_limits_fails_permanently_before_a_model_call():
+    def unexpected(*args):
+        pytest.fail("A PDF beyond the reader's limits should fail before a model call")
+
+    with apply_configuration(page_tree_maximum_page_entries=0):
+        records = extract_source_records(pdf_bytes(), "drawing.pdf",
+                                        SimpleNamespace(process_pdf=unexpected), source_id="asset:1")
+    assert records[0]["status"] == "failed:SourceDocumentError"
+    assert records[0]["error"]["code"] == "pdf_parser_limit" and records[0]["text"] == ""
+    assert permanent_source_failure(records)

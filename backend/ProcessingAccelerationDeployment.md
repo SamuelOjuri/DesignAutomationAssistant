@@ -393,6 +393,18 @@ failed on model citations: an architect's drawing number cited as the requested
 Drawing Reference, and a request note spliced across two image text regions. A retry
 re-runs extraction and may succeed; three other items recovered that way on 17 November.
 
+The 23 November update also keeps the pipeline identity and needs no migration.
+Rotated large drawings now get detail views without pypdf parsing their content (see
+[the specification notes](PerformanceSpecification.md)). Item `3377374422` (job
+`d3e6a8a9`) failed with `LimitReachedError` on two A0 drawings for that reason. A
+completed publication or analysis is also no longer logged as `not_claimed` when a
+newer Monday event (typically the webhook from deleting prior assets) arrives after the
+worker's last read. On 23 November five publications (for example `3cd6b9bf`, item
+`3368202041`) completed but reported `published: 0`. Deploy the design workers,
+reconciliation, API and specification publisher from the same revision, then run
+`python -m backend.app.services.design_processing_reconciliation --item-id 3377374422 --retry-failed`
+once the item is confirmed failed/current.
+
 Local verification on 11 November exercised the backend tests, PostgreSQL checks,
 44 frontend Node tests and the frontend production build. Browser journey
 assertions were not completed: the in-app browser was unavailable and the

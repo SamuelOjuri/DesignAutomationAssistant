@@ -1052,6 +1052,41 @@ def test_cleanup_failure_does_not_undo_successful_publication(db_session):
     )
 
 
+def test_availability_event_from_prior_asset_cleanup_keeps_published_outcome(db_session):
+    # Render 23 Nov (e.g. item 3368202041, job 3cd6b9bf): deleting the prior assets
+    # produced a Monday event newer than the worker's last read, so a completed
+    # publication was reported as "not_claimed" and counted as published: 0.
+    from backend.app.services.monday_item_availability import observe_item
+
+    prior_identity = ProcessingIdentity(
+        "c" * 64,
+        settings.design_processing_pipeline_version,
+    )
+    identity, _, job, storage, prior = _seed_publication(
+        db_session,
+        prior_identity=prior_identity,
+    )
+
+    class WebhookGateway(PublicationGateway):
+        def delete_design_file(self, board_id, item_id, column_id, asset_id):
+            super().delete_design_file(board_id, item_id, column_id, asset_id)
+            with sessionmaker(bind=db_session.bind)() as webhook:
+                observe_item(webhook, board_id, {
+                    "id": item_id, "state": "active", "board": {"id": board_id},
+                    "group": {"id": self.snapshot.group_id},
+                }, access_token="test-token", observed_at=utc_now() + timedelta(seconds=1))
+                webhook.commit()
+
+    result = _run_publication(db_session, WebhookGateway(_publication_snapshot(identity)), storage)
+
+    assert result.published == 1
+    assert db_session.get(DesignProcessingJob, job.id).status == "completed"
+    assert all(
+        db_session.get(DesignProcessingArtifact, artifact.id).status == "deleted"
+        for artifact in prior
+    )
+
+
 def test_cleanup_retries_after_reviewer_moves_item(db_session, monkeypatch):
     monkeypatch.setattr(settings, "auto_sync_active_group_ids", "reviewed")
     prior_identity = ProcessingIdentity(

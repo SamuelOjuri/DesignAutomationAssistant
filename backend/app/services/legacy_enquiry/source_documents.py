@@ -17,7 +17,7 @@ from zipfile import BadZipFile, ZipFile
 import zlib
 
 from pypdf import PdfReader, PdfWriter
-from pypdf.errors import PdfReadError
+from pypdf.errors import LimitReachedError, PdfReadError
 from pypdf.generic import NameObject
 
 from ..gemini_requests import GeminiRequestFailure, source_failure_details as gemini_failure_details
@@ -47,7 +47,7 @@ MAX_DESIGN_WORKSHEETS = 40
 # replacement source (a new input revision) can change them. Model-dependent
 # outcomes such as no_readable_text and transcribed-text limits stay retryable.
 PERMANENT_SOURCE_ERROR_CODES = frozenset({
-    "source_size_limit", "workbook_incomplete", "unreadable_pdf", "unreadable_archive",
+    "source_size_limit", "workbook_incomplete", "unreadable_pdf", "pdf_parser_limit", "unreadable_archive",
     "empty_archive", "encrypted_archive", "archive_depth_limit", "archive_member_limit",
     "archive_member_size_limit", "archive_expansion_limit",
     "email_size_limit", "email_depth_limit", "email_message_limit", "email_expansion_limit",
@@ -290,6 +290,10 @@ def _extract_pdf(content, filename, extractor, metadata):
                     content = output.getvalue()
     except PdfReadError:
         raise SourceDocumentError("unreadable_pdf", "PDF could not be read; supply a valid PDF export.") from None
+    except LimitReachedError:
+        # Not a PdfReadError: pypdf's safety limits reject these exact bytes on every attempt.
+        raise SourceDocumentError("pdf_parser_limit", "PDF structure exceeds the PDF reader's safety limits; "
+                                  "supply a simplified or flattened PDF export.") from None
     return extractor.process_pdf(content, filename)
 
 

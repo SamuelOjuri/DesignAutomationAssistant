@@ -317,7 +317,8 @@ retained. Normal notifications do not automatically retry those failures.
 
 A design job now fails on its first attempt when every incomplete source was
 rejected on its own unchanged bytes: oversize non-archive sources, unreadable PDFs/archives,
-incomplete workbooks, and empty, encrypted or expansion/member/depth-limited ZIPs
+PDFs beyond the PDF reader's safety limits (`pdf_parser_limit`), incomplete workbooks,
+and empty, encrypted or expansion/member/depth-limited ZIPs
 (`PERMANENT_SOURCE_ERROR_CODES`). Retrying cannot change these until a replacement
 file creates new input. Reconciliation treats such a failed job as exhausted for its
 input identity. Provider/transcription failures, `no_readable_text` and
@@ -1178,6 +1179,17 @@ dates or requested/achieved annotations. Explicit ambiguous paper-size labels mu
 remain evidence for review. Source transcription is still model-based; these changes
 improve legibility without guaranteeing that every glyph is correct. Existing source
 size/context limits and encrypted-PDF skips still apply. No new dependency is required.
+
+Rotated pages keep their `/Rotate` value in each view: quadrants are named as
+displayed but cropped in the page's own coordinates, so the drawing content is never
+parsed or rewritten. Item `3377374422` (job `d3e6a8a9`, 23 November) failed all three
+attempts because two A0 drawings with `/Rotate 90` and 13-18 MB content streams
+(`LON16-TSP-ZZ-01-DR-A-220107.pdf`/`220108.pdf`) exceeded pypdf's 2,000,000-token
+per-stream limit when the rotation was moved into their content
+(`failed:LimitReachedError`). Any other PDF parser error while building the optional
+views now omits them with a `PDF detail views omitted` warning, and the full original
+is still transcribed. A parser limit reached while reading the PDF itself fails the
+source with the permanent `pdf_parser_limit` code instead of three identical attempts.
 
 The supplied log's new `output-v14` Company failure, job
 `3eee61a8-077c-4e5e-a8a1-ae52d5f1f72f`, belongs to item `3312713363`, not one of the
