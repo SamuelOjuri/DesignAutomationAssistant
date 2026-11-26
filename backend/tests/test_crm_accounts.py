@@ -17,12 +17,13 @@ from backend.app.models import CRMDirectorySnapshot
 from backend.app.services import crm_accounts
 from backend.app.services.crm_accounts import (
     AccountRecord, AccountsContractError, AccountsIndex, ContactRecord, ContactsIndex, DirectoryCache,
-    RequesterIdentity, SnapshotStore, load_contacts_for_email, load_directory_index, match_account,
-    requester_identity,
+    INDEX_CACHE_SECONDS, RequesterIdentity, SnapshotStore, load_contacts_for_email, load_directory_index,
+    match_account, requester_identity,
 )
 
 
 NOW = datetime(2026, 11, 17, 12, tzinfo=timezone.utc)
+EXPIRED = NOW - timedelta(seconds=INDEX_CACHE_SECONDS + 1)
 MIGRATION = importlib.import_module("backend.migrations.versions.0023_crm_directory_snapshots")
 
 
@@ -140,7 +141,7 @@ def test_shared_snapshot_lets_a_restarted_or_other_process_skip_monday(snapshot_
     index = AccountsIndex((record("701", "Axter Limited", "axterltd.co.uk"), record("702", "Old", duplicate=True)))
     assert directory_cache(clock).load("key", lambda: index, SnapshotStore(snapshot_sessions, "scope")) is index
 
-    clock[0] = NOW + timedelta(seconds=299)
+    clock[0] = NOW + timedelta(seconds=INDEX_CACHE_SECONDS - 1)
     restarted = directory_cache(clock).load(
         "key", lambda: pytest.fail("Monday was read despite a fresh shared snapshot"), SnapshotStore(snapshot_sessions, "scope"))
 
@@ -152,7 +153,7 @@ def test_expired_copy_is_served_while_one_background_refresh_updates_the_snapsho
     clock, spawned = [NOW], []
     old, new = AccountsIndex((record("1", "Old Name"),)), AccountsIndex((record("1", "New Name"),))
     store = SnapshotStore(snapshot_sessions, "scope")
-    store.write(old, NOW - timedelta(seconds=301))
+    store.write(old, EXPIRED)
     cache = directory_cache(clock, spawned)
 
     assert cache.load("key", lambda: new, store) == old
@@ -183,7 +184,7 @@ def test_failed_refresh_serves_the_last_copy_releases_the_lease_and_backs_off(sn
     clock = [NOW]
     old = AccountsIndex((record("1", "Old Name"),))
     store = SnapshotStore(snapshot_sessions, "scope")
-    store.write(old, NOW - timedelta(seconds=301))
+    store.write(old, EXPIRED)
     cache = directory_cache(clock)
 
     assert cache.load("key", unavailable(), store) == old

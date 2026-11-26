@@ -249,6 +249,16 @@ Completed-transition sweeps reuse each stored task's account ID, eliminating the
 extra account lookup previously sent for every item. Standalone metadata callers
 can still omit the account ID to resolve it through Monday.
 
+Monday's daily API limit counts every request, including retries. Each process
+logs `Monday API requests window_seconds=... total=... by_site={...}` (event
+`monday.api_calls`) once an hour, and on exit for cron runs. `by_site` names the
+`monday_client` function and its two nearest callers, for example
+`fetch_design_processing_intake_item <- design_processing_target.fetch_target <-
+design_processing_reconciliation.reconcile_landing_zone_once`, and lists the 20
+busiest sites. Workers and the API log it at INFO; the auto-sync and metadata
+workers configure no INFO logging, but they make few requests. Compare per-service
+totals with the account's API analytics to find remaining consumers.
+
 Completed-transition metadata lookups that return `404: monday item not found`
 are reported as `source_unavailable` warnings, not errors. The summary includes a
 `source_unavailable` count (also included in `skipped`); these warnings alone do
@@ -588,8 +598,15 @@ establish deletion or completion; existing processing history, files, and
 retention dates are preserved.
 
 Confirmed exclusions, including Completed Folder, are rechecked after
-`DESIGN_PROCESSING_EXCLUDED_RECHECK_SECONDS` (default 21600, six hours).
-Their precise policy reason and observed group ID are recorded. Both settings
+`DESIGN_PROCESSING_EXCLUDED_RECHECK_SECONDS` (default 604800, seven days).
+Their precise policy reason and observed group ID are recorded. A move back into
+an eligible group appears in the sweep's live group inventory, which bypasses
+the exclusion delay once the exclusion is at least
+`DESIGN_PROCESSING_SETTLED_RECHECK_SECONDS` old, so a listing that disagrees with
+the item read costs at most one read per interval. The previous six-hour default
+re-read about 1,400 Completed Folder items four times a day (~5,600 Monday calls).
+If a deployment sets this variable explicitly, remove it or raise it to apply
+the new interval. Both settings
 must be positive integers. Delays affect broad reconciliation only: an explicit
 `reconcile-item --item-id ...` or reconciliation `--item-id ...` reads immediately,
 including with `--dry-run`. Webhooks can still queue newly eligible work without

@@ -65,7 +65,12 @@ changes and rendering failures clear that acknowledgement.
 
 Polling updates publication/access state without replacing unsaved text. A
 source or concurrent-review change requires explicitly loading the latest
-context. That action keeps manually entered values and selections while asking
+context. The five-second `status` poll performs no source lookup. A full
+workspace read, which re-reads Monday sources, happens only when the review
+identity or published PDF changes from the last full read, or once a minute.
+Analysis progress is merged from `status`, so an item waiting for extraction no
+longer triggers a full read on every poll (previously about 35-70 Monday
+requests a minute per open review). That action keeps manually entered values and selections while asking
 the reviewer to accept changed recommendations and acknowledge source issues
 again. Failed requests and session renewal retain the draft for the same item;
 mutation retries reuse their idempotency key. An item-context change aborts old

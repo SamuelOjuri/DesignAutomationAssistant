@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   approvalCommand, canComplete, canPublish, publicationCommand, completionIssues, draftValidationErrors, emptyDraft, fieldOverviewTone, fieldReviewState, hasUnsavedChanges,
-  mergeStatus, rebaseDraft, sameReviewIdentity, saveCommand, sourceIssueAddressed, summarizeFieldOverview, updateField, updateSelection, updateSourceDisposition,
+  mergeStatus, needsFullWorkspaceRead, rebaseDraft, sameReviewIdentity, saveCommand, sourceIssueAddressed, summarizeFieldOverview, updateField, updateSelection, updateSourceDisposition,
 } from "../lib/specification-review-state.ts";
 import { FIELD_NAMES } from "../lib/specification-review-api.ts";
 
@@ -117,6 +117,21 @@ test("recorded progress updates do not replace fields or change a draft identity
   assert.equal(merged.analysis.stage, "rendering");
   assert.equal(sameReviewIdentity(initial, { ...progress, provisional: false }), false);
   assert.equal(sameReviewIdentity(initial, { ...progress, extraction_identity: "extraction-2" }), false);
+});
+
+test("waiting polls re-read Monday-backed workspaces only on identity changes or the minute cadence", () => {
+  const waiting = workspace({ status: "source_waiting", provisional: false, extraction_identity: "extraction-1",
+    analysis: { ready: false, stage: "matching" } });
+  const progress = { ...waiting, analysis: { ready: false, stage: "rendering" } };
+  assert.equal(needsFullWorkspaceRead(waiting, progress, null, 5_000), false);
+  assert.equal(needsFullWorkspaceRead(waiting, progress, null, 61_000), true);
+  assert.equal(needsFullWorkspaceRead(waiting, { ...progress, extraction_identity: "extraction-2" }, null, 5_000), true);
+  assert.equal(needsFullWorkspaceRead(waiting, { ...progress, published_pdf: { ...workspace().pdf, revision: "r2" } }, null, 5_000), true);
+  // A failed early preview keeps the workspace non-provisional; repeat only after another change.
+  const preview = { ...progress, provisional: true };
+  assert.equal(needsFullWorkspaceRead(waiting, preview, null, 5_000), true);
+  assert.equal(needsFullWorkspaceRead(waiting, preview, preview, 5_000), false);
+  assert.equal(needsFullWorkspaceRead(waiting, { ...preview, review_version: 4 }, preview, 5_000), true);
 });
 
 test("polling an item leaving Landing Zone exposes its read-only reason while preserving available data", () => {

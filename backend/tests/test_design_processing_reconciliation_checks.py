@@ -165,6 +165,30 @@ def test_only_obsolete_admission_delays_are_bypassed_for_rediscovered_items(
         assert db_session.query(DesignProcessingJob).count() == 0
 
 
+def test_listed_move_out_of_completed_folder_bypasses_its_long_exclusion_hourly(db_session, monkeypatch):
+    item_id = "3249971235"
+    monkeypatch.setattr(settings, "design_processing_settled_recheck_seconds", 3600)
+    db_session.add(DesignProcessingReconciliationCheck(
+        board_id=BOARD, item_id=item_id, last_attempted_at=NOW - timedelta(minutes=5),
+        last_outcome="excluded", last_reason="completed_folder", last_group_id="completed",
+        next_check_at=NOW + timedelta(days=7),
+    ))
+    db_session.commit()
+    monkeypatch.setattr(reconciliation, "list_items_in_groups", lambda *args: {
+        "topics": [monday_client.MondayGroupItem(item_id, (NOW - timedelta(hours=2)).isoformat())],
+    })
+    gateway = fixtures.FakeReconciliationGateway({
+        item_id: fixtures._snapshot(item_id=item_id, group_id="topics"),
+    })
+    # A listing that disagrees with a fresh exclusion cannot force a read every sweep.
+    assert run(db_session, gateway).items[0].action == "deferred"
+    assert gateway.calls == []
+    result = run(db_session, gateway, now=NOW + timedelta(hours=1))
+    assert result.items[0].action == "queued"
+    assert gateway.calls == [item_id]
+    assert check(db_session, item_id).last_group_id == "topics"
+
+
 def test_new_active_candidate_moved_to_completed_is_excluded_before_admission(db_session, monkeypatch):
     item_id = "3249971235"
     monkeypatch.setattr(reconciliation, "list_items_in_groups", lambda *args: {

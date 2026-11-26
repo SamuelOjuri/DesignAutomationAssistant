@@ -310,9 +310,19 @@ def reconcile_landing_zone_once(
                     or specification_changed
                 )
             )
+            # Exclusions (for example Completed Folder) use a long recheck. The live
+            # eligible-group inventory shows a move back without per-item reads;
+            # confirm it at most once per settled interval if the two reads disagree.
+            excluded_item_moved = (
+                rediscovered and check is not None and check.last_outcome == "excluded"
+                and check.last_group_id is not None
+                and candidate_groups[candidate.item_id] != check.last_group_id
+                and _stored_utc(check.last_attempted_at) <= reconciliation_now - timedelta(
+                    seconds=settings.design_processing_settled_recheck_seconds)
+            )
             if check is not None and check.next_check_at is not None and (
                 _stored_utc(check.next_check_at) > reconciliation_now
-            ) and not (obsolete_admission_exclusion or settled_changed
+            ) and not (obsolete_admission_exclusion or settled_changed or excluded_item_moved
                        or (rediscovered and not availability.allowed)):
                 deferred_results.append(DesignProcessingReconciliationItemResult(
                     item_id=candidate.item_id, action="deferred", reason=check.last_reason,

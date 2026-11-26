@@ -41,7 +41,9 @@ ACCOUNT_DUPLICATE_COLUMN_ID = "dropdown_mm6cxq2p"
 DUPLICATE_ACCOUNT_LABEL_ID = 1
 CONTACT_EMAIL_COLUMN_ID = "contact_email"
 CONTACT_ACCOUNTS_COLUMN_ID = "contact_account"
-INDEX_CACHE_SECONDS = 300.0
+# Each refresh reads the whole Accounts board (three pages); new or renamed
+# Accounts reach recommendations within this interval.
+INDEX_CACHE_SECONDS = 1800.0
 INDEX_RETRY_SECONDS = 60.0
 REFRESH_LEASE_SECONDS = 120.0
 # Bump when parsing rules or the stored record format change.

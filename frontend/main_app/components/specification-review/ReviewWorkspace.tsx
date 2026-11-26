@@ -4,11 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FIELD_NAMES, bootstrapReviewSession, createReviewApi, ReviewApiError,
   type ReviewContext, type ReviewDraft, type ReviewWorkspace as Workspace,
-  type ReviewSession, type FieldOperation,
+  type ReviewSession, type ReviewStatusSnapshot, type FieldOperation,
 } from "@/lib/specification-review-api";
 import {
   emptyDraft, hasUnsavedChanges, saveCommand, approvalCommand, canComplete, canPublish, publicationCommand,
-  mergeStatus, friendlyReviewError, sameReviewIdentity, updateSelection, updateField,
+  mergeStatus, friendlyReviewError, needsFullWorkspaceRead, sameReviewIdentity, updateSelection, updateField,
   draftValidationErrors, fieldOverviewTone, fieldReviewState,
   completionIssues, rebaseDraft, sourceIssueAddressed, updateSourceDisposition,
 } from "@/lib/specification-review-state";
@@ -201,6 +201,7 @@ export default function ReviewWorkspace() {
     let timer: ReturnType<typeof setTimeout>;
     let reading = false;
     let lastFullRead = Date.now();
+    let lastFullReadStatus: ReviewStatusSnapshot | null = null;
     const poll = async () => {
       if (controller.signal.aborted || reading) return;
       if (!document.hidden && !busyRef.current && !reading) {
@@ -211,12 +212,11 @@ export default function ReviewWorkspace() {
           const current = workspaceRef.current;
           if (busyRef.current) {
             // A command owns the next workspace read; keep the polling timer alive.
-          } else if (!current || !sameReviewIdentity(current, status)
-            || current.published_pdf?.revision !== status.published_pdf?.revision
-            || Date.now() - lastFullRead > 60000 || current.status === "source_waiting") {
+          } else if (!current || needsFullWorkspaceRead(current, status, lastFullReadStatus, Date.now() - lastFullRead)) {
             const next = await api.workspace(controller.signal);
             if (!controller.signal.aborted && !busyRef.current) receiveWorkspace(next);
             lastFullRead = Date.now();
+            lastFullReadStatus = status;
           } else {
             const next = mergeStatus(current, status);
             workspaceRef.current = next; setWorkspace(next);

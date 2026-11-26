@@ -1,3 +1,5 @@
+import atexit
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -9,6 +11,7 @@ import math
 from pathlib import PurePath
 import random
 import re
+import sys
 from threading import Lock
 from time import monotonic
 from typing import Any, Mapping, Optional, Sequence
@@ -123,6 +126,69 @@ def _check_monday_cooldown(access_token: str) -> None:
         cooldown.upstream_status_code, detail=cooldown.detail,
         retry_after_seconds=remaining, rate_limited=True,
     )
+
+
+# Monday's daily API limit counts every HTTP request, including retries. Each
+# process logs its own hourly summary (and a final one at exit, for cron runs)
+# so usage can be attributed to a service and call site from its logs.
+MONDAY_CALL_SUMMARY_SECONDS = 3600.0
+MONDAY_CALL_SUMMARY_SITES = 20
+_MONDAY_CALL_PLUMBING = frozenset({
+    "_post_monday_graphql", "monday_graphql_request", "_record_monday_call", "_monday_call_site",
+})
+_monday_calls: Counter[str] = Counter()
+_monday_calls_since = monotonic()
+_monday_calls_lock = Lock()
+
+
+def _monday_call_site() -> str:
+    """The requesting client function and its two nearest callers outside this module."""
+    frame, client, callers = sys._getframe(1), None, []
+    while frame is not None and len(callers) < 2:
+        module, name = frame.f_globals.get("__name__", ""), frame.f_code.co_name
+        if module == __name__:
+            if client is None and name not in _MONDAY_CALL_PLUMBING:
+                client = name
+        elif not module.startswith("tenacity"):
+            callers.append(f"{module.rsplit('.', 1)[-1]}.{name}")
+        frame = frame.f_back
+    return " <- ".join(([client] if client else []) + callers) or "unknown"
+
+
+def _log_monday_calls(counts: Counter[str], elapsed: float) -> None:
+    if not counts:
+        return
+    total = sum(counts.values())
+    by_site = dict(counts.most_common(MONDAY_CALL_SUMMARY_SITES))
+    logger.info(
+        "Monday API requests window_seconds=%d total=%d by_site=%s",
+        elapsed, total, json.dumps(by_site),
+        extra={"event": "monday.api_calls", "window_seconds": round(elapsed), "total": total,
+               "by_site": by_site},
+    )
+
+
+def _record_monday_call() -> None:
+    global _monday_calls_since
+    site = _monday_call_site()
+    with _monday_calls_lock:
+        _monday_calls[site] += 1
+        elapsed = monotonic() - _monday_calls_since
+        if elapsed < MONDAY_CALL_SUMMARY_SECONDS:
+            return
+        counts = _monday_calls.copy()
+        _monday_calls.clear()
+        _monday_calls_since += elapsed
+    _log_monday_calls(counts, elapsed)
+
+
+@atexit.register
+def _flush_monday_calls() -> None:
+    with _monday_calls_lock:
+        counts = _monday_calls.copy()
+        _monday_calls.clear()
+        elapsed = monotonic() - _monday_calls_since
+    _log_monday_calls(counts, elapsed)
 
 
 def _require_design_scalar_columns(column_values: Mapping[str, Any]) -> None:
@@ -321,6 +387,7 @@ def _post_monday_graphql(
     timeout: int,
 ) -> requests.Response:
     _check_monday_cooldown(access_token)
+    _record_monday_call()
     resp = requests.post(
         MONDAY_API_URL,
         json={"query": query, "variables": variables or {}},
@@ -514,6 +581,7 @@ def upload_design_file(
         f'column_id: "{column_id}", file: $file) '
         "{ id name file_size created_at } }"
     )
+    _record_monday_call()
     response = requests.post(
         MONDAY_FILE_API_URL,
         data={"query": query},

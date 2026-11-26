@@ -87,6 +87,24 @@ export function sameReviewIdentity(a: ReviewIdentity, b: ReviewIdentity): boolea
     && (a.extraction_identity ?? null) === (b.extraction_identity ?? null);
 }
 
+const FULL_WORKSPACE_READ_MS = 60_000;
+
+function reviewSnapshotChanged(a: ReviewStatusSnapshot, b: ReviewStatusSnapshot): boolean {
+  return !sameReviewIdentity(a, b) || a.published_pdf?.revision !== b.published_pdf?.revision;
+}
+
+/**
+ * Whether a status poll needs a full workspace read, which re-reads Monday sources.
+ * Progress-only changes are merged. A status the previous full read already
+ * reconciled (for example a failed early preview) does not repeat it every poll.
+ */
+export function needsFullWorkspaceRead(current: ReviewWorkspace, status: ReviewStatusSnapshot,
+  lastFullReadStatus: ReviewStatusSnapshot | null, msSinceFullRead: number): boolean {
+  if (msSinceFullRead > FULL_WORKSPACE_READ_MS) return true;
+  return reviewSnapshotChanged(current, status)
+    && (!lastFullReadStatus || reviewSnapshotChanged(lastFullReadStatus, status));
+}
+
 /** Keep source proposals and user drafts untouched. Callers must explicitly reconcile changed identities. */
 export function mergeStatus(workspace: ReviewWorkspace, status: ReviewStatusSnapshot): ReviewWorkspace {
   if (workspace.board_id !== status.board_id || workspace.item_id !== status.item_id) return workspace;

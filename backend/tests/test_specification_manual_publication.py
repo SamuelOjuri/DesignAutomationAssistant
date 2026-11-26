@@ -129,6 +129,21 @@ def test_scheduled_recheck_reuses_existing_draft_without_rendering_phase(case, m
     assert draft_progress(case) == [("ready_to_publish", False, None)] * 2
 
 
+def test_scheduled_draft_recheck_reads_the_item_target_once(case, monkeypatch):
+    move(case, "topics")
+    prepare(case)
+    record = current(case)
+    record.scheduled_for = worker.utc_now()
+    case.db.commit()
+    reads = []
+    fetch_target = case.gateway.fetch_target
+    monkeypatch.setattr(case.gateway, "fetch_target", lambda item_id: reads.append(item_id) or fetch_target(item_id))
+
+    assert execute(case) == ["rendered"]
+    # The draft decision reuses the source read's target; upload boundaries still read again.
+    assert reads == [ITEM]
+
+
 def test_active_first_publication_without_corrections_is_explicit_and_idempotent(case):
     move(case, "topics")
     assert run(case) == ["rendered"]

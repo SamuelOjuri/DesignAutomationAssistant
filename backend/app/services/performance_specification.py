@@ -78,11 +78,13 @@ class _ObservedGateway:
     def __init__(self, db, gateway, board_id):
         self.db, self.gateway, self.board_id = db, gateway, board_id
         self.access_token = getattr(gateway, "access_token", None)
+        self.last_target = None
 
     def __getattr__(self, name):
         return getattr(self.gateway, name)
 
     def fetch_target(self, item_id):
+        self.last_target = None
         decision = availability_decision(self.db, self.board_id, item_id, access_token=self.access_token)
         self.db.commit()
         if not decision.allowed:
@@ -103,6 +105,7 @@ class _ObservedGateway:
         self.db.commit()
         if superseded:
             raise SupersededSpecification("Monday lifecycle changed during the source read")
+        self.last_target = target
         return target
 
     def fetch_holding(self, item_id):
@@ -514,11 +517,16 @@ def _publication_allowed(item_id):
     return specification_publication_allowed(item_id)
 
 
-def _publication_permitted(db, claim, gateway, revision, *, cleanup=False):
-    """Fresh lifecycle plus an exact reviewer request at every upload boundary."""
+def _publication_permitted(db, claim, gateway, revision, *, cleanup=False, target=None):
+    """Fresh lifecycle plus an exact reviewer request at every upload boundary.
+
+    ``target`` may only be supplied by a decision that cannot itself upload:
+    the upload path re-reads Monday before and after its upload.
+    """
     if not _publication_allowed(claim[1]):
         return False
-    target = gateway.fetch_target(claim[1])
+    if target is None or str(target.item_id) != str(claim[1]):
+        target = gateway.fetch_target(claim[1])
     reason = specification_scope_exclusion(target)
     if reason is not None:
         raise SpecificationIneligible(reason)
@@ -729,7 +737,8 @@ def execute_specification(db, claim, *, gateway, client, storage):
                 raise SpecificationSourceError("Stored specification PDF failed its integrity check")
 
         stage = "publication"
-        if not _publication_permitted(db, claim, gateway, revision):
+        # Draft-or-upload decision: reuse the target from the latest source read.
+        if not _publication_permitted(db, claim, gateway, revision, target=gateway.last_target):
             if artifact.status in {"uploading", "deleted"}:
                 artifact.status = "rendered"
                 db.commit()

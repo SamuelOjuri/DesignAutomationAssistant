@@ -189,7 +189,10 @@ candidate Account/Contact IDs, and the matched Account becomes a source dependen
 The Accounts index (three Monday pages, about 5 s) is shared through the
 backend-private `crm_directory_snapshots` table (migration
 `0023_crm_directory_snapshots`), keyed by API URL/version and a token digest. A
-process keeps it in memory for five minutes. After that, it serves the stored or
+process keeps it in memory for 30 minutes (previously five; hourly specification
+rechecks kept a five-minute copy refreshing about 860 Monday requests a day), so a
+new or renamed Account can take up to 30 minutes to reach recommendations. After
+that, it serves the stored or
 expired copy and refreshes once in the background. A short refresh lease lets one
 process read Monday, outside any database transaction, while the others keep
 serving the copy, so reviews only wait on a cold start with no stored copy. The API

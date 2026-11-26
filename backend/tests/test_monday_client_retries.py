@@ -1,3 +1,4 @@
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from email.utils import format_datetime
@@ -389,3 +390,23 @@ def test_concurrent_inflight_responses_cannot_shorten_shared_cooldown(client, mo
         monday_client.monday_graphql_request("token", "query { next }")
     assert exc_info.value.retry_after_seconds == 3600
     assert len(calls) == 2
+
+
+def test_every_request_including_retries_is_summarised_by_call_site(client, monkeypatch, caplog):
+    pending, calls, _ = client
+    monkeypatch.setattr(monday_client, "_monday_calls", Counter())
+    monkeypatch.setattr(monday_client, "_monday_calls_since", 0.0)
+    item = {"data": {"items": [{"id": "1"}]}}
+    pending.extend([response(500), response(200, item), response(200, item)])
+
+    with caplog.at_level(logging.INFO, logger=monday_client.__name__):
+        assert monday_client.can_read_item("secret", "1") is True
+        assert not [record for record in caplog.records if getattr(record, "event", None) == "monday.api_calls"]
+        monkeypatch.setattr(monday_client, "monotonic", lambda: monday_client.MONDAY_CALL_SUMMARY_SECONDS)
+        assert monday_client.can_read_item("secret", "1") is True
+
+    summary = next(record for record in caplog.records if getattr(record, "event", None) == "monday.api_calls")
+    [(site, count)] = summary.by_site.items()
+    assert (len(calls), summary.total, count) == (3, 3, 3)
+    assert site.startswith("can_read_item <- test_monday_client_retries.test_every_request_including_retries")
+    assert "secret" not in caplog.text and not monday_client._monday_calls
