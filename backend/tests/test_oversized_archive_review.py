@@ -3,6 +3,7 @@
 import hashlib
 import io
 import logging
+import random
 from email.message import EmailMessage
 from pathlib import Path
 from types import SimpleNamespace
@@ -80,7 +81,9 @@ def test_oversized_zip_is_reviewable_without_opening_archive_or_calling_document
     assert record["error"]["stage"] == "source_document"
     assert record["error"]["code"] == "source_size_limit"
     assert progress == records
-    assert not sources.permanent_source_failure(records)
+    # A referral is not a source failure; only an inventory with nothing read is permanent.
+    assert not sources.permanent_source_failure([{"sourceId": "asset:1:body", "status": "read"}, *records])
+    assert sources.permanent_source_failure(records)
     log_records = [entry for entry in caplog.records if entry.name == sources.__name__]
     assert any(entry.levelno == logging.INFO for entry in log_records)
     assert all(entry.levelno < logging.WARNING for entry in log_records)
@@ -238,7 +241,7 @@ def test_path_backed_archive_review_hashes_in_bounded_chunks(monkeypatch, tmp_pa
         return BoundedReader(stream) if candidate == path else stream
 
     monkeypatch.setattr(Path, "open", bounded_open)
-    record = sources.oversized_archive_file_record(path, path.name, source_id="asset:2")
+    record, = sources.archive_file_records(path, path.name, None, source_id="asset:2")
     assert record["status"] == REVIEW_STATUS and record["sizeBytes"] == len(content)
     assert record["contentSha256"] == hashlib.sha256(content).hexdigest()
     assert len(read_sizes) >= 3
@@ -250,7 +253,7 @@ def test_path_backed_small_zip_keeps_automatic_extraction(monkeypatch, tmp_path)
     monkeypatch.setattr(sources, "MAX_SOURCE_BYTES", len(content))
     email = downloaded(tmp_path, "request.eml", request_email_bytes(), "1")
     archive = downloaded(tmp_path, "plans.zip", content, "2")
-    assert sources.oversized_archive_file_record(archive.temp_path, archive.source.filename, source_id="asset:2") is None
+    assert sources.archive_file_records(archive.temp_path, archive.source.filename, None, source_id="asset:2") is None
     contexts = []
     result = analyze_downloaded_email_assets([email, archive], client=SimpleNamespace(
         extract_design_parameters=lambda context: contexts.append(context) or parameters(),
@@ -259,6 +262,63 @@ def test_path_backed_small_zip_keeps_automatic_extraction(monkeypatch, tmp_path)
     records = [source for source in result.source_manifest if source["sourceId"].startswith("asset:2")]
     assert [source["status"] for source in records] == ["expanded:archive", "read"]
     assert "Scale: 1:100" in contexts[0]
+
+
+@pytest.mark.parametrize("slack,expanded", [(0, True), (-1, False)])
+def test_downloaded_zip_over_limit_is_read_from_disk_when_only_mesh_exceeds_it(
+        monkeypatch, tmp_path, slack, expanded):
+    # Render job 823f5115 (item 3381414648): a 49.6 MiB TaperedView ZIP held 41.9 MiB of
+    # compressed OBJ mesh, so nothing was read and every attempt failed.
+    content = archive_bytes([("Scan_1/roof_scan.obj", random.Random(0).randbytes(4000)),
+                             ("project_summary.txt", b"Target U-value: 0.15")])
+    with ZipFile(io.BytesIO(content)) as archive:
+        mesh_bytes = archive.getinfo("Scan_1/roof_scan.obj").compress_size
+    monkeypatch.setattr(sources, "MAX_SOURCE_BYTES", len(content) - mesh_bytes + slack)
+    email = downloaded(tmp_path, "request.eml", request_email_bytes(), "1")
+    archive = downloaded(tmp_path, "Site_TaperedView.zip", content, "2")
+    read_bytes = Path.read_bytes
+
+    def guarded_read(path):
+        if path == Path(archive.temp_path):
+            pytest.fail("A ZIP above the in-memory limit must be read from its file")
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read)
+    contexts = []
+    result = analyze_downloaded_email_assets([email, archive], client=SimpleNamespace(
+        extract_design_parameters=lambda context: contexts.append(context) or parameters(),
+        query_llm=lambda *args: "Roof",
+    ))
+
+    records = [source for source in result.source_manifest if source["sourceId"].startswith("asset:2")]
+    assert records[0]["contentSha256"] == hashlib.sha256(content).hexdigest()
+    assert records[0]["sizeBytes"] == len(content)
+    if expanded:
+        assert [source["status"] for source in records] == [
+            "expanded:archive", "review:unsupported_archive_member", "read"]
+        assert "Target U-value: 0.15" in contexts[0]
+    else:
+        assert [source["status"] for source in records] == [REVIEW_STATUS]
+        assert "Target U-value: 0.15" not in contexts[0]
+
+
+def test_inputs_without_any_readable_source_fail_permanently_before_model_requests(monkeypatch, tmp_path):
+    # Render job 823f5115 (item 3381414648): the only input was an unread ZIP, yet the
+    # model was called and three attempts failed with 'Source manifest is empty'.
+    content = archive_bytes([("private.txt", b"PRIVATE UNREAD ARCHIVE CONTENT")])
+    monkeypatch.setattr(sources, "MAX_SOURCE_BYTES", len(content) - 1)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("No model request may be made without a readable source")
+
+    with pytest.raises(sources.IncompleteSourceExtraction, match="No readable source") as error:
+        analyze_downloaded_email_assets([downloaded(tmp_path, "plans.zip", content, "2")],
+            client=SimpleNamespace(extract_design_parameters=unexpected, query_llm=unexpected))
+
+    manifest = error.value.manifest
+    assert [source["status"] for source in manifest] == [REVIEW_STATUS, "review:missing_client_email"]
+    assert sources.permanent_source_failure(manifest)
+    assert str(sources.IncompleteSourceExtraction(manifest)) == str(error.value)  # Survives the process boundary.
 
 
 @pytest.mark.parametrize("filename", ["large.pdf", "large.txt", "large.png"])

@@ -234,6 +234,13 @@ One claimed item is processed at a time per worker; raising `--claim-limit` does
 not itself create parallel worker processes. Existing attachment threads operate
 inside each extraction child and share the admission budget with other services.
 
+Each worker claims due jobs in priority order, then by due time: publication-only
+work (no model calls; about 35 seconds), then the first analysis of items with no
+published AI Data, then re-analysis of items that already have AI Data. On 26
+November, item `3390324091`'s publication waited 52 minutes behind a 113-source
+re-analysis. Claims lock only job rows (`FOR UPDATE OF design_processing_jobs SKIP
+LOCKED`), so an item row held by reconciliation cannot hide its job.
+
 Keep one separate specification publisher:
 
 ```bash

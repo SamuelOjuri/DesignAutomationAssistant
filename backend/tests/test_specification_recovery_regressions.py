@@ -1117,6 +1117,46 @@ def test_dated_twin_copy_from_the_same_plan_is_redundant():
     assert provenance["Drawing Title"]["rejectedCandidates"][0]["status"] == "redundant"
 
 
+PREMIER_SUBJECT = "Subject: RE: Premier inn littlehampton"
+
+
+def test_case_and_comma_restatement_of_a_verified_title_is_redundant():
+    # Render job 6c7626a8 (item 3383299718): the literal subject title verified, but a
+    # copy restating it as 'Premier Inn, Littlehampton' failed all three attempts.
+    verified = candidate("Drawing Title", "Premier inn littlehampton", PREMIER_SUBJECT)
+    copy = {**verified, "value": "Premier Inn, Littlehampton"}
+    manifest = [source("asset:1:attachment:0", PREMIER_SUBJECT)]
+    initial = parameters(drawing_title=copy["value"], specification_evidence=[copy, verified])
+
+    result = extract_twice(initial, initial, manifest)
+
+    raw, provenance, issues = resolve_email_evidence(extraction_payload(result, manifest))
+    assert raw["Drawing Title"] == "Premier inn littlehampton" and not issues
+    assert {(e["value"], e["status"]) for e in provenance["Drawing Title"]["rejectedCandidates"]} == {
+        ("Premier Inn, Littlehampton", "redundant")}
+
+
+@pytest.mark.parametrize("field,value,copy_value,text,overrides", [
+    ("Drawing Title", "Premier inn littlehampton", "Littlehampton Premier Inn", PREMIER_SUBJECT, {}),
+    ("Drawing Title", "Premier inn littlehampton", "Premier Inn Bognor", PREMIER_SUBJECT, {}),
+    ("Drawing Title", "Premier inn littlehampton", "Premier Inn, Littlehampton", PREMIER_SUBJECT,
+     {"scope": "Roof 2"}),
+    ("Drawing Title", "Premier inn littlehampton", "Premier Inn, Littlehampton", PREMIER_SUBJECT,
+     {"issuer": "Architect"}),
+    ("Drawing Title", "Cant Lodge", "Can't Lodge", "Project: Cant Lodge", {}),  # Apostrophe splits words.
+    ("Tapered Insulation", "Fall 1.5 to outlets", "Fall 1,5 to outlets", "Fall 1.5 to outlets", {}),
+    ("Tapered Insulation", "Fall 1.5 to outlets", "Fall 1.5% to outlets", "Fall 1.5 to outlets", {}),
+])
+def test_word_restatement_cannot_change_words_order_numbers_symbols_or_claim(
+        field, value, copy_value, text, overrides):
+    verified = candidate(field, value, text)
+    copy = {**verified, "value": copy_value, **overrides}
+    _, provenance, issues = resolve_email_evidence(
+        extraction([source("asset:1:attachment:0", text)], [verified, copy]))
+    assert field in issues
+    assert provenance[field]["rejectedCandidates"][0]["status"] == "unverified"
+
+
 @pytest.mark.parametrize("blank", ["", "   "])
 @pytest.mark.parametrize("key", ["value", "snippet"])
 def test_blank_evidence_citation_is_dropped_and_audited(blank, key):

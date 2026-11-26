@@ -200,3 +200,75 @@ def test_encrypted_pdf_never_reaches_provider_even_when_called_directly():
         pytest.fail("Protected source was sent to provider")
     with pytest.raises(ValueError, match="Encrypted PDF"):
         LegacyGeminiClient("offline", generate_content=unexpected).process_pdf(pdf(protected=True), "protected.pdf")
+
+
+class ProviderDeadline(Exception):
+    code = 504
+    status = "DEADLINE_EXCEEDED"
+
+
+def cached_client(monkeypatch, generate):
+    saved = {}
+    monkeypatch.setattr(settings, "design_processing_transcription_cache_enabled", True)
+    monkeypatch.setattr(cache, "read_text", lambda scope, key: saved.get((scope, key)))
+    monkeypatch.setattr(cache, "save_text", lambda scope, key, digest, text: saved.update({(scope, key): text}))
+    return saved, LegacyGeminiClient("offline", generate_content=generate, pdf_native_text_enabled=False,
+                                     transcription_cache_scope="test-pdf")
+
+
+def test_provider_deadline_transcribes_page_ranges_with_original_page_numbers(monkeypatch):
+    # Render job 67b6abf3 (item 3386619146): a 48-page A4 PDF returned HTTP 504
+    # DEADLINE_EXCEEDED on every attempt, failing the item after three attempts.
+    calls = []
+
+    def generate(model, parts, config):
+        calls.append((parts, config))
+        if len(calls) == 1:
+            raise ProviderDeadline("private provider detail")
+        return SimpleNamespace(text=f"Range {len(calls) - 1}")
+
+    saved, client = cached_client(monkeypatch, generate)
+    content = pdf(595, 842, pages=23)
+    record, = extract_source_records(content, "House 1.pdf", client, source_id="asset:test")
+
+    assert record["status"] == "read" and record["text"] == "Range 1\n\nRange 2\n\nRange 3"
+    assert record["contentSha256"] == hashlib.sha256(content).hexdigest()
+    ranges = calls[1:]
+    assert [len(PdfReader(io.BytesIO(parts[0].inline_data.data)).pages) for parts, _ in ranges] == [10, 10, 3]
+    assert [parts[1].split(" of ")[0] for parts, _ in ranges] == [
+        f"This PDF contains only pages {pages}" for pages in ("1-10", "11-20", "21-23")]
+    assert "Its first page is original page 11;" in ranges[1][0][1]
+    assert all(config.media_resolution == types.MediaResolution.MEDIA_RESOLUTION_HIGH for _, config in ranges)
+    assert list(saved.values()) == [record["text"]]  # Only the complete page-range text is cached.
+    assert client.process_pdf(content, "House 1.pdf") == record["text"]
+    assert len(calls) == 4  # Reuse skips the whole-document request that exceeded the deadline.
+
+
+def test_single_page_deadline_is_not_split():
+    calls = []
+
+    def deadline(model, parts, config):
+        calls.append(parts)
+        raise ProviderDeadline("private provider detail")
+
+    with pytest.raises(GeminiRequestFailure) as failure:
+        LegacyGeminiClient("offline", generate_content=deadline).process_pdf(pdf(595, 842), "drawing.pdf")
+    assert len(calls) == 1
+    assert (failure.value.http_status, failure.value.details["provider_status"]) == (504, "DEADLINE_EXCEEDED")
+
+
+def test_failed_page_range_fails_the_source_without_caching_partial_text(monkeypatch):
+    calls = []
+
+    def generate(model, parts, config):
+        calls.append(parts)
+        if len(calls) in (1, 3):
+            raise ProviderDeadline("private provider detail")
+        return SimpleNamespace(text="Range text")
+
+    saved, client = cached_client(monkeypatch, generate)
+    record, = extract_source_records(pdf(595, 842, pages=12), "House 1.pdf", client, source_id="asset:test")
+
+    assert len(calls) == 3  # Whole document, then two six-page ranges.
+    assert record["status"] == "failed:GeminiRequestFailure" and record["error"]["http_status"] == 504
+    assert not record["text"] and not saved

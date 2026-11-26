@@ -24,8 +24,8 @@ from .parameter_extraction import (
     extract_project_name_from_content,
 )
 from .source_documents import (
-    IncompleteSourceExtraction, MAX_CONTEXT_CHARS, extract_source_records,
-    oversized_archive_file_record, source_failure_details, source_record,
+    IncompleteSourceExtraction, MAX_CONTEXT_CHARS, archive_file_records, extract_source_records,
+    source_failure_details, source_record,
 )
 from ..specification_semantics import (
     COMPLETE_SOURCE_STATUSES, MISSING_CLIENT_EMAIL_REVIEW_STATUS, SpecificationEvidence, missing,
@@ -130,14 +130,13 @@ def analyze_downloaded_email_assets(
             request_time = None  # Upload time is not the date of the request.
         parsed_assets.append((request_time or "", downloaded.source.asset_id, downloaded, header, body, attachments, inline_images, metadata))
     def read_supplementary(downloaded):
-        review = oversized_archive_file_record(downloaded.temp_path, downloaded.source.filename,
+        records = archive_file_records(downloaded.temp_path, downloaded.source.filename, client,
             source_id=f"asset:{downloaded.source.asset_id}",
-            file_extension=getattr(downloaded.source, "file_extension", None))
-        if review is not None:
-            if review["contentSha256"] != downloaded.content_sha256 or review["sizeBytes"] != downloaded.size_bytes:
-                raise ValueError("Downloaded source changed before transcription")
-            progress.record(review)
-            return [review]
+            file_extension=getattr(downloaded.source, "file_extension", None),
+            expected_sha256=downloaded.content_sha256, expected_size=downloaded.size_bytes,
+            on_source=progress.record)
+        if records is not None:
+            return records
         content = Path(downloaded.temp_path).read_bytes()
         if hashlib.sha256(content).hexdigest() != downloaded.content_sha256 or len(content) != downloaded.size_bytes:
             raise ValueError("Downloaded source changed before transcription")
@@ -203,6 +202,10 @@ def analyze_downloaded_email_assets(
             source_type="request_context", status=MISSING_CLIENT_EMAIL_REVIEW_STATUS)
         manifest.append(missing_email_source)
         progress.record(missing_email_source)
+    if not any(source["status"] == "read" for source in manifest):
+        # Every source was skipped or referred for review. Extraction would have
+        # no evidence, and unchanged inputs produce the same result on retry.
+        raise IncompleteSourceExtraction(manifest)
     if len(parsed_assets) > 1 and any(not entry[0] for entry in parsed_assets):
         raise ValueError("Multiple email requests have unreadable sent dates; chronology requires review")
     for record in supplementary_records:

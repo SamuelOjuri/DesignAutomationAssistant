@@ -95,6 +95,26 @@ def save_text(scope, key, digest, text, *, session_factory=SessionLocal, now=Non
         db.commit()
 
 
+def _reuse(scope, key, digest, kind):
+    try:
+        text = read_text(scope, key)
+    except Exception as exc:
+        details = database_error_details(exc) or {"error_type": type(exc).__name__}
+        logger.warning("Source transcription cache read unavailable details=%s", json.dumps(details, sort_keys=True))
+        return None
+    if text is not None:
+        logger.info("Source transcription reused kind=%s digest=%s", kind, digest[:12])
+    return text
+
+
+def cached_text(client, content, filename, kind):
+    """A previously cached transcription of this exact source; never a model request."""
+    if not settings.design_processing_transcription_cache_enabled or not getattr(client, "transcription_cache_scope", None):
+        return None
+    scope, key, digest = cache_identity(client, content, filename, kind)
+    return _reuse(scope, key, digest, kind)
+
+
 def cached_transcription(kind):
     def decorate(function):
         @wraps(function)
@@ -105,14 +125,8 @@ def cached_transcription(kind):
             # Prevent identical inline logos launching duplicate calls in one
             # child. Separate workers may fill the same idempotent cache key.
             with _key_lock(scope, key):
-                try:
-                    text = read_text(scope, key)
-                except Exception as exc:
-                    details = database_error_details(exc) or {"error_type": type(exc).__name__}
-                    logger.warning("Source transcription cache read unavailable details=%s", json.dumps(details, sort_keys=True))
-                    text = None
+                text = _reuse(scope, key, digest, kind)
                 if text is not None:
-                    logger.info("Source transcription reused kind=%s digest=%s", kind, digest[:12])
                     return text
                 # Failed, blocked and partial responses are never cached.
                 text = function(client, content, filename, *args, **kwargs)

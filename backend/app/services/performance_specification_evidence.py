@@ -164,6 +164,47 @@ def _restates_u_value(rejected, verified):
     )
 
 
+# Punctuation that only separates words. Symbols such as %, /, &, £ and ° carry
+# meaning, and an apostrophe splits a word (Cant != Can't), so neither is ignored.
+_WORD_SEPARATORS = re.compile("[,.;:!?\"()\\-\u2013\u2014\u201c\u201d]+")
+
+
+def _word_sequence(value):
+    """Words in order, ignoring case and word-separating punctuation.
+
+    Punctuation inside a number (1,500 / 1.5 / 1:80 / 26-01) stays significant.
+    """
+    text = _excerpt_normal(value)
+
+    def separator(match):
+        start, end = match.span()
+        inside_number = 0 < start and end < len(text) and text[start - 1].isdigit() and text[end].isdigit()
+        return match[0] if inside_number else " "
+
+    return " ".join(_WORD_SEPARATORS.sub(separator, text).split())
+
+
+def _restates_verified_words(rejected, verified):
+    """A verified literal value restated with different case or word punctuation.
+
+    'Premier Inn, Littlehampton' cited from 'Subject: RE: Premier inn littlehampton'
+    (item 3383299718, job 6c7626a8) claims nothing beyond the verified literal
+    'Premier inn littlehampton'. Source, excerpt, scope, issuer, roles and date must
+    match, with the same words in the same order. Identifiers and U-values keep
+    their own literal rules.
+    """
+    words = _word_sequence(rejected["value"])
+    return bool(
+        rejected["field"] not in REFERENCE_FIELDS | U_VALUE_FIELDS
+        and rejected["reason"] == "Raw value is absent from the supporting excerpt"
+        and words and words == _word_sequence(verified["value"])
+        and rejected["source_id"] == verified["source_id"]
+        and _excerpt_normal(rejected["snippet"]) == _excerpt_normal(verified["snippet"])
+        and all(_normal(rejected.get(key)) == _normal(verified.get(key))
+                for key in ("scope", "issuer", "role", "request_role", "message_date"))
+    )
+
+
 def _title_block_reference_parts(snippet):
     """Return one literal drawing number and one labelled revision from a block.
 
@@ -476,7 +517,8 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
                    and _words_in_order(failure["value"], failure["snippet"]))
                   or (failure["reason"] == UNVERIFIED_TIMESTAMP and single_value
                       and _fact_key(failure) in verified_facts)
-                  or any(_restates_u_value(failure, evidence) for evidence in candidates[label])):
+                  or any(_restates_u_value(failure, evidence) or _restates_verified_words(failure, evidence)
+                         for evidence in candidates[label])):
                 failure["status"] = "redundant"
             else:
                 failure["status"] = "unverified"

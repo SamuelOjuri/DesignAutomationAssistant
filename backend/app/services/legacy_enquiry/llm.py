@@ -10,6 +10,7 @@ from typing import Any, Callable, Sequence
 
 from google.genai import types
 from pydantic import ValidationError
+from pypdf.errors import PyPdfError
 
 from ...gemini_models import ThinkingLevel, validate_thinking_level
 from ..llm_interface import gemini_api_with_retry
@@ -30,11 +31,20 @@ from ..specification_request_context import (
 from ..source_text import require_json_safe_text
 from ..specification_failures import SpecificationEvidenceError
 from ..specification_intent import build_request_intent
-from ..source_transcription_cache import cached_transcription
+from ..source_transcription_cache import cached_text, cached_transcription
 
 
 GenerateContent = Callable[[str, Any, types.GenerateContentConfig], Any]
 logger = logging.getLogger(__name__)
+PDF_PAGE_RANGE_CACHE_KIND = "pdf-page-ranges"
+
+
+def _transcription_deadline(exc: GeminiRequestFailure) -> bool:
+    """A provider (HTTP 504) or client read deadline for a PDF transcription request."""
+    details = exc.details
+    return (details.get("stage") == "pdf_text" and details.get("origin") is None
+            and (exc.http_status == 504 or details.get("provider_status") == "DEADLINE_EXCEEDED"
+                 or (exc.http_status is None and details.get("error_type") == "ReadTimeout")))
 
 
 def _default_generate_content(
@@ -338,21 +348,52 @@ class LegacyGeminiClient:
         return total_size <= 100 * 1024 * 1024 and 1 < len(pdf_files) <= 3
 
     def process_pdf(self, pdf_content: bytes, filename: str) -> str:
+        # A document that previously exceeded the provider deadline reuses its
+        # page-range text instead of repeating the whole-document request.
+        reused = cached_text(self, pdf_content, filename, PDF_PAGE_RANGE_CACHE_KIND)
+        if reused is not None:
+            return reused
         try:
             return self._process_pdf_with_detail_views(pdf_content, filename)
         except GeminiRequestFailure as exc:
-            details = exc.details
-            attempted_bytes = details.get("input_bytes")
-            if (details.get("stage") != "pdf_text" or details.get("error_type") != "ReadTimeout"
-                    or exc.http_status is not None or details.get("origin") is not None
-                    or not isinstance(attempted_bytes, int) or attempted_bytes <= len(pdf_content)):
+            if not _transcription_deadline(exc):
                 raise
+            failure = exc
+        details = failure.details
+        attempted_bytes = details.get("input_bytes")
+        if (details.get("error_type") == "ReadTimeout" and failure.http_status is None
+                and isinstance(attempted_bytes, int) and attempted_bytes > len(pdf_content)):
             logger.warning("PDF detail transcription timed out. Retrying full original stage=pdf_text model=%s "
                            "original_bytes=%d detail_bytes=%d",
                            self.model, len(pdf_content), attempted_bytes - len(pdf_content))
             # Keep this text out of the detail-enhanced cache. Future reads can
             # still benefit from the optional magnified views when they are available.
-            return self._transcribe_pdf(pdf_content)
+            try:
+                return self._transcribe_pdf(pdf_content)
+            except GeminiRequestFailure as exc:
+                if not _transcription_deadline(exc):
+                    raise
+                failure = exc
+        from .pdf_page_ranges import pdf_page_count
+        try:
+            pages = pdf_page_count(pdf_content)
+            if pages < 2:
+                raise failure
+            logger.warning("PDF transcription exceeded the provider deadline. Transcribing page ranges "
+                           "stage=pdf_text model=%s pages=%d http_status=%s error_type=%s",
+                           self.model, pages, failure.http_status, failure.details.get("error_type"))
+            return self._transcribe_page_ranges(pdf_content, filename)
+        except PyPdfError:
+            raise failure from None
+
+    @cached_transcription(PDF_PAGE_RANGE_CACHE_KIND)
+    def _transcribe_page_ranges(self, pdf_content: bytes, filename: str) -> str:
+        # Item 3386619146: a 48-page A4 PDF returned HTTP 504 DEADLINE_EXCEEDED on
+        # every attempt. Bounded ranges keep each request within the deadline.
+        from .pdf_page_ranges import pdf_page_ranges
+
+        return "\n\n".join(self._transcribe_pdf(content, original_pages=(first, last))
+                           for first, last, content in pdf_page_ranges(pdf_content))
 
     @cached_transcription("pdf")
     def _process_pdf_with_detail_views(self, pdf_content: bytes, filename: str) -> str:
@@ -362,8 +403,14 @@ class LegacyGeminiClient:
         return self._transcribe_pdf(pdf_content, detail_content=detail_content, labels=labels)
 
     def _transcribe_pdf(self, pdf_content: bytes, *, detail_content: bytes = b"",
-                        labels: Sequence[str] = ()) -> str:
+                        labels: Sequence[str] = (), original_pages: tuple[int, int] | None = None) -> str:
         parts = [types.Part.from_bytes(data=pdf_content, mime_type="application/pdf")]
+        if original_pages:
+            first, last = original_pages
+            parts.append(
+                f"This PDF contains only pages {first}-{last} of a longer original document. "
+                f"Its first page is original page {first}; label every page with its original page number."
+            )
         if detail_content:
             parts.extend([
                 "The first PDF is the complete original. The next PDF contains enlarged "

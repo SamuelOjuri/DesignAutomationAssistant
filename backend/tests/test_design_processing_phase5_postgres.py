@@ -24,6 +24,7 @@ from backend.app.services.design_processing_locks import (
 from backend.app.services.design_processing_queue import queue_design_processing_snapshot
 from backend.app.services.design_processing_worker import (
     claim_due_analysis_jobs,
+    claim_due_design_processing_jobs,
     recover_expired_analysis_leases,
 )
 
@@ -224,6 +225,41 @@ def test_skip_locked_claims_next_due_job(postgres_worker_db):
     claimed_second = db.get(DesignProcessingJob, second_job.id)
     assert claimed_second.status == "running"
     assert claimed_second.locked_by == "skip-locked-worker"
+
+
+def test_design_worker_claim_prefers_publication_and_locks_only_job_rows(postgres_worker_db):
+    # The production claim joins items for priority but must neither lock them
+    # nor skip a job whose item row another transaction holds.
+    db, Session = postgres_worker_db
+    now = datetime.now(timezone.utc)
+    reanalysis_item, reanalysis = _add_item_and_job(
+        db, item_id="claim-reanalysis", now=now, created_at=now - timedelta(minutes=3))
+    _, first = _add_item_and_job(db, item_id="claim-first", now=now, created_at=now - timedelta(minutes=2))
+    publication_item, publication = _add_item_and_job(
+        db, item_id="claim-publication", now=now, created_at=now - timedelta(minutes=1))
+    reanalysis_item.latest_published_input_revision = "revision-0"
+    reanalysis_item.latest_published_pipeline_version = PIPELINE_VERSION
+    publication_item.latest_analyzed_input_revision = "revision-a"
+    publication_item.latest_analyzed_pipeline_version = PIPELINE_VERSION
+    db.commit()
+
+    locker = Session()
+    claimant = Session()
+    try:
+        locker.query(DesignProcessingItem).filter(
+            DesignProcessingItem.id == publication_item.id
+        ).with_for_update().one()
+        claimed = claim_due_design_processing_jobs(claimant, worker_id="priority-worker", limit=1, now=now)
+        assert [job.id for job in claimed] == [publication.id]
+        locker.rollback()
+
+        locker.query(DesignProcessingJob).filter(DesignProcessingJob.id == first.id).with_for_update().one()
+        claimed = claim_due_design_processing_jobs(claimant, worker_id="priority-worker", limit=1, now=now)
+        assert [job.id for job in claimed] == [reanalysis.id]
+    finally:
+        locker.rollback()
+        locker.close()
+        claimant.close()
 
 
 def test_concurrent_workers_claim_one_job_once(postgres_worker_db):

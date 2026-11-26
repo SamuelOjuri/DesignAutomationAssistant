@@ -12,7 +12,7 @@ import time
 from typing import Iterable, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, case, or_
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -171,8 +171,27 @@ def _supports_skip_locked(db: Session) -> bool:
     return db.bind is not None and db.bind.dialect.name == "postgresql"
 
 
-def _with_job_locks(db: Session, query):
-    return query.with_for_update(skip_locked=True) if _supports_skip_locked(db) else query
+def _with_job_locks(db: Session, query, *, of=None):
+    return query.with_for_update(skip_locked=True, of=of) if _supports_skip_locked(db) else query
+
+
+def _claim_priority():
+    """Publication work first, then items without AI Data, then re-analysis.
+
+    One worker otherwise runs jobs strictly by due time: on 26 Nov 2026 item
+    3390324091's 35-second publication waited 52 minutes behind a 113-source
+    re-analysis of an item that already had AI Data.
+    """
+    analyzed_current = and_(
+        DesignProcessingItem.latest_desired_input_revision == DesignProcessingItem.latest_analyzed_input_revision,
+        DesignProcessingItem.latest_desired_pipeline_version == DesignProcessingItem.latest_analyzed_pipeline_version,
+    )
+    return case(
+        (DesignProcessingJob.execution_kind == "publication", 0),
+        (and_(DesignProcessingJob.execution_kind.is_(None), analyzed_current), 0),
+        (DesignProcessingItem.latest_published_input_revision.is_(None), 1),
+        else_=2,
+    )
 
 
 def _analysis_or_readiness_filter():
@@ -340,6 +359,7 @@ def claim_due_analysis_jobs(
         )
         .filter(DesignProcessingJob.item_id.in_([str(value) for value in allowlist_item_ids]) if mode == "allowlist" else True)
         .order_by(
+            _claim_priority(),
             DesignProcessingJob.scheduled_for.asc(),
             DesignProcessingJob.created_at.asc(),
             DesignProcessingJob.id.asc(),
@@ -371,6 +391,13 @@ def claim_due_design_processing_jobs(
     claimed_at = now or utc_now()
     query = (
         db.query(DesignProcessingJob)
+        .outerjoin(
+            DesignProcessingItem,
+            and_(
+                DesignProcessingItem.board_id == DesignProcessingJob.board_id,
+                DesignProcessingItem.item_id == DesignProcessingJob.item_id,
+            ),
+        )
         .filter(
             or_(
                 and_(
@@ -390,13 +417,15 @@ def claim_due_design_processing_jobs(
         )
         .filter(DesignProcessingJob.item_id.in_([str(value) for value in allowlist_item_ids]) if mode == "allowlist" else True)
         .order_by(
+            _claim_priority(),
             DesignProcessingJob.scheduled_for.asc(),
             DesignProcessingJob.created_at.asc(),
             DesignProcessingJob.id.asc(),
         )
         .limit(limit)
     )
-    jobs = _with_job_locks(db, query).all()
+    # Lock only job rows: an item row on the nullable side of the join cannot be locked.
+    jobs = _with_job_locks(db, query, of=DesignProcessingJob).all()
     for job in jobs:
         claim_job(job, worker_id=worker_id, now=claimed_at)
     if jobs:

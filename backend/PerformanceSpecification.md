@@ -342,7 +342,9 @@ content hash and parent
 source ID. Nested archives share a budget of 100 MiB expanded bytes, 200 entries
 (including directories) and three archive levels. Every archive and readable member must
 also fit the 40 MiB source limit, and extracted text remains subject to the
-500,000-character context limit. No archive paths are extracted to disk. Containers
+500,000-character context limit. No archive paths are extracted to disk; a
+downloaded ZIP above 40 MiB may be read from its downloaded file as described below.
+Containers
 are recorded as `expanded:archive`; only readable members can supply evidence.
 Unsupported document formats are audited as `skipped:unsupported_format`, including
 ZIP members; they supply no field evidence and allow readable sources to proceed.
@@ -359,14 +361,30 @@ to read still hold extraction for retry/review. The design workbook reader also
 accepts 40 MiB inputs; the independent search ingestion workbook reader retains
 its 20 MiB input limit.
 
-The ZIP processing limit remains **40 MiB**. Larger ZIPs are not opened or sent to
-the model; their original filename, byte count and hash are retained with status
-`review:oversized_archive`. A downloaded supplementary ZIP is audited using a
-streamed hash rather than loading its entire contents into memory. An in-limit ZIP
-containing an oversized nested ZIP is likewise referred for manual review before
-any member is read. Readable emails and other sources continue through analysis.
+The ZIP processing limit remains **40 MiB**, measured on the bytes the reader
+actually processes. Compressed OBJ/MTL members, which are recorded from the central
+directory and never expanded, do not count toward it. A downloaded supplementary ZIP
+above 40 MiB is hashed in bounded chunks and verified against its download identity;
+when its remaining bytes fit, it is read from its downloaded file (never loaded whole
+into memory or extracted to disk) under the unchanged member, expansion, depth and
+text limits. Otherwise it is not opened beyond its central directory or sent to the
+model; its original filename, byte count and hash are retained with status
+`review:oversized_archive`. A ZIP above 40 MiB inside an email, or an oversized ZIP
+nested in another archive, is still judged on its whole size and referred for manual
+review before any member is read. Readable emails and other sources continue through analysis.
 The worker logs this policy outcome at INFO rather than failing/retrying extraction
 solely because the ZIP is oversized. Other archive limits remain unchanged.
+Item `3381414648` (job `823f5115`) supplied only a 49.55 MiB TaperedView ZIP, of
+which 41.9 MiB was compressed OBJ mesh and about 7.7 MiB was five preview images,
+JSON annotations and a project summary. It is now expanded: 12 members are read
+and 10 mesh/material members are referred for review.
+
+When no source in the inventory was read (every source was skipped or referred for
+review), analysis now stops before any model request with `No readable source`, and
+the job fails on its first attempt as a permanent source failure. Previously that
+item's empty inventory reached the model and failed all three attempts with
+`Source manifest is empty or contains duplicate identities`. Only new input can
+change the outcome.
 
 Specification Review and the PDF explicitly recommend downloading/reviewing the
 original ZIP, recording necessary specification corrections or supplying smaller
@@ -907,6 +925,20 @@ as does a unit-bearing value without a verified bare sibling. Item `3319900903`
 (job `e30fd92c`) failed all three attempts on this duplicate (`AXTER LTD`, `ROOFS 2
 & 3`); its Target U Value now resolves to `0.18`.
 
+A candidate rejected only because its value is absent from its excerpt is also
+`redundant` when a verified candidate cites the same source and excerpt with the
+same scope, issuer, roles and message date, and both values have the same words in
+the same order once case and word-separating punctuation (commas, full stops,
+colons, quotation marks, brackets and dashes) are ignored. The verified literal
+value is the one selected. Punctuation inside a number (`1,500`, `1.5`, `1:80`),
+apostrophes (`Cant`/`Can't`), symbols such as `%`, `/` and `&`, and Drawing
+Reference, Revision and U-value fields keep their existing literal rules. For item
+`3383299718` (job `6c7626a8`), Drawing Title `Premier inn littlehampton` verified
+from `Subject: RE: Premier inn littlehampton`, but a copy restating it as `Premier
+Inn, Littlehampton` failed all three attempts. A read-only replay of that stored
+payload now resolves with no issues. This changes the verifier only; `output-v22`
+is unchanged.
+
 A populated scalar with no `requested` citation can never be published. It is now
 withdrawn whenever a verified non-request candidate (achieved, baseline, withdrawn
 or lookup; never applicable baseline Decking) states the same value, reading
@@ -1193,6 +1225,17 @@ per-stream limit when the rotation was moved into their content
 views now omits them with a `PDF detail views omitted` warning, and the full original
 is still transcribed. A parser limit reached while reading the PDF itself fails the
 source with the permanent `pdf_parser_limit` code instead of three identical attempts.
+
+When a multi-page PDF transcription exceeds a deadline (provider HTTP 504
+`DEADLINE_EXCEEDED`, or a client read timeout after any detail-view fallback), the
+original pages are transcribed in contiguous ranges of at most 10 pages (at least
+two ranges), without detail views. Each request states its original page numbers,
+and the range texts are joined in page order. Only the complete joined text is cached, under its own
+`pdf-page-ranges` kind; later reads of the same PDF reuse it before attempting the
+whole-document request again. A failed range fails the source as before, and a
+single-page PDF is not split. Item `3386619146` (job `67b6abf3`) failed all three
+attempts because `House 1.pdf` (48 A4 pages of complex graphics, sent without
+detail views) returned HTTP 504 on every whole-document request.
 
 The supplied log's new `output-v14` Company failure, job
 `3eee61a8-077c-4e5e-a8a1-ae52d5f1f72f`, belongs to item `3312713363`, not one of the

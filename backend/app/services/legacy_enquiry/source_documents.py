@@ -100,14 +100,38 @@ def _mark_archive_review(record, error):
     return record
 
 
-def oversized_archive_file_record(path, filename, *, source_id, file_extension=None):
-    """Audit an oversized downloaded ZIP without loading its bytes into memory.
+def _is_zip(filename, file_extension):
+    return (Path(filename).suffix.lower() == ".zip"
+            or str(file_extension or "").strip().lower() in {"zip", ".zip"})
 
-    The caller verifies the streamed hash/size against its download identity.
-    The archive is never opened; this is a manual-review referral, not extraction.
+
+def _processed_archive_bytes(path, size):
+    """ZIP bytes the reader processes: all except compressed OBJ/MTL members.
+
+    Those TaperedView mesh/material members are recorded from the central
+    directory and never expanded, so they do not count against the size limit.
     """
-    if (Path(filename).suffix.lower() != ".zip"
-            and str(file_extension or "").strip().lower() not in {"zip", ".zip"}):
+    try:
+        with ZipFile(path) as archive:
+            unexpanded = sum(entry.compress_size for entry in archive.infolist()
+                             if not entry.is_dir() and _archive_member_metadata_only(entry.filename))
+    except (BadZipFile, OSError, RuntimeError, NotImplementedError, ValueError):
+        return size  # An unreadable directory remains an unopened review referral.
+    return size - unexpanded
+
+
+def archive_file_records(path, filename, extractor, *, source_id, file_extension=None,
+                         expected_sha256=None, expected_size=None, on_source=None):
+    """Read a downloaded ZIP above the in-memory size limit from its file.
+
+    Returns None when the ordinary in-memory reader applies. Otherwise the file is
+    hashed in bounded chunks and verified against its download identity. When the
+    members that would be expanded fit the 40 MiB limit, they are read from disk
+    under the normal member/expansion budgets: item 3381414648's 49.6 MiB
+    TaperedView ZIP held 41.9 MiB of compressed OBJ mesh and 7.7 MiB of readable
+    files. Larger archives remain unopened manual-review referrals.
+    """
+    if not _is_zip(filename, file_extension):
         return None
     path = Path(path)
     if path.stat().st_size <= MAX_SOURCE_BYTES:
@@ -118,11 +142,33 @@ def oversized_archive_file_record(path, filename, *, source_id, file_extension=N
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
             size += len(chunk)
-    return _mark_archive_review({
+    if ((expected_sha256 is not None and digest.hexdigest() != expected_sha256)
+            or (expected_size is not None and size != expected_size)):
+        raise ValueError("Downloaded source changed before transcription")
+    record = {
         "sourceId": source_id, "filename": filename, "sourceType": "attachment",
         "contentSha256": digest.hexdigest(), "sizeBytes": size,
-        "observedAt": None, "text": "",
-    }, _oversized_archive_error())
+        "observedAt": None, "status": "read", "text": "",
+    }
+    records = [record]
+    if _processed_archive_bytes(path, size) > MAX_SOURCE_BYTES:
+        _mark_archive_review(record, _oversized_archive_error())
+    else:
+        from .email_extraction import _EmailBudget
+        try:
+            _extract_archive(path, filename, extractor, source_id, None, _ArchiveBudget(), 0, records,
+                             on_source, archive_sha256=record["contentSha256"], email_budget=_EmailBudget())
+            record["status"] = ARCHIVE_EXPANDED_STATUS
+        except OversizedArchiveReview as exc:
+            _mark_archive_review(record, exc)
+        except Exception as exc:
+            record["status"] = "failed:" + type(exc).__name__
+            error = source_failure_details(exc)
+            if error:
+                record["error"] = error
+    if on_source is not None:
+        on_source(record)
+    return records
 
 
 class UnsupportedSourceFormat(SourceDocumentError):
@@ -197,14 +243,24 @@ class IncompleteSourceExtraction(ValueError):
         self.manifest = manifest
         failures = [_failure_summary(source) for source in manifest
                     if source["status"] not in COMPLETE_SOURCE_STATUSES]
+        if not failures and not any(source["status"] == "read" for source in manifest):
+            super().__init__("No readable source: every source was skipped or requires manual review; "
+                             "supply readable files for extraction")
+            return
         super().__init__("Incomplete source extraction; retry/review required: " + "; ".join(failures)[:1000])
 
 
 def permanent_source_failure(manifest) -> bool:
-    """True when every incomplete source failed on its own unchanged bytes."""
-    failed = [source for source in manifest or []
-              if isinstance(source, dict) and source.get("status") not in COMPLETE_SOURCE_STATUSES]
-    return bool(failed) and all(
+    """True when every incomplete source failed on its own unchanged bytes.
+
+    A complete inventory with nothing read is also permanent: skips and review
+    referrals recur for unchanged inputs (item 3381414648 retried an unread ZIP).
+    """
+    sources = [source for source in manifest or [] if isinstance(source, dict)]
+    failed = [source for source in sources if source.get("status") not in COMPLETE_SOURCE_STATUSES]
+    if not failed:
+        return bool(sources) and not any(source.get("status") == "read" for source in sources)
+    return all(
         isinstance(source.get("error"), dict) and source["error"].get("stage") == "source_document"
         and source["error"].get("code") in PERMANENT_SOURCE_ERROR_CODES
         for source in failed
@@ -494,12 +550,16 @@ def extract_source_records(content, filename, extractor, *, source_id, observed_
 
 def _extract_archive(content, filename, extractor, source_id, observed_at, budget, depth, records,
                      on_source=None, *, archive_sha256, email_budget=None, email_depth=0):
-    if len(content) > MAX_SOURCE_BYTES:
+    if isinstance(content, Path):
+        archive_source = content  # archive_file_records admitted it on its processed bytes.
+    elif len(content) > MAX_SOURCE_BYTES:
         raise _oversized_archive_error()
+    else:
+        archive_source = io.BytesIO(content)
     if depth >= MAX_ARCHIVE_DEPTH:
         raise SourceDocumentError("archive_depth_limit", "ZIP exceeds the three-level nesting limit; flatten the archive.")
     try:
-        with ZipFile(io.BytesIO(content)) as archive:
+        with ZipFile(archive_source) as archive:
             entries = archive.infolist()
             budget.add_members(len(entries))
             files = [entry for entry in entries if not entry.is_dir()]

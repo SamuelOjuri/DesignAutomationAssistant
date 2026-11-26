@@ -1277,6 +1277,41 @@ def test_analysis_worker_does_not_claim_publication_only_job(db_session):
     assert db_session.get(DesignProcessingJob, job.id).status == "scheduled"
 
 
+def test_worker_claims_publication_then_first_analysis_then_reanalysis(db_session):
+    # 26 Nov 2026: item 3390324091's 35-second publication waited 52 minutes behind
+    # a 113-source re-analysis of an item that already had AI Data.
+    version = settings.design_processing_pipeline_version
+    now = utc_now()
+
+    def add(item_id, *, minutes_ago, analyzed=None, published=None):
+        due = now - timedelta(minutes=minutes_ago)
+        db_session.add_all([
+            DesignProcessingItem(
+                id=uuid.uuid4(), board_id=BOARD_ID, item_id=item_id, state="scheduled", warnings_json=[],
+                latest_desired_input_revision="revision-2", latest_desired_pipeline_version=version,
+                latest_analyzed_input_revision=analyzed, latest_analyzed_pipeline_version=analyzed and version,
+                latest_published_input_revision=published, latest_published_pipeline_version=published and version,
+                created_at=due, updated_at=due,
+            ),
+            DesignProcessingJob(
+                id=uuid.uuid4(), board_id=BOARD_ID, item_id=item_id, trigger_type="reconciliation",
+                status="scheduled", scheduled_for=due, attempt_count=0, readiness_check_count=0,
+                max_attempts=3, created_at=due, updated_at=due,
+            ),
+        ])
+
+    add("1", minutes_ago=60, analyzed="revision-1", published="revision-1")  # Re-analysis.
+    add("2", minutes_ago=30)  # First analysis.
+    add("3", minutes_ago=45)  # Older first analysis.
+    add("4", minutes_ago=1, analyzed="revision-2", published="revision-1")  # Publication only.
+    db_session.commit()
+
+    claimed = design_processing_worker.claim_due_design_processing_jobs(
+        db_session, worker_id="priority-test", limit=4)
+
+    assert [job.item_id for job in claimed] == ["4", "3", "2", "1"]
+
+
 def test_incomplete_project_lookup_persists_reviewable_unknown_without_monday_writes(
     db_session, golden, monkeypatch,
 ):
