@@ -55,6 +55,72 @@ def _default_generate_content(
     return gemini_api_with_retry(model=model, contents=contents, config=config)
 
 
+def _parameter_evidence_failure(result, manifest, message):
+    from ..performance_specification_evidence import request_note_diagnostics
+    from ..specification_recovery import evidence_diagnostics, extraction_payload
+
+    provenance, field_issues = evidence_diagnostics(result, manifest)
+    payload = extraction_payload(result, manifest)
+    return SpecificationEvidenceError(message, {
+        "extraction": payload, "fieldIssues": field_issues,
+        "noteIssues": request_note_diagnostics(payload),
+        "provenance": {label: details for label, details in provenance.items() if label in field_issues},
+    })
+
+
+def _validate_parameter_extraction(result, source_manifest):
+    from ..performance_specification_evidence import (
+        PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNCONFIRMED_REFERENCE,
+        UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT, resolve_request_notes,
+    )
+    from ..specification_recovery import evidence_diagnostics, extraction_payload
+
+    def evidence_failure(message):
+        return _parameter_evidence_failure(result, source_manifest, message)
+
+    if source_manifest is not None:
+        provenance, diagnostics = evidence_diagnostics(result, source_manifest)
+        unresolved = {label: reason for label, reason in diagnostics.items()
+                      if (reason not in {VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT, PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN,
+                                         UNCONFIRMED_REFERENCE}
+                          and not (label in {"Date Received", "Revision"}
+                                   and reason == "Populated extraction has no verified applicable evidence"))
+                      or any(e["status"] == "unverified" for e in provenance[label].get("rejectedCandidates", []))}
+        if unresolved:
+            # Valid scoped conflicts remain reviewable. The logs include enum
+            # counts without values or source excerpts.
+            roles = {label: dict(sorted(Counter(e.role for e in result.specification_evidence
+                                               if e.field == label).items()))
+                     for label in sorted(unresolved)}
+            masked = {label: reasons for label in sorted(unresolved)
+                      if (reasons := sorted({e["reason"] for e in provenance[label].get("rejectedCandidates", [])
+                                             if e["status"] == "unverified"}))
+                      and reasons != [unresolved[label]]}
+            raise evidence_failure("Specification evidence recovery unresolved: " + str(unresolved)
+                                   + "; evidence_roles=" + str(roles)
+                                   + ("; unverified_candidates=" + str(masked) if masked else ""))
+        try:
+            resolve_request_notes(extraction_payload(result, source_manifest))
+        except ValidationError as exc:
+            raise evidence_failure("Invalid request notes: " + json.dumps(
+                exc.errors(include_input=False, include_context=False, include_url=False))) from None
+        except ValueError as exc:
+            raise evidence_failure(str(exc)) from None
+    # Individually bounded responses must also satisfy the merged array limits.
+    try:
+        DesignParameterExtraction.model_validate(result.model_dump())
+    except ValidationError as exc:
+        message = "Invalid merged extraction: " + json.dumps(
+            exc.errors(include_input=False, include_context=False, include_url=False))
+        if source_manifest is not None:
+            raise evidence_failure(message) from None
+        raise ValueError(message) from None
+    if source_manifest is not None:
+        result.specification_request_intent = build_request_intent(
+            source_manifest, result.specification_request_intent)
+    return result
+
+
 @dataclass(frozen=True, slots=True)
 class LegacyGeminiClient:
     model: str
@@ -92,7 +158,55 @@ class LegacyGeminiClient:
     def extract_design_parameters_with_manifest(self, context: str, source_manifest: list[dict]) -> DesignParameterExtraction:
         return self.extract_design_parameters(context, source_manifest=source_manifest)
 
-    def extract_design_parameters(self, context: str, *, source_manifest=None) -> DesignParameterExtraction:
+    def extract_design_parameters_batches(self, contexts: Sequence[str], source_manifest: list[dict]) -> DesignParameterExtraction:
+        from ..performance_specification_evidence import resolve_email_evidence
+        from ..specification_recovery import extraction_payload
+
+        batches = [self.extract_design_parameters(context, source_manifest=source_manifest, _partial=True)
+                   for context in contexts]
+        if not batches:
+            raise ValueError("At least one source context is required")
+        result = batches[0].model_copy()
+        # Ignore differences in explanation or location wording when overlapping
+        # batches supply the same literal claim. Keep differing facts and scopes.
+        evidence = {}
+        for batch in batches:
+            for entry in batch.specification_evidence:
+                identity = entry.model_dump_json(exclude={"rationale", "location"})
+                evidence.setdefault(identity, entry)
+        result.specification_evidence = list(evidence.values())
+        notes = {note.model_dump_json(): note for batch in batches for note in batch.specification_request_notes}
+        result.specification_request_notes = list(notes.values())
+        result.specification_assessed_fields = sorted(set.intersection(
+            *(set(batch.specification_assessed_fields) for batch in batches)))
+        result._evidence_repairs = [repair for batch in batches for repair in batch._evidence_repairs]
+        verified, _, _ = resolve_email_evidence(extraction_payload(result, source_manifest))
+        verified_scalars = {}
+        for label in (*result.as_canonical_parameters(), "Bauder Roof Num"):
+            attr = label.lower().replace("-", "_").replace(" ", "_")
+            field = canonical_label(label)
+            values = list(dict.fromkeys(value for batch in batches if not missing(value := getattr(batch, attr))))
+            if field in verified:
+                verified_scalars[attr] = verified[field]
+                # Preserve a populated assertion until validation can detect
+                # that it lacks any applicable evidence in the full manifest.
+                setattr(result, attr, verified[field] or (values[0] if values else None))
+            else:
+                setattr(result, attr, values[0] if len(values) == 1 else None)
+        proposals = [build_request_intent(source_manifest, batch.specification_request_intent)
+                     for batch in batches if batch.specification_request_intent is not None]
+        current = [proposal for proposal in proposals if proposal.recommended_type != "uncertain"]
+        result.specification_request_intent = None
+        if len({proposal.recommended_type for proposal in current}) == 1:
+            result.specification_request_intent = max(current, key=lambda proposal: len(proposal.evidence))
+        _validate_parameter_extraction(result, source_manifest)
+        # Verified evidence decides the cross-batch scalar. Reviewable conflicts
+        # leave the scalar blank and retain their competing source citations.
+        for attr, value in verified_scalars.items():
+            setattr(result, attr, value)
+        return result
+
+    def extract_design_parameters(self, context: str, *, source_manifest=None, _partial=False) -> DesignParameterExtraction:
         from ..specification_recovery import (
             drop_blank_evidence, evidence_diagnostics, extraction_payload, merge_recovery,
             repair_note_list_formatting, repair_note_prose_dashes, repair_image_company_citations,
@@ -100,10 +214,7 @@ class LegacyGeminiClient:
             repair_literal_scale_citations, repair_literal_u_value_citations,
             repair_spreadsheet_cell_citations, repair_template_markers,
         )
-        from ..performance_specification_evidence import (
-            PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN, UNCONFIRMED_REFERENCE,
-            UNDATED_SCOPE_CONFLICT, VALUE_CONFLICT, request_note_diagnostics, resolve_request_notes,
-        )
+        from ..performance_specification_evidence import request_note_diagnostics
         prompt = f"""
         Please analyze the following information extracted from emails, PDF documents, and images:
 
@@ -116,13 +227,20 @@ class LegacyGeminiClient:
         Selected client-request context (verified headers, not model inference):
         {request_context_summary(select_client_request(source_manifest)) if source_manifest is not None else None}
 
-        Explicitly adopted attached-message contexts (their own current heads;
-        quoted history and their senders' client identity are not adopted):
+        Explicitly adopted attached-message contexts. Where the current client explicitly
+        refers to attached correspondence, verified earlier replies of the same participants
+        and subject may support technical fields. The current request and attached message
+        head take priority. Cite the original reply and date, or the uniquely owned inline
+        image. Unrelated history and the attachment sender's identity cannot establish the current request:
         {[request_context_summary(message) for message in adopted_request_contexts(source_manifest)] if source_manifest is not None else []}
 
         Use literal image TEXT REGION blocks as citations. VISUAL CONTEXT is descriptive
         prose, not an alternative spelling or legal-name authority.
         """
+        if _partial:
+            prompt += ("\nThis context is one batch of a larger source inventory. Assess every field against "
+                       "the supplied source text in this batch. Leave a value null if the batch lacks evidence. "
+                       "Retain competing or scoped candidates with their literal citations for merging.\n")
         requester = GeminiJSONRequester(self.generate_content, self.model, self.parameter_extraction_config, DesignParameterExtraction)
         missing_client = any(source.get("status") == MISSING_CLIENT_EMAIL_REVIEW_STATUS
                              for source in source_manifest or [])
@@ -178,13 +296,7 @@ class LegacyGeminiClient:
         result = request(prompt, "parameter_extraction")
 
         def evidence_failure(message):
-            provenance, field_issues = evidence_diagnostics(result, source_manifest)
-            payload = extraction_payload(result, source_manifest)
-            return SpecificationEvidenceError(message, {
-                "extraction": payload, "fieldIssues": field_issues,
-                "noteIssues": request_note_diagnostics(payload),
-                "provenance": {label: details for label, details in provenance.items() if label in field_issues},
-            })
+            return _parameter_evidence_failure(result, source_manifest, message)
 
         required = set(FIELD_DEFINITIONS) - {"Incoming Information"}
         fields = {canonical_label(key): value for key, value in result.as_canonical_parameters().items()}
@@ -278,52 +390,7 @@ class LegacyGeminiClient:
         unverified = {label for label in required - {"Revision", "Date Received"} if not missing(fields.get(label))} - {e.field for e in result.specification_evidence}
         if unverified:
             raise ValueError("Specification extraction omitted supporting evidence for: " + ", ".join(sorted(unverified)))
-        if source_manifest is not None:
-            provenance, diagnostics = evidence_diagnostics(result, source_manifest)
-            unresolved = {label: reason for label, reason in diagnostics.items()
-                          if (reason not in {VALUE_CONFLICT, UNDATED_SCOPE_CONFLICT, PAGE_SIZE_CONFLICT, PAGE_SIZE_UNCERTAIN,
-                                             UNCONFIRMED_REFERENCE}
-                              and not (label in {"Date Received", "Revision"}
-                                       and reason == "Populated extraction has no verified applicable evidence"))
-                          or any(e["status"] == "unverified" for e in provenance[label].get("rejectedCandidates", []))}
-            if unresolved:
-                # Retry the producer, not the same unusable stored extraction in
-                # the independent publisher. Valid scoped conflicts remain reviewable.
-                # Enum counts help distinguish absent evidence from facts marked
-                # as non-requested, without logging values or source excerpts.
-                roles = {label: dict(sorted(Counter(e.role for e in result.specification_evidence
-                                                   if e.field == label).items()))
-                         for label in sorted(unresolved)}
-                # A publishable conflict reason can mask the unverified candidate
-                # that actually blocks; name those fixed verifier reasons too.
-                masked = {label: reasons for label in sorted(unresolved)
-                          if (reasons := sorted({e["reason"] for e in provenance[label].get("rejectedCandidates", [])
-                                                 if e["status"] == "unverified"}))
-                          and reasons != [unresolved[label]]}
-                raise evidence_failure("Specification evidence recovery unresolved: " + str(unresolved)
-                                       + "; evidence_roles=" + str(roles)
-                                       + ("; unverified_candidates=" + str(masked) if masked else ""))
-            try:
-                resolve_request_notes(extraction_payload(result, source_manifest))
-            except ValidationError as exc:
-                raise evidence_failure("Invalid request notes: " + json.dumps(
-                    exc.errors(include_input=False, include_context=False, include_url=False))) from None
-            except ValueError as exc:
-                raise evidence_failure(str(exc)) from None
-        # Merging two individually bounded responses must not bypass the local
-        # array limits and leave an oversized extraction for the publisher.
-        try:
-            DesignParameterExtraction.model_validate(result.model_dump())
-        except ValidationError as exc:
-            message = "Invalid merged extraction: " + json.dumps(
-                exc.errors(include_input=False, include_context=False, include_url=False))
-            if source_manifest is not None:
-                raise evidence_failure(message) from None
-            raise ValueError(message) from None
-        if source_manifest is not None:
-            result.specification_request_intent = build_request_intent(
-                source_manifest, result.specification_request_intent)
-        return result
+        return result if _partial else _validate_parameter_extraction(result, source_manifest)
 
     def query_llm(self, context: str, query: str) -> str:
         prompt = (

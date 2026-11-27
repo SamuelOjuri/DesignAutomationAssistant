@@ -60,6 +60,7 @@ from .design_processing_target import (
     refresh_current_target,
 )
 from .legacy_enquiry.llm import LegacyGeminiClient
+from .legacy_enquiry.source_analysis_failures import SOURCE_ANALYSIS_REVIEW_KEY, SourceAnalysisReviewRequired
 from .legacy_enquiry.source_documents import permanent_source_failure
 from .gemini_requests import runtime_diagnostics
 from .monday_item_availability import (
@@ -75,9 +76,13 @@ def _terminal_analysis_failure(job):
     if job.status != "failed" or job.execution_kind == "publication":
         return None
     exhausted = job.attempt_count >= job.max_attempts
+    source_review = (job.result_json or {}).get(SOURCE_ANALYSIS_REVIEW_KEY)
+    message = ("Analysis failed & automatic retries exhausted" if exhausted
+               else "Analysis failed & source rejection is permanent")
+    if source_review is not None:
+        message = "Analysis stopped for source review"
     return {
-        "message": "Analysis failed & automatic retries exhausted" if exhausted
-            else "Analysis failed & source rejection is permanent",
+        "message": message,
         "board_id": job.board_id,
         "item_id": job.item_id,
         "job_id": str(job.id),
@@ -85,6 +90,7 @@ def _terminal_analysis_failure(job):
         "attempt_count": job.attempt_count,
         "max_attempts": job.max_attempts,
         "automatic_retries_exhausted": exhausted,
+        **({"source_analysis_review": source_review} if source_review is not None else {}),
     }
 
 
@@ -957,6 +963,7 @@ def _record_execution_failure(
     now: datetime,
     source_manifest=None,
     evidence_failure=None,
+    source_review=None,
 ) -> str:
     item, job = lock_design_processing_item_and_job(db, job_id)
     if job is None:
@@ -968,12 +975,19 @@ def _record_execution_failure(
     if job.status != "running" or job.locked_by != worker_id:
         db.rollback()
         return "not_claimed"
+    diagnostics = dict(job.result_json or {})
     if source_manifest is not None:
-        job.result_json = {**(job.result_json or {}), "sourceExtractionFailure": source_manifest}
+        diagnostics["sourceExtractionFailure"] = source_manifest
     if evidence_failure is not None:
-        job.result_json = {**(job.result_json or {}), "specificationEvidenceFailure": evidence_failure}
-    # A source rejected on its own bytes fails identically on every attempt.
-    permanent = permanent_source_failure(source_manifest)
+        diagnostics["specificationEvidenceFailure"] = evidence_failure
+    if source_review is not None:
+        diagnostics[SOURCE_ANALYSIS_REVIEW_KEY] = source_review
+    else:
+        diagnostics.pop(SOURCE_ANALYSIS_REVIEW_KEY, None)
+    if diagnostics != (job.result_json or {}):
+        job.result_json = diagnostics
+    # Retrying cannot change a byte-level rejection or a source-review decision.
+    permanent = source_review is not None or permanent_source_failure(source_manifest)
     if execution_identity(job) is None:
         job.attempt_count += 1
         job.last_error = error
@@ -1020,6 +1034,7 @@ def _record_execution_failure_safely(
     error: str,
     source_manifest=None,
     evidence_failure=None,
+    source_review=None,
 ) -> str:
     try:
         return run_transaction_with_retry(
@@ -1032,6 +1047,7 @@ def _record_execution_failure_safely(
                 now=utc_now(),
                 source_manifest=source_manifest,
                 evidence_failure=evidence_failure,
+                source_review=source_review,
             ),
             operation_name=f"record design-processing job {job_id} failure",
             retry_if=is_postgres_deadlock,
@@ -1370,6 +1386,7 @@ def execute_claimed_analysis_job(
             error=str(exc)[:2000],
             source_manifest=getattr(exc, "manifest", None),
             evidence_failure=getattr(exc, "evidence_failure", None),
+            source_review=exc.details if isinstance(exc, SourceAnalysisReviewRequired) else None,
         )
 
 

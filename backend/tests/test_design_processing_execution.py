@@ -104,6 +104,24 @@ def test_evidence_failure_survives_process_boundary_without_logging_sources(simu
     assert str(error.value) == "Evidence unresolved" and simulated_extraction.closed
 
 
+def test_source_review_survives_process_boundary(simulated_extraction, monkeypatch):
+    from backend.app.services.legacy_enquiry.source_analysis_failures import SourceAnalysisReviewRequired
+
+    def fail(*args, **kwargs):
+        raise SourceAnalysisReviewRequired("Chronology requires review", code="unreadable_request_date",
+                                           source_id="asset:1:body", message_index=2)
+
+    sent = []
+    monkeypatch.setattr(execution, "analyze_downloaded_email_assets", fail)
+    execution._analyze_in_child(SimpleNamespace(send=sent.append, close=lambda: None), (), None)
+    simulated_extraction.duration = 5
+    simulated_extraction.response = sent[0]
+    with pytest.raises(SourceAnalysisReviewRequired, match="Chronology requires review") as error:
+        execution.run_interruptible_analysis((), client=execution.LegacyGeminiClient("offline"),
+                                             check_current=lambda: None)
+    assert error.value.details == {"code": "unreadable_request_date", "source_id": "asset:1:body", "message_index": 2}
+
+
 @pytest.mark.parametrize("failure_at", [10, 60, 600])
 def test_periodic_and_completion_remote_failures_stop_extraction(simulated_extraction, failure_at):
     if failure_at == 10:

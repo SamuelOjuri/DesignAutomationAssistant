@@ -1,6 +1,6 @@
 """Literal message boundaries and client identity, independent of model claims."""
 
-from datetime import timezone
+from datetime import datetime, timezone
 from email.utils import getaddresses
 import re
 from zoneinfo import ZoneInfo
@@ -8,10 +8,17 @@ from zoneinfo import ZoneInfo
 from dateutil.parser import isoparse, parse
 
 from ..config import settings
+from .legacy_enquiry.source_analysis_failures import SourceAnalysisReviewRequired
 from .specification_semantics import ARCHIVE_EXPANDED_STATUS, DOCX_EXPANDED_STATUS
 
 
 CLIENT_FIELDS = frozenset({"Company", "Contact", "Date Received"})
+ADOPTED_THREAD_PRIORITY = 1
+ADOPTED_MESSAGE_PRIORITY = 2
+CURRENT_REQUEST_PRIORITY = 3
+_OUTLOOK_GMT_DATE = re.compile(
+    r"\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}\s+\(GMT[+-]\d{2}:\d{2}\)", re.I,
+)
 
 
 def _addresses(values):
@@ -52,11 +59,22 @@ def _addresses(values):
     return list(dict.fromkeys(addresses))
 
 
+def parse_outlook_gmt_date(value: str) -> datetime | None:
+    """Recognize Outlook's numeric UK date and its explicit GMT offset."""
+    value = value.strip()
+    if _OUTLOOK_GMT_DATE.fullmatch(value):
+        return datetime.strptime(value, "%d/%m/%Y %H:%M (GMT%z)")
+    return None
+
+
 def message_timestamp(value):
     if not value or not re.search(r"\b(?:19|20)\d{2}\b", value):
         return None
+    value = value.strip()
     try:
-        stamp = isoparse(value) if re.match(r"^\d{4}-\d{2}-\d{2}(?:T|\s|$)", value) else parse(value, dayfirst=True)
+        stamp = parse_outlook_gmt_date(value)
+        if stamp is None:
+            stamp = isoparse(value) if re.match(r"^\d{4}-\d{2}-\d{2}(?:T|\s|$)", value) else parse(value, dayfirst=True)
         if stamp.tzinfo is None:
             stamp = stamp.replace(tzinfo=ZoneInfo("Europe/London"))
         return stamp.astimezone(timezone.utc).isoformat()
@@ -171,12 +189,20 @@ def select_client_request(manifest):
                 candidates.append({**message, "sourceId": source["sourceId"]})
     if not candidates:
         return None  # Legacy/unidentified sources retain their existing checks.
-    if any(not message["sentAt"] for message in candidates):
-        raise ValueError("Client request has an unreadable sent date; chronology requires review")
+    undated = next((message for message in candidates if not message["sentAt"]), None)
+    if undated is not None:
+        raise SourceAnalysisReviewRequired(
+            "Client request has an unreadable sent date; chronology requires review",
+            code="unreadable_request_date", source_id=undated["sourceId"],
+            message_index=undated["messageIndex"],
+        )
     latest = max(message["sentAt"] for message in candidates)
     current = [message for message in candidates if message["sentAt"] == latest]
     if len({message["sender"] for message in current}) != 1:
-        raise ValueError("Simultaneous client requests have conflicting senders")
+        raise SourceAnalysisReviewRequired(
+            "Simultaneous client requests have conflicting senders",
+            code="conflicting_request_senders", candidate_count=len(current),
+        )
     # Prefer the original outer email over an otherwise identical quoted copy.
     return min(current, key=lambda message: (message["messageIndex"], message["sourceId"]))
 
@@ -301,11 +327,49 @@ def adopted_request_contexts(manifest):
             and (message := adopted_attached_message(source, sources, context))]
 
 
+def _thread_subject(message):
+    subject = re.search(r"^Subject:[ \t\u00a0]*(.+)$", message["headerSnippet"], re.I | re.M)
+    if not subject:
+        return ""
+    value = re.sub(r"^(?:(?:re|fw|fwd):\s*|\[external\]\s*)+", "", subject[1], flags=re.I)
+    return " ".join(value.casefold().split())
+
+
+def _is_adopted_thread_reply(message, adopted, context):
+    body = context["text"].removeprefix(context["headerSnippet"])
+    # Generic "see attached" establishes the attached message's current head.
+    # Its quoted thread needs an explicit pointer to attached correspondence.
+    if not re.search(r"\b(?:attached\s+(?:e-?mail|message|thread|correspondence)|"
+                     r"(?:e-?mail|message|thread|correspondence)\s+(?:is\s+)?attached)\b", body, re.I):
+        return False
+    if re.search(r"\b(?:ignore|disregard|do not use|don't use)\s+(?:the\s+)?"
+                 r"(?:earlier|previous|prior|older|quoted)\s+(?:e-?mails?|messages?|correspondence|history|replies)\b",
+                 body, re.I):
+        return False
+    client = context["sender"]
+    if client == adopted["sender"]:
+        recipients = set(adopted["recipients"]) - {client}
+        if len(recipients) != 1:
+            return False
+        peer = next(iter(recipients))
+    else:
+        if client not in adopted["recipients"]:
+            return False
+        peer = adopted["sender"]
+    if not ((message["sender"] == client and peer in message["recipients"])
+            or (message["sender"] == peer and client in message["recipients"])):
+        return False
+    subject = _thread_subject(adopted)
+    return bool(message["messageIndex"] > 0 and message["sentAt"] and message["sentAt"] < adopted["sentAt"]
+                and subject and _thread_subject(message) == subject)
+
+
 def technical_evidence_context(evidence, source, sources, context, contains):
     """Return applicability priority and verified own-message attribution.
 
-    None means an attached message is not adopted, or the excerpt belongs only
-    to its quoted history. Zero retains the existing historical-context policy.
+    None means attached correspondence has no applicable source message.
+    An explicitly adopted, attributable thread reply ranks below the current
+    message and cannot establish requester identity or request notes.
     """
     if source.get("parentSourceId") is not None and source_parent_chain(source, sources) is None:
         return None
@@ -316,16 +380,24 @@ def technical_evidence_context(evidence, source, sources, context, contains):
         if adopted is None:
             return None
         if source.get("sourceType") == "email_body":
-            if not contains(evidence["snippet"], adopted["text"]):
-                return None
+            if contains(evidence["snippet"], adopted["text"]):
+                return ADOPTED_MESSAGE_PRIORITY, adopted
+            matches = [message for message in source_email_messages(body)
+                       if contains(evidence["snippet"], message["text"])]
         elif source.get("contentId"):
             containing = attachment_message(source, sources)
-            if not containing or containing["messageIndex"] != 0:
-                return None
-        return 1, adopted
+            if containing and containing["messageIndex"] == 0:
+                return ADOPTED_MESSAGE_PRIORITY, adopted
+            matches = [containing] if containing else []
+        else:
+            return ADOPTED_MESSAGE_PRIORITY, adopted
+        if (context and evidence.get("field") and len(matches) == 1
+                and _is_adopted_thread_reply(matches[0], adopted, context)):
+            return ADOPTED_THREAD_PRIORITY, {**matches[0], "sourceId": adopted["sourceId"]}
+        return None
     if (context and source.get("sourceId") == context["sourceId"]
             and contains(evidence["snippet"], context["text"])):
-        return 2, context
+        return CURRENT_REQUEST_PRIORITY, context
     if (context and body and body.get("sourceId") == context["sourceId"]
             and source.get("sourceType") == "attachment" and _adopts_attachments(context)):
         containing = attachment_message(source, sources) if source.get("contentId") else None
@@ -334,7 +406,7 @@ def technical_evidence_context(evidence, source, sources, context, contains):
                 and containing["sentAt"] == context["sentAt"]):
             # Other explicitly requested documents in the same current envelope
             # remain peers of an adopted email, not silently displaced history.
-            return 1, {**context, "sourceId": body["sourceId"]}
+            return ADOPTED_MESSAGE_PRIORITY, {**context, "sourceId": body["sourceId"]}
     return 0, None
 
 

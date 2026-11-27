@@ -590,6 +590,34 @@ def test_analysis_failure_logs_exhaustion_only_after_final_attempt(
     assert "private source" not in caplog.text and "private-source.pdf" not in caplog.text
 
 
+def test_source_review_stops_retries_until_input_changes(db_session, caplog):
+    job = _running_failure_log_job(db_session, attempts=1)
+    source_review = {"code": "combined_source_text_limit", "character_count": 600_000}
+    assert design_processing_worker._record_execution_failure(
+        db_session, job.id, worker_id="log-test", error="Combined source text requires review",
+        now=utc_now(), source_review=source_review,
+    ) == "failed"
+    assert job.attempt_count == 1
+    assert job.result_json["sourceAnalysisReview"] == source_review
+    [event] = _terminal_failure_events(caplog)
+    assert event["source_analysis_review"] == source_review
+    assert not event["automatic_retries_exhausted"]
+
+    asset = DesignEmailAsset(
+        asset_id="300", filename="request.eml", file_extension="eml", size=100,
+        created_at="2026-11-27T09:00:00Z", download_url="https://monday.invalid/private/300",
+        download_requires_auth=True,
+    )
+    snapshot = DesignProcessingTargetSnapshot(
+        board_id=BOARD_ID, item_id=ITEM_ID, group_id=GROUP_ID, item_state="active",
+        name="Request", email_assets=(asset,), input_revision=job.execution_input_revision,
+    )
+    blocked = _queue(db_session, snapshot)
+    assert (blocked.outcome, blocked.readiness) == ("ignored", "attempts_exhausted")
+    fresh = _queue(db_session, replace(snapshot, input_revision="new-source-revision"))
+    assert fresh.outcome == "queued" and fresh.job.id != job.id
+
+
 def test_terminal_analysis_failure_is_not_logged_when_commit_fails(db_session, monkeypatch, caplog):
     job = _running_failure_log_job(db_session)
     def fail_commit():

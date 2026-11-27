@@ -37,6 +37,7 @@ from .design_processing_target import (
     DesignProcessingReadGateway,
     MondayDesignProcessingReadGateway,
 )
+from .legacy_enquiry.source_analysis_failures import SOURCE_ANALYSIS_REVIEW_KEY
 
 
 logger = logging.getLogger(__name__)
@@ -154,6 +155,9 @@ def retry_failed_design_processing_job(
 
     job.status = "scheduled"
     job.trigger_type = "operator_retry"
+    if SOURCE_ANALYSIS_REVIEW_KEY in (job.result_json or {}):
+        job.result_json = {key: value for key, value in job.result_json.items()
+                           if key != SOURCE_ANALYSIS_REVIEW_KEY}
     job.scheduled_for = retry_at
     job.next_retry_at = None
     job.locked_at = None

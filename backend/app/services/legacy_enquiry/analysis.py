@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from ..design_processing_inputs import DownloadedDesignEmailAsset
 from .email_extraction import (
     AttachmentTextExtractor,
+    email_body_record,
     extract_text_from_email,
     process_email_content,
 )
@@ -27,6 +28,8 @@ from .source_documents import (
     IncompleteSourceExtraction, MAX_CONTEXT_CHARS, archive_file_records, extract_source_records,
     source_failure_details, source_record,
 )
+from .source_analysis_failures import SourceAnalysisReviewRequired
+from .source_context import bounded_source_contexts, source_context_review
 from ..specification_semantics import (
     COMPLETE_SOURCE_STATUSES, MISSING_CLIENT_EMAIL_REVIEW_STATUS, SpecificationEvidence, missing,
 )
@@ -129,6 +132,20 @@ def analyze_downloaded_email_assets(
         except (TypeError, ValueError, OverflowError):
             request_time = None  # Upload time is not the date of the request.
         parsed_assets.append((request_time or "", downloaded.source.asset_id, downloaded, header, body, attachments, inline_images, metadata))
+    client_request = None
+    if not manifest:
+        unreadable_dates = [f"asset:{asset_id}:body" for request_time, asset_id, *_ in parsed_assets if not request_time]
+        if len(parsed_assets) > 1 and unreadable_dates:
+            raise SourceAnalysisReviewRequired("Multiple email requests have unreadable sent dates; chronology requires review",
+                code="unreadable_request_date", source_ids=unreadable_dates)
+        # The chronology check reads only the original top-level message headers
+        # and bodies. Resolve it before transcribing any attachments.
+        client_request = select_client_request([
+            email_body_record(f"{header}\n{body}", f"asset:{asset_id}:body", observed_at=request_time or None,
+                              source_metadata=metadata)
+            for request_time, asset_id, _, header, body, _, _, metadata in parsed_assets
+        ])
+
     def read_supplementary(downloaded):
         records = archive_file_records(downloaded.temp_path, downloaded.source.filename, client,
             source_id=f"asset:{downloaded.source.asset_id}",
@@ -150,7 +167,8 @@ def analyze_downloaded_email_assets(
         try:
             text = extract_text_from_email(f"{header}\n{body}", attachments, extractor=client,
                 inline_images=inline_images, manifest=records, source_prefix=f"asset:{downloaded.source.asset_id}",
-                observed_at=request_time or None, source_metadata=metadata, on_source=progress.record)
+                observed_at=request_time or None, source_metadata=metadata, on_source=progress.record,
+                allow_large_context=True)
         except IncompleteSourceExtraction:
             text = None
         return text, records
@@ -206,15 +224,10 @@ def analyze_downloaded_email_assets(
         # Every source was skipped or referred for review. Extraction would have
         # no evidence, and unchanged inputs produce the same result on retry.
         raise IncompleteSourceExtraction(manifest)
-    if len(parsed_assets) > 1 and any(not entry[0] for entry in parsed_assets):
-        raise ValueError("Multiple email requests have unreadable sent dates; chronology requires review")
     for record in supplementary_records:
         if record["status"] == "read":
             all_text += f"\nSOURCE ID: {record['sourceId']}\nFILE: {record['filename']}\nATTACHMENT CONTENT:\n{record['text']}\n"
-    if len(all_text) > MAX_CONTEXT_CHARS:
-        raise ValueError("Combined source text exceeds extraction limit; review required")
 
-    client_request = select_client_request(manifest)
     stage_timings["reading_sources_seconds"] = round(time.monotonic() - started, 3)
     internal_only = bool(parsed_assets) and all(
         (messages := email_messages(entry[3])) and internal_address(messages[0]["sender"])
@@ -223,8 +236,16 @@ def analyze_downloaded_email_assets(
     extract_with_manifest = getattr(client, "extract_design_parameters_with_manifest", None)
     progress.phase("extracting_fields")
     extracting_started = time.monotonic()
-    structured_parameters = (extract_with_manifest(all_text, manifest) if extract_with_manifest
-                             else client.extract_design_parameters(all_text))
+    batched = len(all_text) > MAX_CONTEXT_CHARS
+    if batched:
+        extract_batches = getattr(client, "extract_design_parameters_batches", None)
+        if extract_batches is None:
+            raise source_context_review(manifest, limit=MAX_CONTEXT_CHARS, character_count=len(all_text), batch_limit=1)
+        contexts = bounded_source_contexts(manifest, limit=MAX_CONTEXT_CHARS, character_count=len(all_text))
+        structured_parameters = extract_batches(contexts, manifest)
+    else:
+        structured_parameters = (extract_with_manifest(all_text, manifest) if extract_with_manifest
+                                 else client.extract_design_parameters(all_text))
     stage_timings["extracting_fields_seconds"] = round(time.monotonic() - extracting_started, 3)
     dated_requests = [entry for entry in parsed_assets if entry[0]]
     if client_request:
@@ -285,7 +306,13 @@ def analyze_downloaded_email_assets(
         if not missing(verified.get("Drawing Title")) and "Drawing Title" not in issues:
             project_name = verified["Drawing Title"]
     if not project_name:
-        project_name = extract_project_name_from_content(first_email_text, all_text, query_llm=query_llm)
+        title_context = all_text
+        if batched:
+            title_context = client_request["text"] if client_request else first_email_text
+            if not title_context or len(title_context) > MAX_CONTEXT_CHARS:
+                raise SourceAnalysisReviewRequired("Large source bundle has no verified project title; review required",
+                    code="combined_source_title_missing", scope="item", character_count=len(all_text))
+        project_name = extract_project_name_from_content(first_email_text, title_context, query_llm=query_llm)
     if not project_name:
         raise ValueError("project-name extraction returned no title")
     stage_timings["project_title_seconds"] = round(time.monotonic() - title_started, 3)

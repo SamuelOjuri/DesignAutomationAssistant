@@ -17,8 +17,8 @@ from .specification_semantics import (
     normalize_reference_dashes, normalize_unit_spacing, scale_ratio, tp_reference_revision,
 )
 from .specification_request_context import (
-    CLIENT_FIELDS, attachment_message, client_evidence_applies,
-    parent_email, select_client_request, source_email_messages, technical_evidence_context,
+    ADOPTED_MESSAGE_PRIORITY, ADOPTED_THREAD_PRIORITY, CLIENT_FIELDS, attachment_message, client_evidence_applies,
+    parent_email, parse_outlook_gmt_date, select_client_request, source_email_messages, technical_evidence_context,
 )
 from .specification_image_text import literal_source_texts
 
@@ -37,6 +37,8 @@ UNCONFIRMED_REFERENCE = "Drawing Reference requires Monday CRM confirmation as a
 def _parse_message_date(value):
     # dayfirst=True changes YYYY-MM-DD dates with a day <= 12. ISO timestamps
     # in source metadata must keep their explicit year-month-day order.
+    if stamp := parse_outlook_gmt_date(value):
+        return stamp
     if re.match(r"^\d{4}-\d{2}-\d{2}(?:T|\s|$)", value):
         return isoparse(value)
     return parse_datetime(value, dayfirst=True)
@@ -454,7 +456,8 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
         containing = attachment_message(source, sources)
         if containing:
             observed_at = containing["sentAt"]
-        if technical_context[0] == 1 and source["sourceType"] == "email_body":
+        adopted_context = technical_context[0] in {ADOPTED_MESSAGE_PRIORITY, ADOPTED_THREAD_PRIORITY}
+        if adopted_context and source["sourceType"] == "email_body":
             observed_at = technical_context[1]["sentAt"]
         if evidence["message_date"]:
             try:
@@ -488,7 +491,7 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
                                   "filename": source["filename"], "contentSha256": source["contentSha256"],
                                   "requestContextPriority": technical_context[0],
                                   **({"attachedMessageSourceId": technical_context[1]["sourceId"]}
-                                     if technical_context[0] == 1 else {}),
+                                     if adopted_context else {}),
                                   **({"crmConfirmation": "required"} if unconfirmed_reference else {})})
         if label == "Page Size" and re.fullmatch(r"(?:ISO\s*)?[ABC][A-Z]", evidence["value"].strip(), re.IGNORECASE):
             issues[label] = PAGE_SIZE_UNCERTAIN

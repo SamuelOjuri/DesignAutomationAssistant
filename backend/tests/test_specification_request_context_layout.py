@@ -3,6 +3,7 @@
 import pytest
 
 from backend.app.config import settings
+from backend.app.services.legacy_enquiry.source_analysis_failures import SourceAnalysisReviewRequired
 from backend.app.services.specification_request_context import (
     email_messages, select_client_request,
 )
@@ -71,3 +72,30 @@ def test_blank_body_boundary_stops_indented_text_extending_a_complete_date():
     context = select_client_request([source(text)])
     assert context["sentDate"] == "11 November 2026 10:59"
     assert "Maximum height" not in context["headerSnippet"]
+
+
+@pytest.mark.parametrize(("sent", "expected"), [
+    ("26/11/2026 16:22 (GMT+00:00)", "2026-11-26T16:22:00+00:00"),
+    ("07/08/2026 16:22 (GMT+01:00)", "2026-08-07T15:22:00+00:00"),
+])
+def test_numeric_outlook_sent_header_preserves_literal_date_and_applies_offset(sent, expected):
+    outer = ("From: Internal <engineer@taperedplus.co.uk>\nTo: sales@taperedplus.co.uk\n"
+             "Date: 26 November 2026 17:00\n\nPlease review.\n\n")
+    forwarded = (f"From: Client <client@example.com>\nDate: {sent}\n"
+                 "To: sales@taperedplus.co.uk\nSubject: Roof plans\n\nPlease check the drawings.")
+    current = select_client_request([source(outer, emailHtmlText=outer + forwarded)])
+    assert current["messageIndex"] == 1 and current["requestRole"] == "forwarded_request"
+    assert current["sentAt"] == expected
+    assert current["sentDate"] == sent
+    assert f"Date: {sent}" in current["headerSnippet"]
+
+
+@pytest.mark.parametrize("sent", ["31/11/2026 16:22 (GMT+00:00)", "26/11/2026 16:22 (GMT+24:00)"])
+def test_invalid_numeric_outlook_sent_header_stays_an_actionable_review(sent):
+    text = (f"From: client@example.com\nDate: {sent}\n"
+            "To: sales@taperedplus.co.uk\n\nPlease check the drawings.")
+    with pytest.raises(SourceAnalysisReviewRequired, match="unreadable sent date") as failure:
+        select_client_request([source(text)])
+    assert failure.value.details == {
+        "code": "unreadable_request_date", "source_id": "asset:1:body", "message_index": 0,
+    }

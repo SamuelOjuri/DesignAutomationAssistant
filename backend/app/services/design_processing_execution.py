@@ -10,6 +10,7 @@ from typing import Callable, Optional
 
 from .legacy_enquiry.analysis import analyze_downloaded_email_assets
 from .legacy_enquiry.llm import LegacyGeminiClient
+from .legacy_enquiry.source_analysis_failures import SOURCE_ANALYSIS_REVIEW_KEY, SourceAnalysisReviewRequired
 from .legacy_enquiry.source_documents import IncompleteSourceExtraction
 from .specification_failures import SpecificationEvidenceError
 from ..config import settings
@@ -60,6 +61,8 @@ def _analyze_in_child(connection, downloaded_assets, client):
     except Exception as exc:
         if isinstance(exc, IncompleteSourceExtraction):
             connection.send((False, {"sourceExtractionFailure": exc.manifest}))
+        elif isinstance(exc, SourceAnalysisReviewRequired):
+            connection.send((False, {SOURCE_ANALYSIS_REVIEW_KEY: exc.details, "message": str(exc)}))
         elif isinstance(exc, SpecificationEvidenceError):
             connection.send((False, {"specificationEvidenceFailure": exc.evidence_failure, "message": str(exc)}))
         else:
@@ -160,6 +163,8 @@ def _run_in_process(
         if not succeeded:
             if isinstance(result, dict) and "sourceExtractionFailure" in result:
                 raise IncompleteSourceExtraction(result["sourceExtractionFailure"])
+            if isinstance(result, dict) and SOURCE_ANALYSIS_REVIEW_KEY in result:
+                raise SourceAnalysisReviewRequired(result["message"], **result[SOURCE_ANALYSIS_REVIEW_KEY])
             if isinstance(result, dict) and "specificationEvidenceFailure" in result:
                 raise SpecificationEvidenceError(result["message"], result["specificationEvidenceFailure"])
             raise _process_error(process, started_at, f"reported {result}")

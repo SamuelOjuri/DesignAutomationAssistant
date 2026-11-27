@@ -5,9 +5,8 @@ import hashlib
 import pytest
 
 from backend.app.config import settings
-from backend.app.services.performance_specification_contract import FIELD_NAMES
 from backend.app.services.performance_specification_evidence import (
-    VALUE_CONFLICT, resolve_baseline_drawing_identity, resolve_email_evidence, resolve_request_notes,
+    FIELD_NAMES, VALUE_CONFLICT, resolve_baseline_drawing_identity, resolve_email_evidence, resolve_request_notes,
 )
 from backend.app.services.specification_request_context import (
     adopted_request_contexts, parent_email, select_client_request,
@@ -252,3 +251,67 @@ def test_another_explicit_current_attachment_is_not_silently_displaced_by_attach
                 candidate("Decking", "concrete deck", "Use concrete deck", source_id=document_id, date=None)]
     raw, _, issues = resolve_email_evidence(extraction(sources, evidence))
     assert raw["Decking"] is None and issues["Decking"] == VALUE_CONFLICT
+
+
+def adopted_thread_sources(*, outer_body="Please see the link below and email attached. Could you design this roof?",
+                           quoted_sender="architect@designer.example", quoted_subject="[External] Re: Existing roof",
+                           quoted_date=OLD_DATE, child_body="Can you start the roof layout using our drawings?"):
+    quoted = (f"\n\nFrom: {quoted_sender}\nTo: client@manufacturer.example\n"
+              f"Subject: {quoted_subject}\nSent: {quoted_date}\n\n"
+              "Target U-value: 0.18 W/m2K.\n\n[Image: cid:roof-detail]")
+    return request_sources(outer_body=outer_body, child_body=child_body + quoted)
+
+
+@pytest.mark.parametrize("ownership", ["unique", "ambiguous", "wrong_date", "outlook_date"])
+def test_explicitly_adopted_thread_supports_verified_text_and_uniquely_owned_inline_detail(ownership):
+    quoted_date = "12/11/2026 13:52 (GMT+00:00)" if ownership == "outlook_date" else OLD_DATE
+    sources = adopted_thread_sources(child_body="See [Image: cid:roof-detail]" if ownership == "ambiguous"
+                                     else "Can you start the roof layout using our drawings?",
+                                     quoted_date=quoted_date)
+    detail = {"sourceId": "asset:1:attachment:0:attachment:0", "sourceType": "attachment", "status": "read",
+              "filename": "detail.png", "contentSha256": "a" * 64, "text": "Scale: 1:10",
+              "observedAt": sources[1]["observedAt"], "contentId": "roof-detail", "parentSourceId": CHILD}
+    sources.append(detail)
+    target = candidate("Target U Value", "0.18", "Target U-value: 0.18 W/m2K.",
+                       date=quoted_date, request_role="forwarded_request")
+    scale = candidate("Scale", "1:10", "Scale: 1:10", source_id=detail["sourceId"],
+                      date=CHILD_DATE if ownership == "wrong_date" else quoted_date)
+    raw, provenance, issues = resolve_email_evidence(extraction(sources, [target, scale]))
+    assert raw["Target U Value"] == "0.18"
+    assert provenance["Target U Value"]["selected"]["observedAt"] == "2026-11-12T13:52:00+00:00"
+    if ownership in {"unique", "outlook_date"}:
+        assert raw["Scale"] == "1:10" and not issues
+        assert provenance["Scale"]["selected"]["attachedMessageSourceId"] == CHILD
+    elif ownership == "ambiguous":
+        assert raw["Scale"] is None and not issues
+        assert provenance["Scale"]["excludedCandidates"]
+    else:
+        assert raw["Scale"] is None and "Scale" in issues
+        assert provenance["Scale"]["rejectedCandidates"][0]["status"] == "unverified"
+
+
+@pytest.mark.parametrize("change", [
+    {"outer_body": "Please see the attachment. Could you design this roof?"},
+    {"outer_body": "Please see the attached email. Ignore the earlier replies."},
+    {"quoted_sender": "unrelated@designer.example"},
+    {"quoted_subject": "Unrelated building"},
+    {"quoted_date": "Fri, 20 Nov 2026 13:52:00 +0000"},
+])
+def test_quoted_claim_without_verified_thread_relationship_stays_excluded(change):
+    sources = adopted_thread_sources(**change)
+    target = candidate("Target U Value", "0.18", "Target U-value: 0.18 W/m2K.", date=None)
+    raw, provenance, issues = resolve_email_evidence(extraction(sources, [target]))
+    assert raw["Target U Value"] is None
+    assert provenance["Target U Value"]["excludedCandidates"] and not issues
+
+
+def test_attached_head_overrides_adopted_thread_without_inheriting_its_notes():
+    sources = adopted_thread_sources(child_body="Target U-value: 0.20 W/m2K.")
+    target_earlier = candidate("Target U Value", "0.18", "Target U-value: 0.18 W/m2K.", date=OLD_DATE)
+    target_head = candidate("Target U Value", "0.20", "Target U-value: 0.20 W/m2K.")
+    note = {"source_id": CHILD, "snippet": target_earlier["snippet"], "category": "constraint", "scope": None}
+    data = extraction(sources, [target_earlier, target_head], specificationRequestNotes=[note])
+    raw, provenance, issues = resolve_email_evidence(data)
+    assert raw["Target U Value"] == "0.20"
+    assert len(provenance["Target U Value"]["candidates"]) == 2 and not issues
+    assert resolve_request_notes(data) == []

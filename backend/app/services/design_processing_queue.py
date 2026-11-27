@@ -482,6 +482,7 @@ def queue_design_processing_snapshot(
         # An attempt budget belongs to this execution identity, not to each new
         # webhook/reconciliation job. A changed input/pipeline is fresh work.
         # A permanent source failure needs replacement input, not more attempts.
+        from .legacy_enquiry.source_analysis_failures import SOURCE_ANALYSIS_REVIEW_KEY
         from .legacy_enquiry.source_documents import permanent_source_failure
         latest = db.query(DesignProcessingJob).filter_by(
             board_id=item.board_id, item_id=item.item_id,
@@ -491,6 +492,7 @@ def queue_design_processing_snapshot(
         ).order_by(DesignProcessingJob.created_at.desc(), DesignProcessingJob.id.desc()).first()
         if latest is not None and latest.status == "failed" and (
                 latest.attempt_count >= latest.max_attempts
+                or (latest.result_json or {}).get(SOURCE_ANALYSIS_REVIEW_KEY) is not None
                 or permanent_source_failure((latest.result_json or {}).get("sourceExtractionFailure"))):
             return DesignProcessingQueueResult(
                 item=item, job=latest, outcome="ignored", readiness="attempts_exhausted",

@@ -22,6 +22,8 @@ from .source_documents import (
     IncompleteSourceExtraction, MAX_CONTEXT_CHARS, MAX_SOURCE_BYTES, SourceDocumentError,
     extract_source_records, html_text, source_record,
 )
+from .source_analysis_failures import SourceAnalysisReviewRequired
+from .source_context import source_context_parts
 from ..specification_semantics import COMPLETE_SOURCE_STATUSES
 from ..specification_request_context import attachment_message, parent_email, request_context_summary
 from ..source_text import clean_source_text
@@ -364,13 +366,19 @@ def extract_attached_email_records(content, filename, extractor, *, source_id, o
         archive_budget=_archive_budget, archive_depth=_archive_depth)
 
 
+def email_body_record(email_text, source_id, *, observed_at, source_metadata, filename="Email body"):
+    record = source_record(source_id, filename, email_text.encode("utf-8"),
+        source_type="email_body", observed_at=observed_at, text=email_text)
+    record.update(source_metadata or {})
+    return record
+
+
 def _email_records(email_text, attachments_data, *, extractor, inline_images, source_prefix, observed_at,
                    source_metadata, budget, depth=0, parent_source_id=None, attached=False,
                    body_filename="Email body", on_source=None, archive_budget=None, archive_depth=0):
     body_id = source_prefix + ":body"
-    record = source_record(body_id, body_filename, email_text.encode("utf-8"),
-        source_type="email_body", observed_at=observed_at, text=email_text)
-    record.update(source_metadata or {})
+    record = email_body_record(email_text, body_id, observed_at=observed_at,
+                               source_metadata=source_metadata, filename=body_filename)
     if parent_source_id:
         record["parentSourceId"] = parent_source_id
     if attached:
@@ -459,6 +467,7 @@ def extract_text_from_email(
     observed_at: str | None = None,
     source_metadata: dict | None = None,
     on_source=None,
+    allow_large_context: bool = False,
 ) -> str:
     budget = _EmailBudget(parsed_bytes=(source_metadata or {}).get("emailContainerSizeBytes", 0))
     records = _email_records(email_text, attachments_data, extractor=extractor,
@@ -477,21 +486,10 @@ def extract_text_from_email(
         manifest.extend(records)
     if any(record["status"] not in COMPLETE_SOURCE_STATUSES for record in records):
         raise IncompleteSourceExtraction(records)
-    combined_text = "\n\n".join(
-        f"SOURCE ID: {record['sourceId']}\nSOURCE TYPE: {record['sourceType']}\n"
-        f"FILE: {record['filename']}\nCARRYING EMAIL TIMESTAMP (not the fact's date): {record['observedAt']}\n"
-        + (f"PARENT SOURCE ID: {record['parentSourceId']}\n" if record.get("parentSourceId") else "")
-        + ("ATTACHED EMAIL: separate message; its quoted history is not the current request.\n"
-           if record.get("attachedEmail") else "")
-        + (f"CONTENT-ID: {record['contentId']}\n" if record.get("contentId") else "")
-        + (f"VERIFIED CONTAINING MESSAGE DATE: {record['containingMessage']['sentDate']}\n"
-           if record.get("containingMessage") else "")
-        + ("EMAIL CONTENT:\n" if record["sourceType"] == "email_body" else "ATTACHMENT CONTENT:\n")
-        + record["text"]
-        + ("\nHTML ALTERNATIVE OF THE SAME EMAIL (literal text and inline Content-IDs):\n"
-           + record["emailHtmlText"] if record.get("emailHtmlText") else "")
-        for record in records if record["status"] == "read"
-    )
-    if len(combined_text) > MAX_CONTEXT_CHARS:
-        raise ValueError("Combined source text exceeds extraction limit; review required")
+    combined_text = "\n\n".join("".join(source_context_parts(record))
+                                for record in records if record["status"] == "read")
+    if not allow_large_context and len(combined_text) > MAX_CONTEXT_CHARS:
+        raise SourceAnalysisReviewRequired("Combined source text exceeds extraction limit; review required",
+            code="combined_source_text_limit", scope="email", source_id=f"{source_prefix}:body",
+            character_count=len(combined_text), character_limit=MAX_CONTEXT_CHARS)
     return combined_text
