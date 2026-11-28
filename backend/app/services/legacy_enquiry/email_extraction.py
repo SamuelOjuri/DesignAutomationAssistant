@@ -18,12 +18,12 @@ from zoneinfo import ZoneInfo
 
 import extract_msg
 
+from . import source_context
 from .source_documents import (
     IncompleteSourceExtraction, MAX_CONTEXT_CHARS, MAX_SOURCE_BYTES, SourceDocumentError,
     extract_source_records, html_text, source_record,
 )
 from .source_analysis_failures import SourceAnalysisReviewRequired
-from .source_context import source_context_parts
 from ..specification_semantics import COMPLETE_SOURCE_STATUSES
 from ..specification_request_context import attachment_message, parent_email, request_context_summary
 from ..source_text import clean_source_text
@@ -277,6 +277,7 @@ class _EmailBudget:
     messages: int = 0
     parsed_bytes: int = 0
     attachments: int = 0
+    allow_large_context: bool = False
     text_chars: int = 0
     text_sources: set = field(default_factory=set)
     lock: Any = field(default_factory=Lock, repr=False)
@@ -300,13 +301,16 @@ class _EmailBudget:
             if self.attachments > MAX_EMAIL_ATTACHMENTS:
                 raise SourceDocumentError("email_attachment_limit", "Email contains more than 200 attachments across nested messages; split the source.")
 
-    def text(self, value, source_id):
+    def add_text(self, record):
+        if record["status"] != "read":
+            return
+        source_id = record["sourceId"]
         with self.lock:
             if source_id in self.text_sources:
                 return
             self.text_sources.add(source_id)
-            self.text_chars += len(value)
-            if self.text_chars > MAX_CONTEXT_CHARS:
+            self.text_chars += len(record["text"]) + len(record.get("emailHtmlText", ""))
+            if not self.allow_large_context and self.text_chars > MAX_CONTEXT_CHARS:
                 raise SourceDocumentError("email_text_limit", "Combined email content exceeds the extraction context limit; split the source.")
 
 
@@ -385,7 +389,7 @@ def _email_records(email_text, attachments_data, *, extractor, inline_images, so
         record["attachedEmail"] = True
     records = [record]
     try:
-        budget.text(record["text"] + record.get("emailHtmlText", ""), record["sourceId"])
+        budget.add_text(record)
     except SourceDocumentError as exc:
         record.update(status="failed:SourceDocumentError", text="", error=exc.details)
         if on_source:
@@ -447,7 +451,7 @@ def _email_records(email_text, attachments_data, *, extractor, inline_images, so
             try:
                 for entry in results[index]:
                     if entry.get("sourceType") != "email_body":
-                        budget.text(entry.get("text", "") + entry.get("emailHtmlText", ""), entry["sourceId"])
+                        budget.add_text(entry)
             except SourceDocumentError as exc:
                 first.update(status="failed:SourceDocumentError", text="", error=exc.details)
         records.extend(results[index])
@@ -469,7 +473,8 @@ def extract_text_from_email(
     on_source=None,
     allow_large_context: bool = False,
 ) -> str:
-    budget = _EmailBudget(parsed_bytes=(source_metadata or {}).get("emailContainerSizeBytes", 0))
+    budget = _EmailBudget(parsed_bytes=(source_metadata or {}).get("emailContainerSizeBytes", 0),
+                          allow_large_context=allow_large_context)
     records = _email_records(email_text, attachments_data, extractor=extractor,
         inline_images=inline_images, source_prefix=source_prefix, observed_at=observed_at,
         source_metadata=source_metadata, budget=budget, on_source=on_source)
@@ -486,7 +491,13 @@ def extract_text_from_email(
         manifest.extend(records)
     if any(record["status"] not in COMPLETE_SOURCE_STATUSES for record in records):
         raise IncompleteSourceExtraction(records)
-    combined_text = "\n\n".join("".join(source_context_parts(record))
+    # Raw text alone cannot fit beyond this bound. The item batcher also checks
+    # rendered headings, source boundaries, and overlapping excerpts.
+    batch_limit = source_context.MAX_CONTEXT_BATCHES
+    if allow_large_context and budget.text_chars > MAX_CONTEXT_CHARS * batch_limit:
+        raise source_context.source_context_review(records, limit=MAX_CONTEXT_CHARS,
+            character_count=budget.text_chars, batch_limit=batch_limit)
+    combined_text = "\n\n".join("".join(source_context.source_context_parts(record))
                                 for record in records if record["status"] == "read")
     if not allow_large_context and len(combined_text) > MAX_CONTEXT_CHARS:
         raise SourceAnalysisReviewRequired("Combined source text exceeds extraction limit; review required",

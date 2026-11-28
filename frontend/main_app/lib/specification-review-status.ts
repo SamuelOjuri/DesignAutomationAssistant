@@ -15,6 +15,7 @@ export interface ReviewStatusDescription {
   title: string;
   detail: string;
   tone: ReviewStatusTone;
+  showSpinner?: boolean;
 }
 
 const descriptions: Record<string, ReviewStatusDescription> = {
@@ -92,9 +93,15 @@ export function getReviewStatusDescription({
     const counts = analysis.source_counts;
     const completed = (counts.read || 0) + (counts.skipped || 0) + (counts.review || 0) + (counts.failed || 0);
     const observed = counts.total ? ` ${completed} of ${counts.total} sources processed (${counts.read || 0} read, ${counts.skipped || 0} skipped${counts.review ? `, ${counts.review} need review` : ""}${counts.failed ? `, ${counts.failed} failed` : ""}).` : "";
-    const state = ["failed", "retry_wait"].includes(analysis.status)
-      ? " The latest attempt did not finish; waiting for a retry."
-      : analysis.status === "running" ? " This is the latest recorded worker stage." : " Waiting for the worker to continue.";
+    if (analysis.status === "failed") {
+      return { title: "Source analysis stopped", tone: "warning", showSpinner: false,
+        detail: `The latest attempt ended before analysis finished.${observed} Contact the processing team with this item ID.` };
+    }
+    if (analysis.status === "retry_wait") {
+      return { title: "Retry scheduled", tone: "neutral", showSpinner: false,
+        detail: `The worker will retry source analysis.${observed} This view will check for updates.` };
+    }
+    const state = analysis.status === "running" ? " This is the latest recorded worker stage." : " Waiting for the worker to continue.";
     return { ...(descriptions[status] ?? descriptions.source_waiting),
       detail: `${stage}.${observed}${state} ${status === "analysis_pending" ? descriptions.analysis_pending.detail : "This view will check for updates."}` };
   }

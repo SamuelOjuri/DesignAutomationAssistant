@@ -84,15 +84,32 @@ test("validated fields explain matching or rendering without claiming the PDF is
   }
 });
 
-test("source reading and retry states report observed progress without inventing activity", () => {
+test("source reading reports observed progress", () => {
   const reading = getReviewStatusDescription({ status: "source_waiting",
     analysis: { ready: false, status: "running", stage: "extracting", phase: "reading_sources", source_counts: { total: 4, read: 1 } } });
   assert.match(reading.detail, /Reading email and attachments/);
   assert.match(reading.detail, /1 of 4 sources processed/);
-  const retry = getReviewStatusDescription({ status: "source_waiting",
-    analysis: { ready: false, status: "retry_wait", stage: "extracting", source_counts: {} } });
-  assert.match(retry.detail, /latest attempt did not finish; waiting for a retry/);
-  assert.doesNotMatch(retry.detail, /is running|recorded worker stage/);
+});
+
+test("source analysis distinguishes a terminal failure from a scheduled retry", () => {
+  const analysis = { ready: false, stage: "extracting", phase: "reading_sources",
+    source_counts: { total: 28, read: 10, failed: 18 } };
+  for (const status of ["source_waiting", "analysis_pending"]) {
+    const failed = getReviewStatusDescription({ status, analysis: { ...analysis, status: "failed" } });
+    assert.equal(failed.title, "Source analysis stopped");
+    assert.equal(failed.tone, "warning");
+    assert.equal(failed.showSpinner, false);
+    assert.match(failed.detail, /28 of 28 sources processed \(10 read, 0 skipped, 18 failed\)/);
+    assert.match(failed.detail, /Contact the processing team with this item ID/);
+    assert.doesNotMatch(failed.detail, /waiting|retry/i);
+
+    const retry = getReviewStatusDescription({ status, analysis: { ...analysis, status: "retry_wait" } });
+    assert.equal(retry.title, "Retry scheduled");
+    assert.equal(retry.showSpinner, false);
+    assert.match(retry.detail, /The worker will retry source analysis/);
+    assert.match(retry.detail, /This view will check for updates/);
+    assert.doesNotMatch(retry.detail, /is running|recorded worker stage/);
+  }
 });
 
 test("source failures only mention a previous PDF when one is available", () => {

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.app.services.design_processing_inputs import DesignEmailAsset, DownloadedDesignEmailAsset
+from backend.app.services.legacy_enquiry import source_context
 from backend.app.services.legacy_enquiry.analysis import analyze_downloaded_email_assets
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
 from backend.app.services.legacy_enquiry.parameter_extraction import DesignParameterExtraction
@@ -13,15 +14,24 @@ from backend.app.services.legacy_enquiry.source_context import MAX_CONTEXT_BATCH
 from backend.app.services.legacy_enquiry.source_documents import MAX_CONTEXT_CHARS, source_record
 from backend.app.services.specification_failures import SpecificationEvidenceError
 from backend.app.services.specification_semantics import FIELD_DEFINITIONS
+from backend.tests.test_specification_sources import image_bytes
 
 
-def _email(tmp_path, asset_id, body, date):
+def _email_message(body, date):
     message = EmailMessage()
     message["From"] = "requester@client.example"
     message["To"] = "sales@taperedplus.co.uk"
     message["Subject"] = "Synthetic project"
     message["Date"] = date
     message.set_content(body)
+    return message
+
+
+def _email(tmp_path, asset_id, body, date):
+    return _downloaded_email(tmp_path, asset_id, _email_message(body, date))
+
+
+def _downloaded_email(tmp_path, asset_id, message):
     content = message.as_bytes()
     path = tmp_path / f"request-{asset_id}.eml"
     path.write_bytes(content)
@@ -81,6 +91,84 @@ def test_large_email_bundle_resolves_verified_chronology_and_scope(tmp_path, con
     }
     assert len(result.source_manifest) == 2
     assert len(result.email_content_audit) == 2
+
+
+@pytest.mark.parametrize("batch_limit", [MAX_CONTEXT_BATCHES, 1])
+def test_large_single_email_tree_preserves_sources_and_obeys_batch_capacity(tmp_path, monkeypatch, batch_limit):
+    monkeypatch.setattr(source_context, "MAX_CONTEXT_BATCHES", batch_limit)
+    title = "Drawing title: Synthetic project"
+    mail = _email_message(title, "Fri, 27 Nov 2026 11:42:00 +0000")
+    mail.add_alternative('<p>See the attached notes.</p><img src="cid:detail">', subtype="html")
+    mail.get_payload()[1].add_related(image_bytes("PNG", animated=False), maintype="image", subtype="png",
+                                      cid="<detail>", filename="detail.png")
+    nested = _email_message("Earlier correspondence", "Thu, 26 Nov 2026 11:42:00 +0000")
+    nested_text = "Nested document text.\n" * 10_000
+    nested.add_attachment(nested_text.encode(), maintype="text", subtype="plain", filename="nested.txt")
+    mail.add_attachment(nested, filename="history.eml")
+    first_text = "First document text.\n" * 10_000
+    last_text = "Last document text.\n" * 10_000
+    for filename, contents in (("first.txt", first_text), ("last.txt", last_text)):
+        mail.add_attachment(contents.encode(), maintype="text", subtype="plain", filename=filename)
+    mail.add_attachment(b"Synthetic CAD source", maintype="application", subtype="octet-stream", filename="plan.dwg")
+
+    asset = _downloaded_email(tmp_path, "1", mail)
+    batches, progress = [], []
+    image_text = "Readable inline detail"
+
+    def extract_batches(contexts, manifest):
+        batches.extend(contexts)
+        data = {name: None for name, field in DesignParameterExtraction.model_fields.items() if field.is_required()}
+        return DesignParameterExtraction.model_validate({
+            **data, "drawing_title": "Synthetic project",
+            "specification_evidence": [_evidence("Drawing Title", "Synthetic project", title, "asset:1:body")],
+            "specification_assessed_fields": sorted(set(FIELD_DEFINITIONS) - {"Incoming Information"}),
+        })
+
+    client = SimpleNamespace(
+        max_attachment_workers=1,
+        process_image=lambda *_: image_text,
+        extract_design_parameters_batches=extract_batches,
+        extract_design_parameters=lambda *_: pytest.fail("Expected bounded context batches"),
+        query_llm=lambda *_: pytest.fail("Expected the verified title from the email body"),
+    )
+    if batch_limit == 1:
+        with pytest.raises(SourceAnalysisReviewRequired) as error:
+            analyze_downloaded_email_assets([asset], client=client, on_progress=progress.append)
+        assert error.value.details["code"] == "combined_source_text_limit"
+        assert error.value.details["scope"] == "item"
+        assert error.value.details["batch_limit"] == 1
+        assert not batches
+        assert progress[-1]["source_counts"] == {"total": 7, "read": 6, "skipped": 1, "review": 0, "failed": 0}
+        return
+
+    result = analyze_downloaded_email_assets([asset], client=client, on_progress=progress.append)
+
+    assert len(batches) == 2
+    assert all(len(batch) <= MAX_CONTEXT_CHARS for batch in batches)
+    assert result.project_name == "Synthetic project"
+    sources = {record["sourceId"]: record for record in result.source_manifest}
+    expected = {
+        "asset:1:body": "read",
+        "asset:1:attachment:0:body": "read",
+        "asset:1:attachment:0:attachment:0": "read",
+        "asset:1:attachment:1": "read",
+        "asset:1:attachment:2": "read",
+        "asset:1:attachment:3": "skipped:dwg",
+        "asset:1:attachment:4": "read",
+    }
+    assert {source_id: record["status"] for source_id, record in sources.items()} == expected
+    assert sources["asset:1:attachment:0:body"]["parentSourceId"] == "asset:1:body"
+    assert sources["asset:1:attachment:0:attachment:0"]["parentSourceId"] == "asset:1:attachment:0:body"
+    assert sources["asset:1:attachment:4"]["contentId"] == "detail"
+    for source_id, contents in (
+        ("asset:1:attachment:0:attachment:0", nested_text),
+        ("asset:1:attachment:1", first_text),
+        ("asset:1:attachment:2", last_text),
+        ("asset:1:attachment:4", image_text),
+    ):
+        assert sources[source_id]["text"] == contents
+        assert any(f"SOURCE ID: {source_id}\n" in batch and contents in batch for batch in batches)
+    assert all("SOURCE ID: asset:1:attachment:3\n" not in batch for batch in batches)
 
 
 def test_large_source_context_preserves_source_id_and_overlap():

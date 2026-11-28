@@ -329,6 +329,7 @@ export default function ReviewWorkspace() {
   const statusDescription = usable ? getReviewStatusDescription({ status: workspace.status,
     scopeReason: workspace.scope_reason, hasSource: Boolean(workspace.source), hasPdf: Boolean(workspace.pdf || workspace.published_pdf), analysis: workspace.analysis }) : null;
   const analysisPending = Boolean(usable && (workspace.provisional || (workspace.analysis && !workspace.analysis.ready)));
+  const analysisStopped = Boolean(usable && !readOnly && analysisPending && workspace.analysis?.status === "failed");
   const editable = Boolean(usable && !analysisPending && workspace.capabilities.edit && connection === "ready" && !busy && !conflict);
   const currentPdfUrl = pdfRevision === revision ? pdfUrl : null;
   const previewReady = Boolean(currentPdfUrl && renderedPdfUrl === currentPdfUrl);
@@ -357,12 +358,17 @@ export default function ReviewWorkspace() {
   const saveSummary = dirty
     ? { dot: "bg-primary", title: plural(unsavedCount, "unsaved change", "unsaved changes"), detail: [stillNeeded, "completion unavailable until saved"] }
     : readOnly ? { dot: "border border-muted-foreground/60", title: "Editing is unavailable in this view", detail: [] }
-      : analysisPending ? { dot: "bg-info", title: "Waiting for analysis and matching to finish", detail: [] }
-        : { dot: "bg-success", title: "All changes saved", detail: [stillNeeded ?? "no outstanding decisions"] };
+      : analysisStopped ? { dot: "bg-warning", title: "Source analysis needs attention", detail: [] }
+        : analysisPending ? { dot: "bg-info", title: "Waiting for analysis and matching to finish", detail: [] }
+          : { dot: "bg-success", title: "All changes saved", detail: [stillNeeded ?? "no outstanding decisions"] };
   const sourceContext = !usable ? null : readOnly
     ? workspace.source ? "Saved source context retained" : "No source analysis available for review"
+    : analysisStopped ? workspace.source ? "Available source context is read-only" : null
     : workspace.provisional ? "Current extraction available; matching and documents pending"
     : workspace.source ? "Current source context available" : "Waiting for current source context";
+  const candidateUnavailableMessage = readOnly && !workspace?.source
+    ? "Project and drawing recommendations are unavailable in this read-only view."
+    : analysisStopped ? "Project and drawing recommendations are unavailable until source analysis succeeds." : undefined;
 
   return (
     <div className="specification-review min-h-screen bg-background text-foreground">
@@ -425,7 +431,7 @@ export default function ReviewWorkspace() {
               </AlertDescription>
             </Alert>
           )}
-          <CandidateSelector candidates={workspace.candidates} extractedProjectTitle={workspace.extracted_project_title} intent={workspace.source?.intent} selections={{ ...workspace.review.selections, ...draft.selections }} disabled={!editable} unavailableMessage={readOnly && !workspace.source ? "Project and drawing recommendations are unavailable in this read-only view." : undefined} onChange={(patch) => { setDraft((value) => updateSelection(value, patch)); setCheckedPdf(false); }} />
+          <CandidateSelector candidates={workspace.candidates} extractedProjectTitle={workspace.extracted_project_title} intent={workspace.source?.intent} selections={{ ...workspace.review.selections, ...draft.selections }} disabled={!editable} unavailableMessage={candidateUnavailableMessage} onChange={(patch) => { setDraft((value) => updateSelection(value, patch)); setCheckedPdf(false); }} />
           {workspace.source && (workspace.source.selected_project || workspace.source.selected_drawing) && (
             <p className="flex items-start gap-2 text-sm text-muted-foreground"><Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>Displayed recommendations use project {workspace.source.selected_project?.item_id || "unassigned"}, drawing {workspace.source.selected_drawing?.item_id || "unassigned"}. {readOnly ? "These saved recommendations are read-only." : "Save changed selections to resolve their recommendations."}</span></p>
           )}
@@ -433,7 +439,7 @@ export default function ReviewWorkspace() {
             <section id="review-fields" aria-labelledby="review-fields-title" className="min-w-0 scroll-mt-4 space-y-4">
               <div className="space-y-1">
                 <h2 id="review-fields-title" className="text-xl font-semibold tracking-tight">Specification fields</h2>
-                <p className="text-sm text-muted-foreground">{analysisPending ? "Validated source recommendations are available to read. Wait for analysis and matching to finish before making corrections." : readOnly ? "Any saved field values are shown for reference. Editing is unavailable in this view." : manualPublication ? "Save corrections to prepare a draft. Publish separately when ready. Entered values and intentional blanks display Source: Reviewer Specified." : "Save corrections to regenerate the PDF. Entered values and intentional blanks display Source: Reviewer Specified."}</p>
+                <p className="text-sm text-muted-foreground">{analysisStopped ? "Editing becomes available after source analysis succeeds." : analysisPending ? "Validated source recommendations are available to read. Wait for analysis and matching to finish before making corrections." : readOnly ? "Any saved field values are shown for reference. Editing is unavailable in this view." : manualPublication ? "Save corrections to prepare a draft. Publish separately when ready. Entered values and intentional blanks display Source: Reviewer Specified." : "Save corrections to regenerate the PDF. Entered values and intentional blanks display Source: Reviewer Specified."}</p>
               </div>
               {fieldEntries.length > 0 && <FieldOverview entries={fieldEntries} showStatus={showFieldStatus} />}
               {fieldEntries.map(({ label, anchorId, state }) => <FieldEditor key={label} anchorId={anchorId} label={label} field={workspace.fields[label]!} operation={draft.field_operations[label]} reviewState={state} disabled={!editable} onChange={(operation) => changeField(label, operation)} />)}

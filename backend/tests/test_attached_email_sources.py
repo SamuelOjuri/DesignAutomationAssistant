@@ -201,6 +201,23 @@ def test_message_byte_and_text_limits_are_explicit_not_empty_success(monkeypatch
     assert records[0]["error"]["code"] == "email_text_limit"
 
 
+def test_default_text_budget_preserves_skipped_sources_and_original_failures(monkeypatch):
+    monkeypatch.setattr(email, "MAX_CONTEXT_CHARS", 300)
+    mail = message("Synthetic request")
+    mail.add_attachment(b"Readable notes.\n" * 30, maintype="text", subtype="plain", filename="large.txt")
+    mail.add_attachment(b"Synthetic CAD source", maintype="application", subtype="octet-stream", filename="plan.dwg")
+    mail.add_attachment(b"\xff", maintype="text", subtype="plain", filename="unreadable.txt")
+
+    with pytest.raises(documents.IncompleteSourceExtraction) as error:
+        extract(mail)
+
+    body, large, drawing, unreadable = error.value.manifest
+    assert body["status"] == "read"
+    assert large["error"]["code"] == "email_text_limit"
+    assert drawing["status"] == "skipped:dwg"
+    assert unreadable["status"] == "failed:UnicodeDecodeError"
+
+
 def test_malformed_attached_email_is_an_audited_permanent_failure():
     records = documents.extract_source_records(b"not an email", "bad.eml", SimpleNamespace(), source_id="x")
     assert records[0]["status"] == "failed:SourceDocumentError"

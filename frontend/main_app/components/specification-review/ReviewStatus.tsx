@@ -21,7 +21,7 @@ export default function ReviewStatus({ hasUnsavedChanges = false, className, ...
   const { status, analysis } = context;
   const description = getReviewStatusDescription(context);
   const tone = toneClasses[description.tone];
-  const spinning = inProgress.has(status);
+  const spinning = description.showSpinner ?? inProgress.has(status);
   const Icon = status === "read_only" ? Lock : spinning ? LoaderCircle : tone.fallback;
   return (
     <div className={cn("flex gap-3 rounded-xl border p-4 shadow-xs", tone.panel, className)} role="status" aria-live="polite" aria-atomic="true">
