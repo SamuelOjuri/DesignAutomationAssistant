@@ -142,6 +142,77 @@ def test_periodic_and_completion_remote_failures_stop_extraction(simulated_extra
         assert simulated_extraction.terminated
 
 
+def test_progress_stream_checks_and_writes_on_a_cadence_instead_of_per_message(monkeypatch):
+    # Item 3391548442: 84 messages each cost a lock and a write in the parent,
+    # which fell minutes behind the child before it could collect the result.
+    def counts(read, failed=0):
+        return {"total": 28, "read": read, "failed": failed}
+
+    script = [(index / 2, ("progress", {"phase": "reading_sources", "source_counts": counts(index)}))
+              for index in range(20)]
+    script += [
+        (10.0, ("progress", {"phase": "reading_sources", "source_counts": counts(19, failed=1)})),
+        (10.5, ("progress", {"phase": "reading_sources", "source_counts": counts(20, failed=1)})),
+        (20.0, ("progress", {"phase": "extracting_fields", "source_counts": counts(20, failed=1)})),
+        (20.5, ("progress", {"phase": "extracting_fields", "source_counts": counts(21, failed=1)})),
+        (21.0, (True, {"result": "ok"})),
+    ]
+    state = SimpleNamespace(elapsed=0.0, terminated=False)
+
+    class Receiver:
+        def poll(self, timeout=0):
+            if script and script[0][0] <= state.elapsed + timeout:
+                state.elapsed = max(state.elapsed, script[0][0])
+                return True
+            state.elapsed += timeout
+            return False
+
+        def recv(self):
+            return script.pop(0)[1]
+
+        def close(self):
+            pass
+
+    class Process:
+        pid = 123
+        exitcode = 0
+
+        def start(self):
+            pass
+
+        def is_alive(self):
+            return not state.terminated
+
+        def terminate(self):
+            state.terminated = True
+
+        def join(self, timeout):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(execution, "monotonic", lambda: state.elapsed)
+    monkeypatch.setattr(execution.multiprocessing, "get_context", lambda method: SimpleNamespace(
+        Pipe=lambda **kwargs: (Receiver(), SimpleNamespace(close=lambda: None)), Process=lambda **kwargs: Process(),
+    ))
+    local, remote, writes = [], [], []
+    result = execution._run_in_process(
+        None, (), check_local=lambda: local.append(state.elapsed), check_current=lambda: remote.append(state.elapsed),
+        on_progress=lambda progress: writes.append(
+            (state.elapsed, progress["phase"], progress["source_counts"]["read"], progress["source_counts"]["failed"])),
+    )
+    assert result == {"result": "ok"}
+    assert local == [5.0, 10.0, 15.5, 20.5]
+    assert remote == [21.0]
+    # Phase changes and failures are immediate; other counts wait at most five
+    # seconds, including through an idle poll, and the last one precedes the result.
+    assert writes == [
+        (0.0, "reading_sources", 0, 0), (5.0, "reading_sources", 10, 0), (10.0, "reading_sources", 19, 1),
+        (15.5, "reading_sources", 20, 1), (20.0, "extracting_fields", 20, 1), (21.0, "extracting_fields", 21, 1),
+    ]
+
+
 def _send_when_released(connection, release):
     if not release.wait(15):
         raise RuntimeError("test parent never released child")

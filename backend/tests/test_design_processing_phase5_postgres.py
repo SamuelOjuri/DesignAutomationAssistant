@@ -9,7 +9,7 @@ import uuid
 from alembic import command
 from alembic.config import Config
 import pytest
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import JSON, create_engine, event, inspect, null, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -21,6 +21,7 @@ from backend.app.services.design_processing_inputs import (
 from backend.app.services.design_processing_locks import (
     lock_design_processing_item_and_job,
 )
+from backend.app.services.design_processing_progress import persist_analysis_progress
 from backend.app.services.design_processing_queue import queue_design_processing_snapshot
 from backend.app.services.design_processing_worker import (
     claim_due_analysis_jobs,
@@ -438,6 +439,34 @@ def test_live_heartbeat_prevents_lease_recovery(postgres_worker_db):
     persisted = db.get(DesignProcessingJob, job.id)
     assert persisted.status == "running"
     assert persisted.locked_by == "live-worker"
+
+
+@pytest.mark.parametrize("retained", [JSON.NULL, null(), {"specificationEvidenceFailure": {"fieldIssues": {"A": "x"}}}])
+def test_progress_update_patches_only_progress_on_the_current_execution(postgres_worker_db, retained):
+    db, _ = postgres_worker_db
+    now = datetime.now(timezone.utc)
+    _, job = _add_item_and_job(
+        db, item_id="progress-patch", now=now, execution_revision="revision-a",
+        status="running", locked_by="progress-worker", locked_at=now, heartbeat_at=now,
+    )
+    job.result_json = retained
+    db.commit()
+
+    item, locked = lock_design_processing_item_and_job(db, job.id, include_payloads=False)
+    assert (item.item_id, locked.locked_by) == ("progress-patch", "progress-worker")
+    db.rollback()
+    persist_analysis_progress(db, job.id, worker_id="progress-worker", progress={
+        "phase": "reading_sources", "source_counts": {"total": 28, "read": 27, "skipped": 1}})
+    with pytest.raises(RuntimeError, match="obsolete execution"):
+        persist_analysis_progress(db, job.id, worker_id="another-worker", progress={
+            "phase": "extracting_fields", "source_counts": {"total": 28, "read": 27, "skipped": 1}})
+
+    db.expire_all()
+    stored = db.get(DesignProcessingJob, job.id).result_json
+    progress = stored.pop("progress")
+    assert stored == (retained if isinstance(retained, dict) else {})
+    assert (progress["phase"], progress["source_counts"]) == (
+        "reading_sources", {"total": 28, "read": 27, "skipped": 1})
 
 
 def test_expired_lease_is_recovered_to_retry_wait(postgres_worker_db):

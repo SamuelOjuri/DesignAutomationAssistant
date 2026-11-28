@@ -308,8 +308,10 @@ extraction; changing only specification publisher flags does not refresh old
 pipeline identities.
 
 Keep the Item View visible. It polls automatically and shows current processing
-stages/counts. The extraction parent coalesces count updates to at most once per
-second, while phase changes and failures are reported immediately. Once current validated extraction is durable, fields may appear
+stages/counts. The extraction parent writes phase changes and new source failures
+immediately and other count updates at most every five seconds (the Item View poll
+interval); a pending count is still written during an idle poll and before the
+result is handled. Once current validated extraction is durable, fields may appear
 as a provisional read-only preview while project matching and legacy rendering
 continue. Review saves and completion become available through the normal full
 analysis/review gates. Retained PDFs stay labelled separately from current
@@ -332,6 +334,31 @@ waiting, initial asset downloading, later CRM matching, legacy rendering and spe
 keep those milestones separate when assessing user-visible latency. Compare a
 first uncached run with a later unchanged-source read rather than treating a
 cache hit as a first-run processing estimate.
+
+### Worker overhead outside `processingTimings` (item 3391548442)
+
+Item `3391548442` (job `f677a566`, 28 November) spent 570 seconds in analysis
+while its `analysis_seconds` was 220. The rest was worker bookkeeping and CRM
+matching. Worker transactions open a new pooler connection each time, so checks
+made per progress message or per Monday read dominated:
+
+- The extraction parent runs `check_local` on the idle-poll cadence (every five
+  seconds) rather than for each progress message. Progress is one fenced `UPDATE`
+  that patches only `result_json.progress`; it no longer reloads and rewrites the
+  job row, whose retained failure payload was 583 KB on retried job `12568d15`.
+- State-only checks (`check_local`, `check_current`) lock the item and job
+  without the stored extraction, match result or job result payloads.
+- Matching validates Monday immediately before and after the stage. Reads in
+  between use the extraction cadence (a local check every five seconds and a
+  Monday re-read every `design_processing_extraction_remote_validation_seconds`)
+  instead of two Monday re-reads around every gateway call.
+- Bare project-reference detection ignores a two-letter UK postcode outward code
+  followed by an inward code (`ST15 8JS`, `HA3 7RG`) unless an explicit reference
+  label precedes it. These signature postcodes had triggered a board-wide search
+  for project names containing "15" or "3". `REFERENCE_PARSER_VERSION` is
+  unchanged: references are stored at analysis time, so a bump would reprocess
+  settled specifications without changing them. Existing extractions keep their
+  detected references until they are analyzed again.
 
 Stored attachment-check results from before this release remain historical
 diagnostic evidence. New request-header parsing and extraction behavior should

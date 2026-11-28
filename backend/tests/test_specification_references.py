@@ -77,6 +77,17 @@ def test_ambiguous_word_prefix_remains_available_with_explicit_reference_context
     assert [match.reference.project_key for match in find_references(text)] == ["AT15", "IN2026", "AT15", "AB00123"]
 
 
+def test_signature_postcodes_are_not_project_references():
+    # Item 3391548442: these signature postcodes made matching search the whole
+    # project board for names containing "15" or "3".
+    text = ("Stone, Staffordshire ST15\u00a08JS\n"
+            "\u200b14\u00a0Oxford\u00a0Road,\u00a0Wealdstone,\u00a0Middlesex,\u00a0HA3\u00a07RG\n"
+            "Leeds LS1 4AP")
+    assert find_references(text) == []
+    controls = "ST15 drawings attached\nTP15 8JS\nProject ref: HA3 7RG\nSee AB00123 1st floor"
+    assert [match.reference.project_key for match in find_references(controls)] == ["ST15", "TP15", "HA3", "AB00123"]
+
+
 def test_revision_order_handles_multi_letter_issues():
     assert [revision_rank(value) for value in [None, "Y", "Z", "AA", "AB"]] == [0, 25, 26, 27, 28]
 

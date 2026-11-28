@@ -4,6 +4,7 @@ from datetime import datetime
 import logging
 import json
 import os
+from time import monotonic
 from typing import Any, Callable, Iterable, Mapping, Optional
 
 from sqlalchemy.orm import Session
@@ -102,8 +103,9 @@ def _lock_current_analysis(
     *,
     worker_id: str,
     execution_policy: Optional[ExecutionPolicy] = None,
+    include_payloads: bool = True,
 ) -> tuple[DesignProcessingItem, DesignProcessingJob, ProcessingIdentity]:
-    item, job = lock_design_processing_item_and_job(db, job_id)
+    item, job = lock_design_processing_item_and_job(db, job_id, include_payloads=include_payloads)
     if job is None:
         raise DesignProcessingTargetMismatch(
             "job_missing",
@@ -257,6 +259,7 @@ def run_analysis_pipeline(
         try:
             current_item, current_job, _ = _lock_current_analysis(
                 db, job_id, worker_id=worker_id, execution_policy=execution_policy,
+                include_payloads=False,
             )
             assert_current_execution_state(
                 current_item, current_job, pipeline_version=pipeline_version,
@@ -272,6 +275,7 @@ def run_analysis_pipeline(
     def check_current():
         current_item, current_job, _ = _lock_current_analysis(
             db, job_id, worker_id=worker_id, execution_policy=execution_policy,
+            include_payloads=False,
         )
         current_snapshot = assert_current_execution_target(
             current_item, current_job, gateway=gateway,
@@ -374,7 +378,11 @@ def run_analysis_pipeline(
         db.commit()
         intent = extraction.get("specificationRequestIntent") or {}
         detected_references = intent.get("detected_references", [])
-        checked_gateway = _CheckedMatchingGateway(gateway, check_current)
+        check_current()
+        checked_gateway = _CheckedMatchingGateway(
+            gateway, check_current, check_local,
+            remote_validation_seconds=settings.design_processing_extraction_remote_validation_seconds,
+        )
         if project_name or detected_references:
             legacy_result = match_projects(project_name, checked_gateway,
                 detected_references=detected_references)
@@ -515,18 +523,39 @@ def run_analysis_pipeline(
 
 
 class _CheckedMatchingGateway:
-    def __init__(self, gateway, check_current):
+    """Bound cancellation latency during matching without a check around every read.
+
+    Each Monday and Postgres round trip is slow from the worker. The caller
+    validates immediately before matching and again before persisting its result,
+    so reads in between need only the same cadence as extraction: a local DB
+    check every few seconds and a Monday re-read every remote interval.
+    """
+
+    def __init__(self, gateway, check_current, check_local=None, *, local_validation_seconds=5.0,
+                 remote_validation_seconds=60.0, clock=monotonic):
         self.gateway = gateway
         self.check_current = check_current
+        self.check_local = check_local
+        self.local_validation_seconds = local_validation_seconds
+        self.remote_validation_seconds = remote_validation_seconds
+        self.clock = clock
+        self.last_local_check = self.last_remote_check = clock()
+
+    def _check(self):
+        now = self.clock()
+        if now - self.last_remote_check >= self.remote_validation_seconds:
+            self.check_current()
+            self.last_remote_check = self.last_local_check = self.clock()
+        elif self.check_local is not None and now - self.last_local_check >= self.local_validation_seconds:
+            self.check_local()
+            self.last_local_check = self.clock()
 
     def __getattr__(self, name):
         method = getattr(self.gateway, name)
 
         def checked(*args, **kwargs):
-            self.check_current()
-            result = method(*args, **kwargs)
-            self.check_current()
-            return result
+            self._check()
+            return method(*args, **kwargs)
 
         return checked
 

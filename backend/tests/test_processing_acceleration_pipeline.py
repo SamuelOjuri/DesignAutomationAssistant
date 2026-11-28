@@ -5,10 +5,15 @@ from threading import Barrier
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
-from backend.app.models import GeminiRequestLease, SourceTranscriptionCache
+from backend.app.db import Base
+from backend.app.models import (
+    DesignProcessingItem, DesignProcessingJob, GeminiRequestLease, SourceTranscriptionCache,
+)
+from backend.app.services.design_processing_locks import lock_design_processing_item_and_job
+from backend.app.services.design_processing_progress import persist_analysis_progress
 from backend.app.services.legacy_enquiry.analysis import analyze_downloaded_email_assets
 from backend.app.services.specification_semantics import PDF_FIELD_NAMES, SpecificationEvidence
 from backend.app.services.source_progress import SourceProgress
@@ -79,6 +84,57 @@ def test_progress_counts_distinct_sources_and_excludes_archive_containers():
     progress.record({"sourceId": "child", "status": "skipped:unsupported_format"})
     assert events[-1]["source_counts"] == {"total": 1, "read": 0, "skipped": 1, "review": 0, "failed": 0}
     assert "PRIVATE" not in str(events)
+
+
+def test_execution_checks_and_progress_writes_do_not_transfer_large_payloads(tmp_path):
+    # Item 3391548442: a retried job retained a 583 KB failure payload that each
+    # progress update reloaded and rewrote, alongside a 0.6 MB stored extraction.
+    engine = create_engine("sqlite:///" + str(tmp_path / "progress.sqlite"))
+    Base.metadata.create_all(engine, tables=[DesignProcessingItem.__table__, DesignProcessingJob.__table__])
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    retained = {"specificationEvidenceFailure": {"sourceManifest": ["PAYLOAD" * 1000]}}
+    with factory() as db:
+        db.add(DesignProcessingItem(board_id="1", item_id="2", state="processing", warnings_json=[],
+            latest_desired_input_revision="rev", latest_desired_pipeline_version="pipe",
+            extracted_parameters_json={"text": "PAYLOAD"}, match_result_json={"text": "PAYLOAD"}))
+        job = DesignProcessingJob(board_id="1", item_id="2", trigger_type="test", execution_kind="analysis",
+            execution_input_revision="rev", execution_pipeline_version="pipe", status="running",
+            stage="extracting", scheduled_for=datetime.now(timezone.utc), locked_by="worker", result_json=retained)
+        db.add(job)
+        db.commit()
+        job_id = job.id
+        statements = []
+
+        def record(conn, cursor, statement, *args):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", record)
+        lock_design_processing_item_and_job(db, job_id, include_payloads=False)
+        event.remove(engine, "before_cursor_execute", record)
+        assert statements and not any(column in statement for statement in statements
+                                      for column in ("extracted_parameters_json", "match_result_json", "result_json"))
+        db.rollback()
+        assert job.result_json == retained
+        statements.clear()
+        event.listen(engine, "before_cursor_execute", record)
+        persist_analysis_progress(db, job_id, worker_id="worker", progress={
+            "phase": "reading_sources", "source_counts": {"total": 2, "read": 1, "private": 3}})
+        event.remove(engine, "before_cursor_execute", record)
+        assert len(statements) == 1 and statements[0].startswith("UPDATE design_processing_jobs SET ")
+        assert "result_json=json_set(" in statements[0]
+        # The loaded job is refreshed rather than left with the pre-update payload.
+        assert job.result_json["specificationEvidenceFailure"] == retained["specificationEvidenceFailure"]
+        assert job.result_json["progress"]["source_counts"] == {"total": 2, "read": 1}
+        assert job.heartbeat_at is not None
+
+        db.query(DesignProcessingItem).update({"latest_desired_input_revision": "rev-b"})
+        db.commit()
+        with pytest.raises(RuntimeError, match="obsolete execution"):
+            persist_analysis_progress(db, job_id, worker_id="worker", progress={
+                "phase": "extracting_fields", "source_counts": {"total": 2, "read": 2}})
+        db.expire_all()
+        assert db.get(DesignProcessingJob, job_id).result_json["progress"]["phase"] == "reading_sources"
+    engine.dispose()
 
 
 def test_expiry_cleanup_is_bounded_and_dry_run_preserves_live_rows(tmp_path):

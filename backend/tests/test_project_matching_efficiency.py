@@ -328,8 +328,37 @@ def test_no_match_requests_stay_constant_as_word_count_grows(monkeypatch, word_c
     )
     result = matching.match_projects(name, gateway)
     assert result["matches"] == [] and result["titleLookup"]["status"] == "available"
-    new_requests = len(calls) + len(checks)
-    assert (len(calls), len(checks), new_requests) == (2, 4, 6)
+    # The pipeline validates before and after matching; quick reads add no re-reads.
+    assert (len(calls), len(checks)) == (2, 0)
+
+
+def test_matching_reads_use_the_extraction_check_cadence_instead_of_rereading_each_call():
+    # Item 3391548442: two Monday re-reads around every matching call took minutes.
+    now, local, remote, reads = [0.0], [], [], []
+
+    class Gateway:
+        def read(self, value):
+            reads.append(value)
+            now[0] += 2
+            return value
+
+    gateway = _CheckedMatchingGateway(
+        Gateway(), lambda: remote.append(now[0]), lambda: local.append(now[0]),
+        local_validation_seconds=5, remote_validation_seconds=60, clock=lambda: now[0],
+    )
+    assert [gateway.read(index) for index in range(40)] == list(range(40))
+    assert remote == [60]
+    assert local == [6, 12, 18, 24, 30, 36, 42, 48, 54, 66, 72, 78]
+
+    def cancelled():
+        raise RuntimeError("stored_identity_changed")
+
+    gateway = _CheckedMatchingGateway(Gateway(), lambda: None, cancelled,
+                                      local_validation_seconds=5, clock=lambda: now[0])
+    now[0] += 5
+    with pytest.raises(RuntimeError, match="stored_identity_changed"):
+        gateway.read("after cancellation")
+    assert "after cancellation" not in reads
 
 
 def test_long_titles_do_not_expand_the_number_of_queries_or_claim_completeness():

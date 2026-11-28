@@ -29,6 +29,23 @@ _PROJECT_LABEL = re.compile(
     r"\b(?:ref(?:erence)?|project(?:\s+(?:ref(?:erence)?|number|no\.?))?|"
     r"drawing(?:\s+(?:ref(?:erence)?|number|no\.?))?|scheme|job|regarding)\s*[:#=-]?\s*$", re.IGNORECASE,
 )
+# Two-letter UK postcode areas. Their outward codes ("ST15", "HA3") share the
+# compact project-reference shape and appear in every signature address.
+_UK_POSTCODE_AREAS = frozenset("""
+    AB AL BA BB BD BH BL BN BR BS BT CA CB CF CH CM CO CR CT CV CW DA DD DE DG DH
+    DL DN DT DY EC EH EN EX FK FY GL GU GY HA HD HG HP HR HS HU HX IG IM IP IV JE
+    KA KT KW KY LA LD LE LL LN LS LU ME MK ML NE NG NN NP NR NW OL OX PA PE PH PL
+    PO PR RG RH RM SA SE SG SK SL SM SN SO SP SR SS ST SW SY TA TD TF TN TQ TR TS
+    TW UB WA WC WD WF WN WR WS WV YO ZE
+""".split())
+_POSTCODE_OUTWARD = re.compile(r"(?P<area>[A-Z]{2})\d{1,2}", re.IGNORECASE)
+# The inward code follows the outward code ("8JS"); its letters exclude C I K M O V.
+_POSTCODE_INWARD = re.compile(r"[^\S\n]*\d[ABD-HJLNP-UW-Z]{2}(?![A-Za-z0-9])")
+
+
+def _is_postcode_outward_code(literal: str, text: str, end: int) -> bool:
+    match = _POSTCODE_OUTWARD.fullmatch(literal)
+    return bool(match and match["area"].upper() in _UK_POSTCODE_AREAS and _POSTCODE_INWARD.match(text, end))
 
 
 def normalize_reference_dashes(value):
@@ -133,10 +150,15 @@ def find_references(text: str, *, include_legacy: bool = False) -> list[Referenc
             # project/reference label disambiguates it without banning any
             # prefix from the structural parser or compact reference family.
             literal = text[match.start():match.end()]
-            line_start = normalized.rfind("\n", 0, match.start()) + 1
-            if (re.match(r"[A-Z]{2}\s+", literal, re.IGNORECASE)
-                    and literal[:2].casefold() in _AMBIGUOUS_SPACED_PREFIXES
-                    and not _PROJECT_LABEL.search(normalized[line_start:match.start()])):
+            # A label must directly precede the reference; bound the search window.
+            window_start = max(0, match.start() - 80)
+            label_start = normalized.rfind("\n", window_start, match.start()) + 1 or window_start
+            ambiguous = bool(re.match(r"[A-Z]{2}\s+", literal, re.IGNORECASE)
+                             and literal[:2].casefold() in _AMBIGUOUS_SPACED_PREFIXES)
+            # A postcode such as "ST15 8JS" would otherwise search the whole
+            # project board for names containing "15" (item 3391548442).
+            postcode = _is_postcode_outward_code(literal, normalized, match.end())
+            if (ambiguous or postcode) and not _PROJECT_LABEL.search(normalized, label_start, match.start()):
                 continue
             reference = parse_project_reference(literal)
             if reference:

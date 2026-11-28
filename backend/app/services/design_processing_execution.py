@@ -71,6 +71,46 @@ def _analyze_in_child(connection, downloaded_assets, client):
         connection.close()
 
 
+# The Item View polls every five seconds, and each progress write is a fresh
+# connection to a distant database, so count-only updates share that cadence.
+PROGRESS_WRITE_SECONDS = 5.0
+
+
+class _ProgressWriter:
+    """Write phase changes and new failures at once; other counts at most per interval."""
+
+    def __init__(self, write, interval=PROGRESS_WRITE_SECONDS):
+        self.write = write
+        self.interval = interval
+        self.pending = None
+        self.written_at = None
+        self.phase = None
+        self.failures = 0
+
+    def record(self, progress):
+        failures = progress.get("source_counts", {}).get("failed", 0)
+        if self.written_at is None or progress.get("phase") != self.phase or failures != self.failures:
+            self._write(progress)
+        else:
+            self.pending = progress
+            self.flush_due()
+
+    def flush_due(self):
+        if self.pending is not None and monotonic() - self.written_at >= self.interval:
+            self._write(self.pending)
+
+    def flush(self):
+        if self.pending is not None:
+            self._write(self.pending)
+
+    def _write(self, progress):
+        self.pending = None
+        self.write(progress)
+        self.written_at = monotonic()
+        self.phase = progress.get("phase")
+        self.failures = progress.get("source_counts", {}).get("failed", 0)
+
+
 def run_interruptible_analysis(
     downloaded_assets,
     *,
@@ -117,9 +157,8 @@ def _run_in_process(
     )
     started_at = monotonic()
     next_remote_validation = started_at + remote_validation_seconds
-    last_progress_at = None
-    last_progress_phase = None
-    last_progress_failures = 0
+    next_local_validation = started_at + poll_seconds
+    progress = _ProgressWriter(on_progress) if on_progress is not None else None
     try:
         process.start()
         sender.close()
@@ -129,9 +168,12 @@ def _run_in_process(
                     check_current()
                 else:
                     check_local()
+                    next_local_validation = monotonic() + poll_seconds
                     if monotonic() >= next_remote_validation:
                         check_current()
                         next_remote_validation = monotonic() + remote_validation_seconds
+                if progress is not None:
+                    progress.flush_due()
                 if not process.is_alive():
                     if receiver.poll():
                         break
@@ -143,23 +185,19 @@ def _run_in_process(
                 raise _process_error(process, started_at, "closed its result channel without a result") from exc
             if succeeded != "progress":
                 break
-            if check_local is not None:
+            # A busy child can send a message per source. Each check is a fresh
+            # database connection, so messages share the idle poll's cadence.
+            if check_local is not None and monotonic() >= next_local_validation:
                 check_local()
-            if on_progress is not None:
-                now = monotonic()
-                phase = result.get("phase")
-                failures = result.get("source_counts", {}).get("failed", 0)
-                # Large ZIPs can emit hundreds of quick skip/read updates. UI
-                # polls every five seconds; coalesce writes without delaying a
-                # new phase or hiding a source failure.
-                if (last_progress_at is None or now - last_progress_at >= 1
-                        or phase != last_progress_phase or failures != last_progress_failures):
-                    on_progress(result)
-                    last_progress_at, last_progress_phase, last_progress_failures = now, phase, failures
+                next_local_validation = monotonic() + poll_seconds
+            if progress is not None:
+                progress.record(result)
             if monotonic() >= next_remote_validation:
                 check_current()
                 next_remote_validation = monotonic() + remote_validation_seconds
         check_current()
+        if progress is not None:
+            progress.flush()
         if not succeeded:
             if isinstance(result, dict) and "sourceExtractionFailure" in result:
                 raise IncompleteSourceExtraction(result["sourceExtractionFailure"])
