@@ -186,20 +186,23 @@ def _word_sequence(value):
     return " ".join(_WORD_SEPARATORS.sub(separator, text).split())
 
 
-def _restates_verified_words(rejected, verified):
-    """A verified literal value restated with different case or word punctuation.
+def _restates_verified_value(rejected, verified):
+    """Recognize alternate spelling or presentation of an already verified claim.
 
     'Premier Inn, Littlehampton' cited from 'Subject: RE: Premier inn littlehampton'
     (item 3383299718, job 6c7626a8) claims nothing beyond the verified literal
     'Premier inn littlehampton'. Source, excerpt, scope, issuer, roles and date must
-    match, with the same words in the same order. Identifiers and U-values keep
-    their own literal rules.
+    match, with the same words in the same order or the known Foamglas spelling
+    pair. Identifiers and U-values keep their own literal rules.
     """
     words = _word_sequence(rejected["value"])
+    same_words = bool(words) and words == _word_sequence(verified["value"])
+    foamglas_spelling = (rejected["field"] == "Tapered Insulation"
+                        and {_normal(rejected["value"]), _normal(verified["value"])} == {"foamglas", "foamglass"})
     return bool(
         rejected["field"] not in REFERENCE_FIELDS | U_VALUE_FIELDS
         and rejected["reason"] == "Raw value is absent from the supporting excerpt"
-        and words and words == _word_sequence(verified["value"])
+        and (same_words or foamglas_spelling)
         and rejected["source_id"] == verified["source_id"]
         and _excerpt_normal(rejected["snippet"]) == _excerpt_normal(verified["snippet"])
         and all(_normal(rejected.get(key)) == _normal(verified.get(key))
@@ -520,7 +523,7 @@ def resolve_email_evidence(extraction, scopes=(), *, _include_baseline_reference
                    and _words_in_order(failure["value"], failure["snippet"]))
                   or (failure["reason"] == UNVERIFIED_TIMESTAMP and single_value
                       and _fact_key(failure) in verified_facts)
-                  or any(_restates_u_value(failure, evidence) or _restates_verified_words(failure, evidence)
+                  or any(_restates_u_value(failure, evidence) or _restates_verified_value(failure, evidence)
                          for evidence in candidates[label])):
                 failure["status"] = "redundant"
             else:

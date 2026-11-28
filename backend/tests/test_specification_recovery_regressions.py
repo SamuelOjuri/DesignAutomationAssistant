@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.app.services.legacy_enquiry.llm import LegacyGeminiClient
+from backend.app.services.legacy_enquiry.parameter_extraction import extract_parameters
 from backend.app.services.performance_specification_evidence import (
     UNCONFIRMED_REFERENCE, VALUE_CONFLICT, resolve_baseline_drawing_identity,
     resolve_email_evidence, resolve_request_notes,
@@ -1134,6 +1135,69 @@ def test_case_and_comma_restatement_of_a_verified_title_is_redundant():
     assert raw["Drawing Title"] == "Premier inn littlehampton" and not issues
     assert {(e["value"], e["status"]) for e in provenance["Drawing Title"]["rejectedCandidates"]} == {
         ("Premier Inn, Littlehampton", "redundant")}
+
+
+def test_foamglas_restatement_preserves_the_current_and_older_literal_candidates():
+    field = "Tapered Insulation"
+    latest_date = "Thursday, 26 November 2026 15:44:12"
+    older_date = "Friday, 20 November 2026 16:20"
+    latest_excerpt = "Roof A requires a tapered foamglass drawing and quotation."
+    older_excerpt = "The Roof A specification currently names Foamglas insulation."
+    body = ("From: Staff <staff@taperedplus.co.uk>\nTo: Team <sales@taperedplus.co.uk>\n"
+            "Date: Thu, 26 Nov 2026 15:50:31 +0000\n\nDesign and quotation please.\n"
+            "From: Client <client@example.test>\nTo: Sales <sales@taperedplus.co.uk>\n"
+            f"Sent: {latest_date}\n\n{latest_excerpt}\n"
+            "From: Architect <architect@example.test>\nTo: Client <client@example.test>\n"
+            f"Sent: {older_date}\n\n{older_excerpt}")
+    manifest = [source("asset:1:body", body, "email_body")]
+    latest = candidate(field, "foamglass", latest_excerpt, source_id="asset:1:body",
+                       scope="Roof A", request_role="forwarded_request", message_date=latest_date)
+    copy = {**latest, "value": "Foamglas"}
+    older = {**latest, "value": "Foamglas", "snippet": older_excerpt, "message_date": older_date}
+    initial = parameters(tapered_insulation="Foamglas", specification_evidence=[copy, latest, older])
+
+    replies = iter([initial, parameters()])
+    client = LegacyGeminiClient("offline", generate_content=lambda *_: SimpleNamespace(parsed=next(replies)))
+    result = client.extract_design_parameters_batches((body, "No additional insulation evidence."), manifest)
+    raw, provenance, issues = resolve_email_evidence(extraction_payload(result, manifest))
+
+    assert not issues
+    assert raw[field] == "foamglass"
+    assert extract_parameters(body, extracted_parameters=result)[field] == "foamglass"
+    assert [(entry["value"], entry["snippet"], entry["message_date"]) for entry in provenance[field]["candidates"]] == [
+        ("foamglass", latest_excerpt, latest_date), ("Foamglas", older_excerpt, older_date),
+    ]
+    rejected, = provenance[field]["rejectedCandidates"]
+    assert (rejected["value"], rejected["snippet"], rejected["message_date"], rejected["reason"], rejected["status"]) == (
+        "Foamglas", latest_excerpt, latest_date, "Raw value is absent from the supporting excerpt", "redundant",
+    )
+
+
+@pytest.mark.parametrize("verified_overrides,copy_overrides", [
+    ({}, {"value": "Foamglas T3+"}),
+    ({}, {"value": "Foamglaze"}),
+    ({}, {"source_id": "asset:2:attachment:0"}),
+    ({}, {"snippet": "tapered foamglass is required."}),
+    ({}, {"scope": "Roof B"}),
+    ({}, {"issuer": "Another architect"}),
+    ({}, {"request_role": "forwarded_request"}),
+    ({}, {"message_date": "20 November 2026 16:20"}),
+    ({"role": "baseline"}, {"role": "requested"}),
+    ({"field": "Membrane"}, {}),
+], ids=["grade", "other-product", "source", "excerpt", "scope", "issuer", "request-role", "date",
+        "no-verified-sibling", "other-field"])
+def test_foamglas_restatement_cannot_hide_a_distinct_or_unsupported_claim(verified_overrides, copy_overrides):
+    excerpt = "Roof A: tapered foamglass is required."
+    verified = {**candidate("Tapered Insulation", "foamglass", excerpt, scope="Roof A"), **verified_overrides}
+    copy = {**verified, "value": "Foamglas", **copy_overrides}
+    manifest = [source("asset:1:attachment:0", excerpt), source("asset:2:attachment:0", excerpt)]
+
+    _, provenance, issues = resolve_email_evidence(extraction(manifest, [verified, copy]))
+
+    field = copy["field"]
+    assert issues[field] == "Raw value is absent from the supporting excerpt"
+    rejected, = provenance[field]["rejectedCandidates"]
+    assert rejected["status"] == "unverified"
 
 
 @pytest.mark.parametrize("field,value,copy_value,text,overrides", [

@@ -218,6 +218,10 @@ class DesignParameterExtraction(BaseModel):
 
 
 def map_tapered_insulation_value(value: str) -> str:
+    if value and value.strip().casefold() in {"foamglas", "foamglass"}:
+        # Preserve the stated product family. The MG code inside its name
+        # would otherwise select tissue-faced PIR.
+        return value
     insulation_mappings = {
         "TissueFaced PIR": [
             "TT47",
